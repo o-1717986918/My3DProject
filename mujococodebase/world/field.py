@@ -43,6 +43,20 @@ class HLAdultField(Field):
     
     @override
     def get_width(self):
+        return 9
+    
+    @override
+    def get_length(self):
+        return 14
+
+
+
+class MyField(Field):
+    def __init__(self, world):
+        super().__init__(world)
+    
+    @override
+    def get_width(self):
         return 36
     
     @override
