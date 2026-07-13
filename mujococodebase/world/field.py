@@ -43,8 +43,8 @@ class HLAdultField(Field):
     
     @override
     def get_width(self):
-        return 9
+        return 36
     
     @override
     def get_length(self):
-        return 14
+        return 55
