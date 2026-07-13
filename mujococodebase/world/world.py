@@ -1,7 +1,7 @@
 from dataclasses import Field
 import numpy as np
 from mujococodebase.world.other_robot import OtherRobot
-from mujococodebase.world.field import FIFAField, HLAdultField
+from mujococodebase.world.field import FIFAField, HLAdultField, MyField
 from mujococodebase.world.play_mode import PlayModeEnum, PlayModeGroupEnum
 
 class World:
@@ -60,5 +60,7 @@ class World:
     def __initialize_field(self, field_name: str) -> Field:
         if field_name in ('hl_adult', 'hl_adult_2020', 'hl_adult_2019',):
             return HLAdultField(world=self)
+        elif field_name == 'my_field':
+            return MyField(world=self)
         else:
             return FIFAField(world=self)
