@@ -1,0 +1,12 @@
+.venv/
+.vscode/
+**/__pycache__/
+poetry.lock
+poetry.toml
+**/*.log
+**/*.txt
+**/build/
+**/install/
+**/log/
+*.spec
+dist/

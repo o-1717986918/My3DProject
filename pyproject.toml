@@ -1,0 +1,25 @@
+[project]
+name = "mujococodebase"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Alan Nascimento",email = "alanvan3791@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "black (>=25.1.0,<26.0.0)",
+    "flake8 (>=7.3.0,<8.0.0)",
+    "numpy (>=2.3.3,<3.0.0)",
+    "scipy (>=1.16.1,<2.0.0)",
+    "pylint (>=3.3.8,<4.0.0)",
+    "pyyaml (>=6.0.2,<7.0.0)",
+    "pyinstaller (>=6.16.0,<7.0.0)",
+    "onnxruntime (>=1.23.0,<2.0.0)",
+    "onnx (>=1.19.0,<2.0.0)",
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
