@@ -45,7 +45,7 @@ class DecisionMaker:
             4: (5.0, -3.0, 0),
             5: (5.0, 3.0, 0),
             6: (15.0, 0.0, 0),
-            7: (2.0, 0.0, 0),
+            7: (-2.0, 0.0, 0),
         }
     } 
 
@@ -72,14 +72,32 @@ class DecisionMaker:
         if self.agent.world.playmode is PlayModeEnum.GAME_OVER:
             return
 
+        # 诊断日志：playmode变化时输出
+        if not hasattr(self, '_last_logged_mode'):
+            self._last_logged_mode = None
+        if self._last_logged_mode != self.agent.world.playmode:
+            self._last_logged_mode = self.agent.world.playmode
+            logger.info(
+                f"[#{self.agent.world.number}] playmode={self.agent.world.playmode.name} "
+                f"group={self.agent.world.playmode_group.name}"
+            )
+
+        # Beam只发一次：检测playmode变化，首次进入beam状态时发送
+        # 注意：beam帧不发送电机指令，避免冲突
+        if not hasattr(self, '_has_beamed_for_mode'):
+            self._has_beamed_for_mode = None
         if self.agent.world.playmode_group in (
             PlayModeGroupEnum.ACTIVE_BEAM,
             PlayModeGroupEnum.PASSIVE_BEAM,
         ):
-            self.agent.server.commit_beam(
-                pos2d=self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][:2],
-                rotation=self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][2],
-            )
+            if self._has_beamed_for_mode != self.agent.world.playmode:
+                self._has_beamed_for_mode = self.agent.world.playmode
+                self.agent.server.commit_beam(
+                    pos2d=self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][:2],
+                    rotation=self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][2],
+                )
+            else:
+                self.agent.skills_manager.execute("Neutral")
 
         if self.is_getting_up or self.agent.skills_manager.is_ready(skill_name="GetUp"):
             self.is_getting_up = not self.agent.skills_manager.execute(skill_name="GetUp")
@@ -221,65 +239,112 @@ class DecisionMaker:
         """前锋：抢球并带向对方球门"""
         self.carry_ball()
 
-    def _get_kicker_number(self) -> int:
-        """决定由几号球员去开球。
-        优先选离球最近的球员，如果无法判断则默认让1号开。
-        """
-        my_pos = self.agent.world.global_position[:2]
-        ball_pos = self.agent.world.ball_pos[:2]
-        dist = np.linalg.norm(my_pos - ball_pos)
-        # 距球1m内则认为是开球者
-        if dist < 1.0:
-            return self.agent.world.number
-        return 0  # 非开球者
-
     def run_our_set_piece(self):
         """我方开球/任意球/角球等定位球。"""
         number = self.agent.world.number
         playmode = self.agent.world.playmode
         ball_pos = self.agent.world.ball_pos[:2]
         my_pos = self.agent.world.global_position[:2]
+        their_goal_pos = self.agent.world.field.get_their_goal_position()[:2]
 
-        # 谁是开球者：距球最近的去开，一号优先级最高
-        dist_to_ball = np.linalg.norm(my_pos - ball_pos)
-        is_kicker = dist_to_ball < 1.0
-
-        if is_kicker:
-            # 开球者：走到球旁，面向对方球门
-            self.agent.skills_manager.execute(
-                "Walk",
-                target_2d=ball_pos,
-                is_target_absolute=True,
-                orientation=0.0,
-            )
+        # 球到对方球门的方向
+        ball_to_goal = their_goal_pos - ball_pos
+        bg_norm = np.linalg.norm(ball_to_goal)
+        if bg_norm == 0:
+            ball_to_goal_dir = np.array([1.0, 0.0])
         else:
-            # 其他人：分散站位策应
-            y_offset = (number - 4) * 4
-            support_pos = np.array([ball_pos[0] - 5, y_offset])
-            self.agent.skills_manager.execute(
-                "Walk",
-                target_2d=support_pos,
-                is_target_absolute=True,
-            )
+            ball_to_goal_dir = ball_to_goal / bg_norm
+        orientation = MathOps.vector_angle(ball_to_goal)
+
+        if playmode == PlayModeEnum.OUR_KICK_OFF:
+            # --- 开球专用逻辑 ---
+            # 开球者：beam位置离球（中点）最近的球员
+            # 所有agent共享BEAM_POSES，各自独立计算，结果一致
+            beam_positions = self.BEAM_POSES[type(self.agent.world.field)]
+            closest_to_ball = min(beam_positions.keys(),
+                key=lambda p: np.linalg.norm(np.array(beam_positions[p][:2]) - ball_pos))
+            is_kicker = (number == closest_to_ball)
+
+            if is_kicker:
+                # 两阶段：先走到球后方，再穿过球踢向对方半场
+                behind_ball = ball_pos - ball_to_goal_dir * 0.3
+                dist_to_behind = np.linalg.norm(my_pos - behind_ball)
+
+                if dist_to_behind < 0.3:
+                    # 阶段2：已在球后方，穿过球踢向目标
+                    target = ball_pos + ball_to_goal_dir * 1.5
+                else:
+                    # 阶段1：走到球后方
+                    target = behind_ball
+
+                self.agent.skills_manager.execute(
+                    "Walk",
+                    target_2d=target,
+                    is_target_absolute=True,
+                    orientation=orientation,
+                )
+            else:
+                # 非开球者：分散站位准备接球
+                y_offset = (number - 4) * 5
+                support_pos = np.array([ball_pos[0] - 3, y_offset])
+                self.agent.skills_manager.execute(
+                    "Walk",
+                    target_2d=support_pos,
+                    is_target_absolute=True,
+                )
+        else:
+            # --- 其他定位球（界外球、角球、任意球等）---
+            dist_to_ball = np.linalg.norm(my_pos - ball_pos)
+            is_kicker = dist_to_ball < 1.0
+
+            if is_kicker:
+                self.agent.skills_manager.execute(
+                    "Walk",
+                    target_2d=ball_pos,
+                    is_target_absolute=True,
+                    orientation=orientation,
+                )
+            else:
+                y_offset = (number - 4) * 4
+                support_pos = np.array([ball_pos[0] - 5, y_offset])
+                self.agent.skills_manager.execute(
+                    "Walk",
+                    target_2d=support_pos,
+                    is_target_absolute=True,
+                )
 
     def run_their_set_piece(self):
         """对方开球/任意球等定位球——全员退防。"""
         number = self.agent.world.number
+        playmode = self.agent.world.playmode
         our_goal = self.agent.world.field.get_our_goal_position()[:2]
         ball_pos = self.agent.world.ball_pos[:2]
 
-        # 在球门和球之间排人墙
-        fm = {
-            1:  (our_goal[0] + 1.5,  0.0),
-            2:  (our_goal[0] + 8,   -3.0),
-            3:  (our_goal[0] + 8,    3.0),
-            4:  (our_goal[0] + 12,  -5.0),
-            5:  (our_goal[0] + 12,   5.0),
-            6:  (our_goal[0] + 5,   -1.5),
-            7:  (our_goal[0] + 5,    1.5),
-        }
-        default = (our_goal[0] + 10, (number - 4) * 3)
-        defend_pos = np.array(fm.get(number, default))
+        if playmode == PlayModeEnum.THEIR_KICK_OFF:
+            # --- 对方开球：分散站位，前锋前压 ---
+            kickoff_positions = {
+                1:  (our_goal[0] + 1.5,  0.0),    # 门将
+                2:  (our_goal[0] + 10,  -4.0),    # 后卫
+                3:  (our_goal[0] + 10,   4.0),    # 后卫
+                4:  (our_goal[0] + 16,  -6.0),    # 中场
+                5:  (our_goal[0] + 16,   6.0),    # 中场
+                6:  (our_goal[0] + 20,  -3.0),    # 中场
+                7:  (our_goal[0] + 22,   3.0),    # 前锋，靠近中线压迫
+            }
+            defend_pos = np.array(kickoff_positions.get(number, (our_goal[0] + 15, (number - 4) * 4)))
+        else:
+            # --- 其他定位球：在球门和球之间排人墙 ---
+            fm = {
+                1:  (our_goal[0] + 1.5,  0.0),
+                2:  (our_goal[0] + 8,   -3.0),
+                3:  (our_goal[0] + 8,    3.0),
+                4:  (our_goal[0] + 12,  -5.0),
+                5:  (our_goal[0] + 12,   5.0),
+                6:  (our_goal[0] + 5,   -1.5),
+                7:  (our_goal[0] + 5,    1.5),
+            }
+            default = (our_goal[0] + 10, (number - 4) * 3)
+            defend_pos = np.array(fm.get(number, default))
 
         self.agent.skills_manager.execute(
             "Walk",
