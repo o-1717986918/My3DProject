@@ -13,7 +13,7 @@ for i in {1..7}; do
 done
 
 # 等所有agent连上并beam完毕，然后触发开球
-sleep 3
+sleep 10
 python3 -c "
 import socket, struct
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
