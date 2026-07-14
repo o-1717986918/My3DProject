@@ -92,8 +92,12 @@ class DecisionMaker:
         ):
             if self._has_beamed_for_mode != self.agent.world.playmode:
                 self._has_beamed_for_mode = self.agent.world.playmode
+                pos2d = list(self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][:2])
+                # 右队需要翻转X坐标，确保beam在己方半场
+                if not self.agent.world.is_left_team:
+                    pos2d[0] = -pos2d[0]
                 self.agent.server.commit_beam(
-                    pos2d=self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][:2],
+                    pos2d=pos2d,
                     rotation=self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][2],
                 )
             else:
@@ -266,23 +270,21 @@ class DecisionMaker:
             is_kicker = (number == closest_to_ball)
 
             if is_kicker:
-                # 两阶段：先走到球后方，再穿过球踢向对方半场
-                behind_ball = ball_pos - ball_to_goal_dir * 0.3
+                # 两阶段：先走到球后方（面向球门），再执行踢球动作
+                behind_ball = ball_pos - ball_to_goal_dir * 0.20
                 dist_to_behind = np.linalg.norm(my_pos - behind_ball)
 
-                if dist_to_behind < 0.3:
-                    # 阶段2：已在球后方，穿过球踢向目标
-                    target = ball_pos + ball_to_goal_dir * 1.5
+                if dist_to_behind < 0.25:
+                    # 阶段2：已就位，执行踢球
+                    self.agent.skills_manager.execute("KickRight")
                 else:
                     # 阶段1：走到球后方
-                    target = behind_ball
-
-                self.agent.skills_manager.execute(
-                    "Walk",
-                    target_2d=target,
-                    is_target_absolute=True,
-                    orientation=orientation,
-                )
+                    self.agent.skills_manager.execute(
+                        "Walk",
+                        target_2d=behind_ball,
+                        is_target_absolute=True,
+                        orientation=orientation,
+                    )
             else:
                 # 非开球者：分散站位准备接球
                 y_offset = (number - 4) * 5

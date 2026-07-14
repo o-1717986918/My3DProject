@@ -1,0 +1,68 @@
+# 右脚踢球关键帧
+# 注意：以下角度是第一版估算值，需在模拟器中实测调优
+symmetry: false   # 左右腿动作不对称，手动控制两侧
+kp: 25
+kd: 0.6
+keyframes:
+  # 阶段1 - 蓄力 (0.30s): 重心移到左脚，右脚后摆，屈膝
+  - delta: 0.30
+    motor_positions:
+      # 支撑腿（左腿）- 稳定站立
+      Left_Hip_Pitch: -15.0      # 略前倾
+      Left_Hip_Roll: 5.0         # 重心左移
+      Left_Hip_Yaw: 0.0
+      Left_Knee_Pitch: -25.0     # 微屈
+      Left_Ankle_Pitch: 15.0     # 脚掌着地
+      Left_Ankle_Roll: 0.0
+      # 踢球腿（右腿）- 后摆蓄力
+      Right_Hip_Pitch: 35.0      # 大腿后摆
+      Right_Hip_Roll: 0.0
+      Right_Hip_Yaw: 0.0
+      Right_Knee_Pitch: -70.0    # 小腿折叠
+      Right_Ankle_Pitch: 10.0    # 脚背绷直
+      Right_Ankle_Roll: 0.0
+      # 手臂 - 平衡
+      Left_Shoulder_Pitch: 30.0
+      Right_Shoulder_Pitch: -30.0
+      Waist: 0.0
+
+  # 阶段2 - 击球 (0.10s): 右腿快速前摆，膝盖打直
+  - delta: 0.10
+    motor_positions:
+      # 支撑腿
+      Left_Hip_Pitch: 5.0
+      Left_Hip_Roll: 5.0
+      Left_Hip_Yaw: 0.0
+      Left_Knee_Pitch: -15.0
+      Left_Ankle_Pitch: 10.0
+      Left_Ankle_Roll: 0.0
+      # 踢球腿 - 前摆击球
+      Right_Hip_Pitch: -50.0     # 大腿前摆
+      Right_Hip_Roll: 0.0
+      Right_Hip_Yaw: 0.0
+      Right_Knee_Pitch: -5.0     # 膝盖打直
+      Right_Ankle_Pitch: 0.0     # 脚背触球
+      Right_Ankle_Roll: 0.0
+      # 手臂 - 反向摆动保持平衡
+      Left_Shoulder_Pitch: -20.0
+      Right_Shoulder_Pitch: 20.0
+      Waist: 0.0
+
+  # 阶段3 - 收腿 (0.20s): 回到站立姿态
+  - delta: 0.20
+    motor_positions:
+      Left_Hip_Pitch: 0.0
+      Left_Hip_Roll: 0.0
+      Left_Hip_Yaw: 0.0
+      Left_Knee_Pitch: 0.0
+      Left_Ankle_Pitch: 0.0
+      Left_Ankle_Roll: 0.0
+      Right_Hip_Pitch: 0.0
+      Right_Hip_Roll: 0.0
+      Right_Hip_Yaw: 0.0
+      Right_Knee_Pitch: 0.0
+      Right_Ankle_Pitch: 0.0
+      Right_Ankle_Roll: 0.0
+      Left_Shoulder_Pitch: 0.0
+      Right_Shoulder_Pitch: 0.0
+      Waist: 0.0

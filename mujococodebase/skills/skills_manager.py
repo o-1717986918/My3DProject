@@ -1,4 +1,5 @@
 from mujococodebase.skills.keyframe.get_up.get_up import GetUp
+from mujococodebase.skills.keyframe.kick.kick_right import KickRight
 from mujococodebase.skills.keyframe.keyframe import KeyframeSkill
 from mujococodebase.skills.keyframe.poses.neutral.neutral import Neutral
 from mujococodebase.skills.skill import Skill
@@ -22,7 +23,7 @@ class SkillsManager:
         Each skill is indexed by its class name.
         """
 
-        classes: list[type[Skill]] = [Walk, Neutral, GetUp]
+        classes: list[type[Skill]] = [Walk, Neutral, GetUp, KickRight]
 
         # instantiate each Skill and store in the skills dictionary
         self.skills = {cls.__name__: cls(agent=self.agent) for cls in classes}
