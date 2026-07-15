@@ -10,9 +10,13 @@ class Field(ABC):
         self.field_landmarks: FieldLandmarks = FieldLandmarks(world=self.world)
     
     def get_our_goal_position(self):
+        if self.world.is_left_team is False:
+            return (self.get_length()/2, 0)
         return (-self.get_length()/2, 0)
-    
+
     def get_their_goal_position(self):
+        if self.world.is_left_team is False:
+            return (-self.get_length()/2, 0)
         return (self.get_length()/2, 0)
     
     @abstractmethod

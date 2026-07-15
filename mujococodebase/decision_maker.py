@@ -322,30 +322,34 @@ class DecisionMaker:
         our_goal = self.agent.world.field.get_our_goal_position()[:2]
         ball_pos = self.agent.world.ball_pos[:2]
 
+        # 从球门指向场地中心的方向（球门在左侧则+1，在右侧则-1）
+        toward_center = -np.sign(our_goal[0])
+
         if playmode == PlayModeEnum.THEIR_KICK_OFF:
             # --- 对方开球：分散站位，前锋前压 ---
             kickoff_positions = {
-                1:  (our_goal[0] + 1.5,  0.0),    # 门将
-                2:  (our_goal[0] + 10,  -4.0),    # 后卫
-                3:  (our_goal[0] + 10,   4.0),    # 后卫
-                4:  (our_goal[0] + 16,  -6.0),    # 中场
-                5:  (our_goal[0] + 16,   6.0),    # 中场
-                6:  (our_goal[0] + 20,  -3.0),    # 中场
-                7:  (our_goal[0] + 22,   3.0),    # 前锋，靠近中线压迫
+                1:  (our_goal[0] + toward_center * 1.5,  0.0),    # 门将
+                2:  (our_goal[0] + toward_center * 10,  -4.0),    # 后卫
+                3:  (our_goal[0] + toward_center * 10,   4.0),    # 后卫
+                4:  (our_goal[0] + toward_center * 16,  -6.0),    # 中场
+                5:  (our_goal[0] + toward_center * 16,   6.0),    # 中场
+                6:  (our_goal[0] + toward_center * 20,  -3.0),    # 中场
+                7:  (our_goal[0] + toward_center * 22,   3.0),    # 前锋，靠近中线压迫
             }
-            defend_pos = np.array(kickoff_positions.get(number, (our_goal[0] + 15, (number - 4) * 4)))
+            defend_pos = np.array(kickoff_positions.get(
+                number, (our_goal[0] + toward_center * 15, (number - 4) * 4)))
         else:
             # --- 其他定位球：在球门和球之间排人墙 ---
             fm = {
-                1:  (our_goal[0] + 1.5,  0.0),
-                2:  (our_goal[0] + 8,   -3.0),
-                3:  (our_goal[0] + 8,    3.0),
-                4:  (our_goal[0] + 12,  -5.0),
-                5:  (our_goal[0] + 12,   5.0),
-                6:  (our_goal[0] + 5,   -1.5),
-                7:  (our_goal[0] + 5,    1.5),
+                1:  (our_goal[0] + toward_center * 1.5,  0.0),
+                2:  (our_goal[0] + toward_center * 8,   -3.0),
+                3:  (our_goal[0] + toward_center * 8,    3.0),
+                4:  (our_goal[0] + toward_center * 12,  -5.0),
+                5:  (our_goal[0] + toward_center * 12,   5.0),
+                6:  (our_goal[0] + toward_center * 5,   -1.5),
+                7:  (our_goal[0] + toward_center * 5,    1.5),
             }
-            default = (our_goal[0] + 10, (number - 4) * 3)
+            default = (our_goal[0] + toward_center * 10, (number - 4) * 3)
             defend_pos = np.array(fm.get(number, default))
 
         self.agent.skills_manager.execute(
