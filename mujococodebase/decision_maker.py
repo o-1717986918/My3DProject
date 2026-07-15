@@ -39,13 +39,15 @@ class DecisionMaker:
             3: (2.0, 1.5, 0),
         },
         MyField: {
-            1: (20.0, 0.0, 0),
-            2: (10.0, -6.0, 0),
-            3: (10.0, 6.0, 0),
-            4: (5.0, -3.0, 0),
-            5: (5.0, 3.0, 0),
-            6: (15.0, 0.0, 0),
-            7: (-2.0, 0.0, 0),
+            # 2-3-1 阵型（右半场坐标，左队自动翻转x）
+            # 半场长27.5m，中圈半径9.15m，所有非GK球员距中心>9.15m
+            1:  (26.0,  0.0, 0),   # GK  - 门将，球门前1.5m
+            2:  (15.0, -5.0, 0),   # CB  - 中后卫
+            3:  (14.0,  6.0, 0),   # LB  - 边后卫
+            4:  (10.0,  0.0, 0),   # DM  - 防守中场
+            5:  (9.5,  -7.0, 0),   # CM  - 中场
+            6:  (9.5,   7.0, 0),   # LM  - 边前卫
+            7:  (9.5,  -2.0, 0),   # ST  - 前锋
         }
     } 
 
@@ -92,14 +94,26 @@ class DecisionMaker:
         ):
             if self._has_beamed_for_mode != self.agent.world.playmode:
                 self._has_beamed_for_mode = self.agent.world.playmode
-                pos2d = list(self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][:2])
-                # 右队需要翻转X坐标，确保beam在己方半场
-                if not self.agent.world.is_left_team:
-                    pos2d[0] = -pos2d[0]
-                self.agent.server.commit_beam(
-                    pos2d=pos2d,
-                    rotation=self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][2],
-                )
+                beam_positions = self.BEAM_POSES[type(self.agent.world.field)]
+                pos2d = list(beam_positions[self.agent.world.number][:2])
+                rotation = beam_positions[self.agent.world.number][2]
+
+                # 左队翻转X坐标，确保beam在己方半场（BEAM_POSES定义在右半场）
+                side_sign = -1 if self.agent.world.is_left_team else 1
+                pos2d[0] = pos2d[0] * side_sign
+
+                # 开球方开球者：beam到中圈球旁（开球方不受中圈限制）
+                if (self.agent.world.playmode == PlayModeEnum.BEFORE_KICK_OFF
+                        and self.agent.world.playmode_group == PlayModeGroupEnum.ACTIVE_BEAM):
+                    ball_pos = np.array([0.0, 0.0])
+                    closest_number = min(beam_positions.keys(),
+                        key=lambda p: np.linalg.norm(np.array(beam_positions[p][:2]) - ball_pos))
+                    if self.agent.world.number == closest_number:
+                        their_goal_sign = np.sign(self.agent.world.field.get_their_goal_position()[0])
+                        pos2d = [-their_goal_sign * 0.3, 0.0]
+                        rotation = 0.0 if their_goal_sign > 0 else np.pi
+
+                self.agent.server.commit_beam(pos2d=pos2d, rotation=rotation)
             else:
                 self.agent.skills_manager.execute("Neutral")
 
@@ -326,18 +340,19 @@ class DecisionMaker:
         toward_center = -np.sign(our_goal[0])
 
         if playmode == PlayModeEnum.THEIR_KICK_OFF:
-            # --- 对方开球：分散站位，前锋前压 ---
+            # --- 对方开球：全员必须在己方半场且中圈(9.15m)之外 ---
+            # MyField half=27.5m, 距中心至少10m → offset ≤ 17.5
             kickoff_positions = {
-                1:  (our_goal[0] + toward_center * 1.5,  0.0),    # 门将
-                2:  (our_goal[0] + toward_center * 10,  -4.0),    # 后卫
-                3:  (our_goal[0] + toward_center * 10,   4.0),    # 后卫
-                4:  (our_goal[0] + toward_center * 16,  -6.0),    # 中场
-                5:  (our_goal[0] + toward_center * 16,   6.0),    # 中场
-                6:  (our_goal[0] + toward_center * 20,  -3.0),    # 中场
-                7:  (our_goal[0] + toward_center * 22,   3.0),    # 前锋，靠近中线压迫
+                1:  (our_goal[0] + toward_center * 1.5,  0.0),    # 门将（豁免中圈规则）
+                2:  (our_goal[0] + toward_center * 10,  -5.0),    # 后卫，距中心17.5m
+                3:  (our_goal[0] + toward_center * 10,   5.0),    # 后卫，距中心17.5m
+                4:  (our_goal[0] + toward_center * 14,  -7.0),    # 中场，距中心13.5m
+                5:  (our_goal[0] + toward_center * 14,   7.0),    # 中场，距中心13.5m
+                6:  (our_goal[0] + toward_center * 16,  -4.0),    # 中场，距中心11.5m
+                7:  (our_goal[0] + toward_center * 16,   4.0),    # 前锋，距中心11.5m
             }
             defend_pos = np.array(kickoff_positions.get(
-                number, (our_goal[0] + toward_center * 15, (number - 4) * 4)))
+                number, (our_goal[0] + toward_center * 12, (number - 4) * 5)))
         else:
             # --- 其他定位球：在球门和球之间排人墙 ---
             fm = {
