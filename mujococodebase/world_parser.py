@@ -8,6 +8,7 @@ from mujococodebase.world.play_mode import PlayModeEnum
 
 logger = logging.getLogger()
 
+
 class WorldParser:
     def __init__(self, agent):
         from mujococodebase.agent import Agent  # type hinting
@@ -50,34 +51,54 @@ class WorldParser:
 
         robot = self.agent.robot
 
-        robot.motor_positions = {h["n"]: h["ax"] for h in perception_dict["HJ"]}
-
-        robot.motor_speeds = {h["n"]: h["vx"] for h in perception_dict["HJ"]}
+        for hinge in perception_dict["HJ"]:
+            perceived_name = hinge["n"]
+            motor_name = robot.MOTOR_FROM_SENSOR_TO_SERVER.get(
+                perceived_name, perceived_name
+            )
+            if motor_name not in robot.motor_positions:
+                logger.warning("Ignoring unknown perceived motor %s", perceived_name)
+                continue
+            position = float(hinge["ax"])
+            speed = float(hinge["vx"])
+            if np.isfinite(position):
+                robot.motor_positions[motor_name] = position
+            if np.isfinite(speed):
+                robot.motor_speeds[motor_name] = speed
 
         world._global_cheat_position = np.array(perception_dict["pos"]["p"])
 
-        # changes quaternion from (w, x, y, z) to (x, y, z, w) 
+        # changes quaternion from (w, x, y, z) to (x, y, z, w)
         robot._global_cheat_orientation = np.array(perception_dict["quat"]["q"])
         robot._global_cheat_orientation = robot._global_cheat_orientation[[1, 2, 3, 0]]
 
-        # flips 180 deg considering team side
+        # Normalize both teams into a frame where our goal is always on -x.
         try:
             if not world.is_left_team:
                 world._global_cheat_position[:2] = -world._global_cheat_position[:2]
 
                 global_rotation = R.from_quat(robot._global_cheat_orientation)
-                yaw180 = R.from_euler('z', 180, degrees=True)
+                yaw180 = R.from_euler("z", 180, degrees=True)
                 fixed_rotation = yaw180 * global_rotation
                 robot._global_cheat_orientation = fixed_rotation.as_quat()
 
-            # updates global orientation
-            euler_angles_deg = R.from_quat(robot._global_cheat_orientation).as_euler('xyz', degrees=True)
-            robot.global_orientation_euler = np.array([MathOps.normalize_deg(axis_angle) for axis_angle in euler_angles_deg])
+            # Only yaw is consumed by the motion stack, but keep the complete
+            # Euler vector for compatibility. The direct quaternion formula is
+            # deterministic at pitch +/-90 degrees and avoids scipy's noisy
+            # gimbal-lock warning during falls or transient spawn poses.
+            x, y, z, w = robot._global_cheat_orientation
+            roll = np.arctan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+            pitch = np.arcsin(np.clip(2.0 * (w * y - z * x), -1.0, 1.0))
+            yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+            euler_angles_deg = np.rad2deg([roll, pitch, yaw])
+            robot.global_orientation_euler = np.array(
+                [MathOps.normalize_deg(axis_angle) for axis_angle in euler_angles_deg]
+            )
             robot.global_orientation_quat = robot._global_cheat_orientation
             world.global_position = world._global_cheat_position
-        except:
-            logger.exception(f'Failed to rotate orientation and position considering team side')
-            
+        except (ValueError, IndexError, FloatingPointError):
+            logger.exception("Failed to normalize robot orientation and position")
+
         robot.gyroscope = np.array(perception_dict["GYR"]["rt"])
 
         robot.accelerometer = np.array(perception_dict["ACC"]["a"])
@@ -85,57 +106,93 @@ class WorldParser:
         world.is_ball_pos_updated = False
 
         # Vision parse
-        if 'See' in perception_dict:
-            
-            for seen_object in perception_dict['See']:
-                obj_type = seen_object['type']
-                
-                if obj_type == 'B': # Ball
-                    
-                    polar_coords = np.array(seen_object['pol'])
+        if "See" in perception_dict:
+
+            for seen_object in perception_dict["See"]:
+                obj_type = seen_object["type"]
+
+                if obj_type == "B":  # Ball
+
+                    polar_coords = np.array(seen_object["pol"])
                     local_cartesian_3d = MathOps.deg_sph2cart(polar_coords)
-                    
-                    world.ball_pos = MathOps.rel_to_global_3d(
+
+                    observed_ball_pos = MathOps.rel_to_global_3d(
                         local_pos_3d=local_cartesian_3d,
                         global_pos_3d=world.global_position,
-                        global_orientation_quat=robot.global_orientation_quat
+                        global_orientation_quat=robot.global_orientation_quat,
                     )
-                    world.is_ball_pos_updated = True
-                
-                elif obj_type == "P":
-                    
-                    team = seen_object.get('team')
-                    player_id = seen_object.get('id')
-                    
-                    if team and player_id is not None:
-                        if (team == world.team_name):
-                            player = world.our_team_players[player_id-1]
+                    if np.all(np.isfinite(observed_ball_pos)):
+                        if world.ball_last_seen_time is None:
+                            filtered_ball_pos = observed_ball_pos
                         else:
-                            player = world.their_team_players[player_id-1]
-                        
-                        objects = [seen_object.get('head'), seen_object.get('l_foot'), seen_object.get('r_foot')]
+                            # Vision is intentionally noisy in RCSSServerMJ. A
+                            # low-pass estimate stops the final approach from
+                            # chasing a different kick point every frame.
+                            filtered_ball_pos = (
+                                0.65 * world.ball_pos + 0.35 * observed_ball_pos
+                            )
+
+                        if world.ball_last_seen_time is not None:
+                            dt = world.server_time - world.ball_last_seen_time
+                            if dt > 1e-6:
+                                measured_velocity = (
+                                    filtered_ball_pos - world.ball_pos
+                                ) / dt
+                                speed = np.linalg.norm(measured_velocity)
+                                if speed > 30.0:
+                                    measured_velocity *= 30.0 / speed
+                                world.ball_velocity = (
+                                    0.8 * world.ball_velocity + 0.2 * measured_velocity
+                                )
+                        world.ball_pos = filtered_ball_pos
+                        world.ball_last_seen_time = world.server_time
+                        world.is_ball_pos_updated = True
+
+                elif obj_type == "P":
+
+                    team = seen_object.get("team")
+                    player_id = seen_object.get("id")
+
+                    if (
+                        team
+                        and isinstance(player_id, int)
+                        and 1 <= player_id <= world.MAX_PLAYERS_PER_TEAM
+                    ):
+                        if team == world.team_name:
+                            player = world.our_team_players[player_id - 1]
+                        else:
+                            player = world.their_team_players[player_id - 1]
+
+                        objects = [
+                            seen_object.get("head"),
+                            seen_object.get("l_foot"),
+                            seen_object.get("r_foot"),
+                        ]
 
                         seen_objects = [object for object in objects if object]
 
                         if seen_objects:
 
-                            local_cartesian_seen_objects = [MathOps.deg_sph2cart(object) for object in seen_objects]
+                            local_cartesian_seen_objects = [
+                                MathOps.deg_sph2cart(object) for object in seen_objects
+                            ]
 
-                            approximated_centroid = np.mean(local_cartesian_seen_objects, axis=0)
- 
+                            approximated_centroid = np.mean(
+                                local_cartesian_seen_objects, axis=0
+                            )
+
                             player.position = MathOps.rel_to_global_3d(
                                 local_pos_3d=approximated_centroid,
                                 global_pos_3d=world.global_position,
-                                global_orientation_quat=robot._global_cheat_orientation
+                                global_orientation_quat=robot._global_cheat_orientation,
                             )
                             player.last_seen_time = world.server_time
-                        
+
                 elif obj_type:
-                    
-                    polar_coords = np.array(seen_object['pol'])
+
+                    polar_coords = np.array(seen_object["pol"])
                     world.field.field_landmarks.update_from_perception(
-                        landmark_id=obj_type,
-                        landmark_pos=polar_coords
+                        landmark_id=obj_type, landmark_pos=polar_coords
                     )
 
     def __sexpression_to_dict(self, sexpression: str) -> dict:
@@ -150,14 +207,14 @@ class WorldParser:
             depth = 0
             start = None
             for i, ch in enumerate(s):
-                if ch == '(':
+                if ch == "(":
                     if depth == 0:
                         start = i
                     depth += 1
-                elif ch == ')':
+                elif ch == ")":
                     depth -= 1
                     if depth == 0 and start is not None:
-                        groups.append(s[start:i+1])
+                        groups.append(s[start : i + 1])
                         start = None
             return groups
 
@@ -166,7 +223,7 @@ class WorldParser:
         top_groups = split_top_level(sexpression)
 
         for grp in top_groups:
-            m = re.match(r'^\((\w+)\s*(.*)\)$', grp, re.DOTALL)
+            m = re.match(r"^\((\w+)\s*(.*)\)$", grp, re.DOTALL)
             if not m:
                 continue
             tag = m.group(1)
@@ -175,9 +232,9 @@ class WorldParser:
             if tag == "See":
                 see_items = []
                 subs = split_top_level(inner)
-                
+
                 for sub in subs:
-                    sm = re.match(r'^\((\w+)\s*(.*)\)$', sub, re.DOTALL)
+                    sm = re.match(r"^\((\w+)\s*(.*)\)$", sub, re.DOTALL)
                     if not sm:
                         continue
                     obj_type = sm.group(1)
@@ -185,17 +242,19 @@ class WorldParser:
 
                     if obj_type == "P":  # Player
                         player_data = {"type": "P"}
-                        team_m = re.search(r'\(team\s+([^)]+)\)', inner2)
+                        team_m = re.search(r"\(team\s+([^)]+)\)", inner2)
                         if team_m:
                             player_data["team"] = team_m.group(1)
-                        id_m = re.search(r'\(id\s+([^)]+)\)', inner2)
+                        id_m = re.search(r"\(id\s+([^)]+)\)", inner2)
                         if id_m:
                             try:
                                 player_data["id"] = int(id_m.group(1))
                             except ValueError:
                                 player_data["id"] = id_m.group(1)
 
-                        parts = re.findall(r'\((\w+)\s*\(pol\s+([-0-9.\s]+)\)\)', inner2)
+                        parts = re.findall(
+                            r"\((\w+)\s*\(pol\s+([-0-9.\s]+)\)\)", inner2
+                        )
                         for part_name, pol_str in parts:
                             pol_vals = [float(x) for x in pol_str.strip().split()]
                             player_data[part_name] = pol_vals
@@ -204,8 +263,12 @@ class WorldParser:
                         continue
 
                     # Generic
-                    pol_m = re.search(r'\(pol\s+([-0-9.\s]+)\)', inner2)
-                    vals = [float(x) for x in pol_m.group(1).strip().split()] if pol_m else []
+                    pol_m = re.search(r"\(pol\s+([-0-9.\s]+)\)", inner2)
+                    vals = (
+                        [float(x) for x in pol_m.group(1).strip().split()]
+                        if pol_m
+                        else []
+                    )
                     see_items.append({"type": obj_type, "pol": vals})
 
                 result.setdefault("See", []).extend(see_items)
@@ -214,9 +277,9 @@ class WorldParser:
             # Generic parse for other tags (time, GS, quat, pos, HJ, ...)
             group = {}
             children = split_top_level(inner)
-            if children: # (key val1 val2)
+            if children:  # (key val1 val2)
                 for child in children:
-                    im = re.match(r'^\(\s*(\w+)\s+([^)]+)\)$', child.strip(), re.DOTALL)
+                    im = re.match(r"^\(\s*(\w+)\s+([^)]+)\)$", child.strip(), re.DOTALL)
                     if not im:
                         continue
                     key = im.group(1)
@@ -240,7 +303,9 @@ class WorldParser:
                         except ValueError:
                             parsed_vals.append(t)
                     # Single value vs. list
-                    group[key] = parsed_vals[0] if len(parsed_vals) == 1 else parsed_vals
+                    group[key] = (
+                        parsed_vals[0] if len(parsed_vals) == 1 else parsed_vals
+                    )
 
             # Merge into result, handling repeated tags as lists
             if tag in result:

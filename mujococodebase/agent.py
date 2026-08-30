@@ -17,7 +17,7 @@ class Agent:
         number: int = 1,
         host: str = "localhost",
         port: int = 60000,
-        field: str = 'fifa'
+        field: str = "fifa",
     ):
         """
         Initializes the agent and all its main components.
@@ -29,8 +29,10 @@ class Agent:
             port (int): The port number of the simulator server.
             field (str): The name of the field configuration to use.
         """
-         
-        self.world: World = World(agent=self, team_name=team_name, number=number, field_name=field)
+
+        self.world: World = World(
+            agent=self, team_name=team_name, number=number, field_name=field
+        )
         self.world_parser: WorldParser = WorldParser(agent=self)
         self.server: Server = Server(
             host=host, port=port, world_parser=self.world_parser
@@ -39,7 +41,7 @@ class Agent:
         self.skills_manager: SkillsManager = SkillsManager(agent=self)
         self.decision_maker: DecisionMaker = DecisionMaker(agent=self)
 
-    def run(self):
+    def run(self, max_cycles: int | None = None, status_interval: int = 500):
         """
         Starts the agent’s main control loop.
 
@@ -58,8 +60,8 @@ class Agent:
             f"(init {self.robot.name} {self.world.team_name} {self.world.number})"
         )
 
-        while True:
-            try:
+        try:
+            while max_cycles is None or self.world.cycle_count < max_cycles:
                 self.server.receive()
 
                 self.world.update()
@@ -67,10 +69,27 @@ class Agent:
                 self.decision_maker.update_current_behavior()
 
                 self.server.send()
-            except Exception:
-                self.shutdown()
-                raise
-        
+
+                if (
+                    status_interval > 0
+                    and self.world.cycle_count % status_interval == 0
+                ):
+                    logger.info(
+                        "[#%d] cycle=%d time=%.2f pos=(%.2f, %.2f, %.2f) "
+                        "up=%.2f ball=(%.2f, %.2f) fresh=%s skill=%s phase=%s",
+                        self.world.number,
+                        self.world.cycle_count,
+                        self.world.server_time,
+                        *self.world.global_position,
+                        self.world.torso_up_component(),
+                        *self.world.ball_pos[:2],
+                        self.world.is_ball_fresh(),
+                        self.skills_manager.current_skill_name,
+                        self.decision_maker.attack_phase.name,
+                    )
+        finally:
+            self.shutdown()
+
     def shutdown(self):
         """
         Safely shuts down the agent.

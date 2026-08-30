@@ -1,374 +1,462 @@
-from dataclasses import Field
+from enum import Enum, auto
 import logging
 from typing import Mapping
 
 import numpy as np
+
 from mujococodebase.utils.math_ops import MathOps
-from mujococodebase.world.field import FIFAField, HLAdultField, MyField
+from mujococodebase.world.field import Field, FIFAField, HLAdultField, MyField
 from mujococodebase.world.play_mode import PlayModeEnum, PlayModeGroupEnum
 
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
+
+
+class AttackPhase(Enum):
+    SEARCH = auto()
+    APPROACH = auto()
+    ALIGN = auto()
+    KICK = auto()
+    RECOVER = auto()
 
 
 class DecisionMaker:
-    """
-    Responsible for deciding what the agent should do at each moment.
+    """Competition controller using one canonical frame for both team sides."""
 
-    This class is called every simulation step to update the agent's behavior
-    based on the current state of the world and game conditions.
-    """
-
-    BEAM_POSES: Mapping[type[Field], Mapping[int, tuple[float, float, float]]] ={
+    # Poses are expressed in the canonical team frame: our goal is on negative x.
+    BEAM_POSES: Mapping[type[Field], Mapping[int, tuple[float, float, float]]] = {
         FIFAField: {
-            1: (2.1, 0, 0),
-            2: (22.0, 12.0, 0),
-            3: (22.0, 4.0, 0),
-            4: (22.0, -4.0, 0),
-            5: (22.0, -12.0, 0),
-            6: (15.0, 0.0, 0),
-            7: (4.0, 16.0, 0),
-            8: (11.0, 6.0, 0),
-            9: (11.0, -6.0, 0),
-            10: (4.0, -16.0, 0),
-            11: (7.0, 0.0, 0),
+            1: (-50.0, 0.0, 0.0),
+            2: (-35.0, -12.0, 0.0),
+            3: (-35.0, 0.0, 0.0),
+            4: (-35.0, 12.0, 0.0),
+            5: (-22.0, -16.0, 0.0),
+            6: (-22.0, -6.0, 0.0),
+            7: (-22.0, 6.0, 0.0),
+            8: (-22.0, 16.0, 0.0),
+            9: (-11.0, -8.0, 0.0),
+            10: (-11.0, 8.0, 0.0),
+            11: (-10.0, 0.0, 0.0),
         },
         HLAdultField: {
-            1: (7.0, 0.0, 0),
-            2: (2.0, -1.5, 0),
-            3: (2.0, 1.5, 0),
+            1: (-6.5, 0.0, 0.0),
+            2: (-2.0, -1.5, 0.0),
+            3: (-2.0, 1.5, 0.0),
         },
         MyField: {
-            # 2-3-1 阵型（右半场坐标，左队自动翻转x）
-            # 半场长27.5m，中圈半径9.15m，所有非GK球员距中心>9.15m
-            1:  (26.0,  0.0, 0),   # GK  - 门将，球门前1.5m
-            2:  (15.0, -5.0, 0),   # CB  - 中后卫
-            3:  (14.0,  6.0, 0),   # LB  - 边后卫
-            4:  (10.0,  0.0, 0),   # DM  - 防守中场
-            5:  (9.5,  -7.0, 0),   # CM  - 中场
-            6:  (9.5,   7.0, 0),   # LM  - 边前卫
-            7:  (9.5,  -2.0, 0),   # ST  - 前锋
-        }
-    } 
+            1: (-26.0, 0.0, 0.0),
+            2: (-15.0, -5.0, 0.0),
+            3: (-15.0, 5.0, 0.0),
+            4: (-12.0, 0.0, 0.0),
+            5: (-10.0, -7.0, 0.0),
+            6: (-10.0, 7.0, 0.0),
+            7: (-9.5, -2.0, 0.0),
+        },
+    }
+
+    # Kickoff-specific 7v7 poses. Only the active kicker enters the centre
+    # circle; the passive side remains in its own half and outside the 5.5 m
+    # exclusion radius. This avoids spending the opening 20+ seconds walking a
+    # midfielder from the generic formation to a stationary centre ball.
+    MY_FIELD_ACTIVE_KICKOFF_POSES: Mapping[int, tuple[float, float, float]] = {
+        1: (-26.0, 0.0, 0.0),
+        2: (-15.0, -5.0, 0.0),
+        3: (-15.0, 5.0, 0.0),
+        4: (-8.0, 0.0, 0.0),
+        5: (-7.0, -6.0, 0.0),
+        6: (-7.0, 6.0, 0.0),
+        7: (-0.9, -0.4, 0.0),
+    }
+    MY_FIELD_PASSIVE_KICKOFF_POSES: Mapping[int, tuple[float, float, float]] = {
+        1: (-26.0, 0.0, 0.0),
+        2: (-15.0, -5.0, 0.0),
+        3: (-15.0, 5.0, 0.0),
+        4: (-8.0, 0.0, 0.0),
+        5: (-7.0, -6.0, 0.0),
+        6: (-7.0, 6.0, 0.0),
+        7: (-6.0, 0.0, 0.0),
+    }
+
+    BALL_FRESHNESS_SECONDS = 0.75
+    KICK_COOLDOWN_SECONDS = 0.8
+    POST_GETUP_HOLD_SECONDS = 0.6
 
     def __init__(self, agent):
-        """
-        Creates a new DecisionMaker linked to the given agent.
-
-        Args:
-            agent: The main agent that owns this DecisionMaker.
-        """
-        from mujococodebase.agent import Agent  # type hinting
+        from mujococodebase.agent import Agent
 
         self.agent: Agent = agent
-        self.is_getting_up: bool = False
+        self.is_getting_up = False
+        self.attack_phase = AttackPhase.SEARCH
+        self.kick_cooldown_until = 0.0
+        self.recovery_hold_until = 0.0
+        self._beam_mode = None
+        self._beam_attempts = 0
+        self._beam_last_cycle = -100
+        self._last_logged_mode = None
+        self._last_logged_attack_phase = None
 
     def update_current_behavior(self) -> None:
-        """
-        Chooses what the agent should do in the current step.
+        """Select one high-level action and always finish with a safe motor packet."""
+        world = self.agent.world
 
-        This function checks the game state and decides which behavior
-        or skill should be executed next.
-        """
-
-        if self.agent.world.playmode is PlayModeEnum.GAME_OVER:
-            return
-
-        # 诊断日志：playmode变化时输出
-        if not hasattr(self, '_last_logged_mode'):
-            self._last_logged_mode = None
-        if self._last_logged_mode != self.agent.world.playmode:
-            self._last_logged_mode = self.agent.world.playmode
+        if self._last_logged_mode != world.playmode:
+            self._last_logged_mode = world.playmode
             logger.info(
-                f"[#{self.agent.world.number}] playmode={self.agent.world.playmode.name} "
-                f"group={self.agent.world.playmode_group.name}"
+                "[#%d] playmode=%s group=%s",
+                world.number,
+                world.playmode.name,
+                world.playmode_group.name,
             )
 
-        # Beam只发一次：检测playmode变化，首次进入beam状态时发送
-        # 注意：beam帧不发送电机指令，避免冲突
-        if not hasattr(self, '_has_beamed_for_mode'):
-            self._has_beamed_for_mode = None
-        if self.agent.world.playmode_group in (
+        if world.playmode is PlayModeEnum.GAME_OVER:
+            self.agent.skills_manager.execute("Neutral")
+            self._commit_motors()
+            return
+
+        if world.playmode_group in (
             PlayModeGroupEnum.ACTIVE_BEAM,
             PlayModeGroupEnum.PASSIVE_BEAM,
         ):
-            if self._has_beamed_for_mode != self.agent.world.playmode:
-                self._has_beamed_for_mode = self.agent.world.playmode
-                beam_positions = self.BEAM_POSES[type(self.agent.world.field)]
-                pos2d = list(beam_positions[self.agent.world.number][:2])
-                rotation = beam_positions[self.agent.world.number][2]
+            self._run_beam_state()
+            self._commit_motors()
+            return
 
-                # 左队翻转X坐标，确保beam在己方半场（BEAM_POSES定义在右半场）
-                side_sign = -1 if self.agent.world.is_left_team else 1
-                pos2d[0] = pos2d[0] * side_sign
+        if self.is_getting_up or world.is_fallen():
+            self.is_getting_up = not self.agent.skills_manager.execute("GetUp")
+            if not self.is_getting_up:
+                self.attack_phase = AttackPhase.SEARCH
+                self.recovery_hold_until = (
+                    world.server_time or 0.0
+                ) + self.POST_GETUP_HOLD_SECONDS
+            self._commit_motors()
+            return
 
-                # 开球方开球者：beam到中圈球旁（开球方不受中圈限制）
-                if (self.agent.world.playmode == PlayModeEnum.BEFORE_KICK_OFF
-                        and self.agent.world.playmode_group == PlayModeGroupEnum.ACTIVE_BEAM):
-                    ball_pos = np.array([0.0, 0.0])
-                    closest_number = min(beam_positions.keys(),
-                        key=lambda p: np.linalg.norm(np.array(beam_positions[p][:2]) - ball_pos))
-                    if self.agent.world.number == closest_number:
-                        their_goal_sign = np.sign(self.agent.world.field.get_their_goal_position()[0])
-                        pos2d = [-their_goal_sign * 0.3, 0.0]
-                        rotation = 0.0 if their_goal_sign > 0 else np.pi
+        if (world.server_time or 0.0) < self.recovery_hold_until:
+            self.agent.skills_manager.execute(
+                "Walk", target_2d=np.zeros(2), is_target_absolute=False
+            )
+            self._commit_motors()
+            return
 
-                self.agent.server.commit_beam(pos2d=pos2d, rotation=rotation)
-            else:
-                self.agent.skills_manager.execute("Neutral")
-
-        if self.is_getting_up or self.agent.skills_manager.is_ready(skill_name="GetUp"):
-            self.is_getting_up = not self.agent.skills_manager.execute(skill_name="GetUp")
-
-        elif self.agent.world.playmode_group == PlayModeGroupEnum.OTHER:
-            if self.agent.world.playmode == PlayModeEnum.PLAY_ON:
-                self.run_play_strategy()
-            elif self.agent.world.playmode in (
-                PlayModeEnum.BEFORE_KICK_OFF,
-                PlayModeEnum.THEIR_GOAL,
-                PlayModeEnum.OUR_GOAL,
-            ):
-                self.agent.skills_manager.execute("Neutral")
-
-        elif self.agent.world.playmode_group == PlayModeGroupEnum.OUR_KICK:
+        if world.playmode_group is PlayModeGroupEnum.OUR_KICK:
             self.run_our_set_piece()
-
-        elif self.agent.world.playmode_group == PlayModeGroupEnum.THEIR_KICK:
+        elif world.playmode_group is PlayModeGroupEnum.THEIR_KICK:
             self.run_their_set_piece()
+        elif world.playmode is PlayModeEnum.PLAY_ON:
+            self.run_play_strategy()
+        else:
+            self.agent.skills_manager.execute("Neutral")
 
+        self._commit_motors()
+
+    def _commit_motors(self) -> None:
+        if self._last_logged_attack_phase is not self.attack_phase:
+            self._last_logged_attack_phase = self.attack_phase
+            logger.info(
+                "[#%d] attack=%s skill=%s",
+                self.agent.world.number,
+                self.attack_phase.name,
+                self.agent.skills_manager.current_skill_name,
+            )
+        self._control_head()
         self.agent.robot.commit_motor_targets_pd()
 
-    def carry_ball(self):
-        """
-        Basic example of a behavior: moves the robot toward the goal while handling the ball.
-        """
-        their_goal_pos = self.agent.world.field.get_their_goal_position()[:2]
-        ball_pos = self.agent.world.ball_pos[:2]
-        my_pos = self.agent.world.global_position[:2]
+    def _control_head(self) -> None:
+        """Keep the ball in view, especially inside the final approach radius."""
+        if self.agent.skills_manager.current_skill_name == "GetUp":
+            return
 
-        ball_to_goal = their_goal_pos - ball_pos
-        bg_norm = np.linalg.norm(ball_to_goal)
-        if bg_norm == 0:
-            return 
-        ball_to_goal_dir = ball_to_goal / bg_norm
+        world = self.agent.world
+        if world.playmode_group in (
+            PlayModeGroupEnum.ACTIVE_BEAM,
+            PlayModeGroupEnum.PASSIVE_BEAM,
+        ):
+            return
 
-        dist_from_ball_to_start_carrying = 0.30
-        carry_ball_pos = ball_pos - ball_to_goal_dir * dist_from_ball_to_start_carrying
-
-        my_to_ball = ball_pos - my_pos
-        my_to_ball_norm = np.linalg.norm(my_to_ball)
-        if my_to_ball_norm == 0:
-            my_to_ball_dir = np.zeros(2)
-        else:
-            my_to_ball_dir = my_to_ball / my_to_ball_norm
-
-        cosang = np.dot(my_to_ball_dir, ball_to_goal_dir)
-        cosang = np.clip(cosang, -1.0, 1.0)
-        angle_diff = np.arccos(cosang)
-
-        ANGLE_TOL = np.deg2rad(7.5)
-        aligned = (my_to_ball_norm > 1e-6) and (angle_diff <= ANGLE_TOL)
-
-        behind_ball = np.dot(my_pos - ball_pos, ball_to_goal_dir) < 0
-        desired_orientation = MathOps.vector_angle(ball_to_goal)
-
-        if not aligned or not behind_ball:
-            self.agent.skills_manager.execute(
-                "Walk",
-                target_2d=carry_ball_pos,
-                is_target_absolute=True,
-                orientation=None if np.linalg.norm(my_pos - carry_ball_pos) > 2 else desired_orientation
+        robot = self.agent.robot
+        if world.is_ball_fresh(1.5):
+            delta = world.ball_pos[:2] - world.global_position[:2]
+            distance = max(float(np.linalg.norm(delta)), 0.05)
+            yaw = MathOps.normalize_deg(
+                MathOps.vector_angle(delta) - robot.global_orientation_euler[2]
+            )
+            camera_height = max(float(world.global_position[2]) + 0.28, 0.55)
+            pitch = np.rad2deg(
+                np.arctan2(camera_height - float(world.ball_pos[2]), distance)
             )
         else:
+            server_time = world.server_time or 0.0
+            yaw = 65.0 * np.sin(server_time * 0.8)
+            pitch = 32.0
+
+        robot.set_motor_target_position("he1", yaw, kp=12.0, kd=0.35)
+        robot.set_motor_target_position("he2", pitch, kp=12.0, kd=0.35)
+
+    def _run_beam_state(self) -> None:
+        world = self.agent.world
+        beam_positions = self.BEAM_POSES[type(world.field)]
+        if isinstance(world.field, MyField):
+            if world.playmode_group is PlayModeGroupEnum.ACTIVE_BEAM:
+                beam_positions = self.MY_FIELD_ACTIVE_KICKOFF_POSES
+            elif world.playmode_group is PlayModeGroupEnum.PASSIVE_BEAM:
+                beam_positions = self.MY_FIELD_PASSIVE_KICKOFF_POSES
+        canonical_pose = beam_positions.get(
+            world.number, beam_positions[max(beam_positions)]
+        )
+        canonical_position = np.array(canonical_pose[:2], dtype=float)
+        canonical_orientation = canonical_pose[2]
+
+        if self._beam_mode != world.playmode:
+            self._beam_mode = world.playmode
+            self._beam_attempts = 0
+            self._beam_last_cycle = -100
+
+        beam_confirmed = (
+            np.linalg.norm(world.global_position[:2] - canonical_position) < 0.5
+            and world.global_position[2] > 0.3
+        )
+        should_retry_beam = (
+            not beam_confirmed
+            and self._beam_attempts < 20
+            and world.cycle_count - self._beam_last_cycle >= 10
+        )
+        if should_retry_beam:
+            simulator_position, simulator_orientation = world.to_simulator_pose(
+                canonical_position, canonical_orientation
+            )
+            self.agent.server.commit_beam(
+                pos2d=simulator_position.tolist(), rotation=simulator_orientation
+            )
+            self._beam_attempts += 1
+            self._beam_last_cycle = world.cycle_count
+
+        self.attack_phase = AttackPhase.SEARCH
+        if beam_confirmed:
+            # The learned zero-velocity stance is substantially more stable than
+            # a straight-knee pose during long pre-kickoff waits.  Do not invoke
+            # it at the off-field staging pose before beam activation.
             self.agent.skills_manager.execute(
-                "Walk",
-                target_2d=their_goal_pos,
-                is_target_absolute=True,
-                orientation=desired_orientation
+                "Walk", target_2d=np.zeros(2), is_target_absolute=False
             )
 
-    def run_play_strategy(self):
-        """根据球员号码分配角色行为"""
-        number = self.agent.world.number
+    def run_play_strategy(self) -> None:
+        world = self.agent.world
+        number = world.number
+        ball_owner = self._select_ball_owner() if world.is_ball_fresh(1.0) else 7
+
         if number == 1:
             self.play_as_goalkeeper()
+        elif number == ball_owner:
+            self.run_attack()
         elif number in (2, 3):
             self.play_as_defender()
-        elif number in (4, 5, 6):
-            self.play_as_midfielder()
-        else:
+        elif number == 7:
             self.play_as_forward()
+        else:
+            self.play_as_midfielder()
 
-    def play_as_goalkeeper(self):
-        """守门员：守住球门，跟随球移动"""
-        my_pos = self.agent.world.global_position[:2]
-        ball_pos = self.agent.world.ball_pos[:2]
-        our_goal = self.agent.world.field.get_our_goal_position()[:2]
+    def _select_ball_owner(self) -> int:
+        """Assign exactly one field player from stable pitch zones.
 
-        guard_x = our_goal[0] + 1.5
-        guard_y = np.clip(ball_pos[1], -4, 4)
-        guard_pos = np.array([guard_x, guard_y])
+        RCSSServerMJ vision is local and the current client has no explicit
+        teammate-radio arbitration. A deterministic zone map therefore avoids
+        seven robots chasing the same ball while still handing possession from
+        defence through midfield to the forward line.
+        """
+        ball_x, ball_y = self.agent.world.ball_pos[:2]
+        if ball_x < -8.0:
+            return 2 if ball_y <= 0.0 else 3
+        if ball_x < 5.0:
+            if ball_x >= -2.0 and abs(ball_y) <= 4.5:
+                return 7
+            if ball_y < -3.5:
+                return 5
+            if ball_y > 3.5:
+                return 6
+            return 4
+        return 7
 
+    def run_attack(self) -> None:
+        """Closed-loop search, approach, alignment, kick, and recovery FSM."""
+        world = self.agent.world
+        server_time = world.server_time or 0.0
+
+        if self.attack_phase is AttackPhase.KICK:
+            if self.agent.skills_manager.execute("KickRight"):
+                self.attack_phase = AttackPhase.RECOVER
+                self.kick_cooldown_until = server_time + self.KICK_COOLDOWN_SECONDS
+            return
+
+        if self.attack_phase is AttackPhase.RECOVER:
+            self.agent.skills_manager.execute(
+                "Walk", target_2d=np.zeros(2), is_target_absolute=False
+            )
+            if server_time >= self.kick_cooldown_until:
+                self.attack_phase = AttackPhase.APPROACH
+            return
+
+        if not world.is_ball_fresh(self.BALL_FRESHNESS_SECONDS):
+            self.attack_phase = AttackPhase.SEARCH
+            self._search_for_ball()
+            return
+
+        ball = world.ball_pos[:2]
+        player = world.global_position[:2]
+        goal = np.asarray(world.field.get_their_goal_position(), dtype=float)
+        ball_to_goal = goal - ball
+        distance_to_goal = np.linalg.norm(ball_to_goal)
+        goal_direction = (
+            ball_to_goal / distance_to_goal
+            if distance_to_goal > 1e-6
+            else np.array([1.0, 0.0])
+        )
+        left_direction = np.array([-goal_direction[1], goal_direction[0]])
+        # global_position is the T1 root/torso pose. In simulation the root is
+        # about 0.62 m behind the ball when the forward foot reaches it.
+        alignment_target = ball - 0.62 * goal_direction + 0.04 * left_direction
+        target_orientation = MathOps.vector_angle(goal_direction)
+        distance_to_alignment = np.linalg.norm(player - alignment_target)
+        orientation_error = abs(
+            MathOps.normalize_deg(
+                target_orientation - self.agent.robot.global_orientation_euler[2]
+            )
+        )
+        ball_distance = np.linalg.norm(player - ball)
+
+        if distance_to_alignment > 0.42:
+            self.attack_phase = AttackPhase.APPROACH
+            self.agent.skills_manager.execute(
+                "Walk",
+                target_2d=alignment_target,
+                is_target_absolute=True,
+                orientation=(
+                    target_orientation if distance_to_alignment < 1.5 else None
+                ),
+            )
+        elif distance_to_alignment > 0.25 or orientation_error > 15.0:
+            self.attack_phase = AttackPhase.ALIGN
+            self.agent.skills_manager.execute(
+                "Walk",
+                target_2d=alignment_target,
+                is_target_absolute=True,
+                orientation=target_orientation,
+            )
+        elif 0.48 <= ball_distance <= 0.85:
+            self.attack_phase = AttackPhase.KICK
+            self.agent.skills_manager.execute("KickRight")
+        else:
+            # Re-acquire a geometrically valid kick pose instead of kicking blindly.
+            self.attack_phase = AttackPhase.ALIGN
+            self.agent.skills_manager.execute(
+                "Walk",
+                target_2d=alignment_target,
+                is_target_absolute=True,
+                orientation=target_orientation,
+            )
+
+    def _search_for_ball(self) -> None:
         self.agent.skills_manager.execute(
             "Walk",
-            target_2d=guard_pos,
-            is_target_absolute=True,
-            orientation=0.0,
+            target_2d=np.zeros(2),
+            is_target_absolute=False,
+            orientation=35.0,
+            is_orientation_absolute=False,
         )
 
-    def play_as_defender(self):
-        """后卫：守住后场，球靠近时上前逼抢"""
-        my_pos = self.agent.world.global_position[:2]
-        ball_pos = self.agent.world.ball_pos[:2]
-        our_goal = self.agent.world.field.get_our_goal_position()[:2]
-
-        # 根据号码分散站位 (2号偏左, 3号偏右)
-        y_offset = (self.agent.world.number - 2.5) * 8
-        defense_x = our_goal[0] + 15
-        home_pos = np.array([defense_x, y_offset])
-
-        dist_to_ball = np.linalg.norm(my_pos - ball_pos)
-        if dist_to_ball < 6.0:
-            target = ball_pos
-        else:
-            target = home_pos
-
+    def play_as_goalkeeper(self) -> None:
+        world = self.agent.world
+        goal = np.asarray(world.field.get_our_goal_position(), dtype=float)
+        ball_y = world.ball_pos[1] if world.is_ball_fresh(1.5) else 0.0
+        target = np.array([goal[0] + 1.3, np.clip(ball_y, -3.5, 3.5)])
         self.agent.skills_manager.execute(
-            "Walk",
-            target_2d=target,
-            is_target_absolute=True,
+            "Walk", target_2d=target, is_target_absolute=True, orientation=0.0
         )
 
-    def play_as_midfielder(self):
-        """中场：在中圈活动，连接攻防"""
-        ball_pos = self.agent.world.ball_pos[:2]
-
-        # 根据号码分散站位
-        y_offset = (self.agent.world.number - 5.5) * 6
-        home_pos = np.array([5, y_offset])
-
+    def play_as_defender(self) -> None:
+        world = self.agent.world
+        number = world.number
+        home = np.array([-15.0, -5.0 if number == 2 else 5.0])
+        if world.is_ball_fresh(1.0) and world.ball_pos[0] < -9.0:
+            ball = world.ball_pos[:2]
+            own_goal = np.asarray(world.field.get_our_goal_position(), dtype=float)
+            lane = ball - own_goal
+            lane_norm = np.linalg.norm(lane)
+            target = ball - (lane / lane_norm) * 1.2 if lane_norm > 1e-6 else home
+        else:
+            target = home
         self.agent.skills_manager.execute(
-            "Walk",
-            target_2d=home_pos,
-            is_target_absolute=True,
+            "Walk", target_2d=target, is_target_absolute=True
         )
 
-    def play_as_forward(self):
-        """前锋：抢球并带向对方球门"""
-        self.carry_ball()
-
-    def run_our_set_piece(self):
-        """我方开球/任意球/角球等定位球。"""
-        number = self.agent.world.number
-        playmode = self.agent.world.playmode
-        ball_pos = self.agent.world.ball_pos[:2]
-        my_pos = self.agent.world.global_position[:2]
-        their_goal_pos = self.agent.world.field.get_their_goal_position()[:2]
-
-        # 球到对方球门的方向
-        ball_to_goal = their_goal_pos - ball_pos
-        bg_norm = np.linalg.norm(ball_to_goal)
-        if bg_norm == 0:
-            ball_to_goal_dir = np.array([1.0, 0.0])
+    def play_as_midfielder(self) -> None:
+        world = self.agent.world
+        lane_by_number = {4: 0.0, 5: -7.0, 6: 7.0}
+        if world.is_ball_fresh(1.0):
+            support_x = float(np.clip(world.ball_pos[0] - 4.0, -10.0, 12.0))
         else:
-            ball_to_goal_dir = ball_to_goal / bg_norm
-        orientation = MathOps.vector_angle(ball_to_goal)
+            support_x = -10.0
+        target = np.array([support_x, lane_by_number.get(world.number, 0.0)])
+        self.agent.skills_manager.execute(
+            "Walk", target_2d=target, is_target_absolute=True
+        )
 
-        if playmode == PlayModeEnum.OUR_KICK_OFF:
-            # --- 开球专用逻辑 ---
-            # 开球者：beam位置离球（中点）最近的球员
-            # 所有agent共享BEAM_POSES，各自独立计算，结果一致
-            beam_positions = self.BEAM_POSES[type(self.agent.world.field)]
-            closest_to_ball = min(beam_positions.keys(),
-                key=lambda p: np.linalg.norm(np.array(beam_positions[p][:2]) - ball_pos))
-            is_kicker = (number == closest_to_ball)
-
-            if is_kicker:
-                # 两阶段：先走到球后方（面向球门），再执行踢球动作
-                behind_ball = ball_pos - ball_to_goal_dir * 0.20
-                dist_to_behind = np.linalg.norm(my_pos - behind_ball)
-
-                if dist_to_behind < 0.25:
-                    # 阶段2：已就位，执行踢球
-                    self.agent.skills_manager.execute("KickRight")
-                else:
-                    # 阶段1：走到球后方
-                    self.agent.skills_manager.execute(
-                        "Walk",
-                        target_2d=behind_ball,
-                        is_target_absolute=True,
-                        orientation=orientation,
-                    )
-            else:
-                # 非开球者：分散站位准备接球
-                y_offset = (number - 4) * 5
-                support_pos = np.array([ball_pos[0] - 3, y_offset])
-                self.agent.skills_manager.execute(
-                    "Walk",
-                    target_2d=support_pos,
-                    is_target_absolute=True,
-                )
+    def play_as_forward(self) -> None:
+        """Offer a forward outlet while another zone owner has the ball."""
+        world = self.agent.world
+        if world.is_ball_fresh(1.0):
+            target = np.array(
+                [
+                    float(np.clip(world.ball_pos[0] + 4.0, -5.0, 16.0)),
+                    float(np.clip(0.5 * world.ball_pos[1], -6.0, 6.0)),
+                ]
+            )
         else:
-            # --- 其他定位球（界外球、角球、任意球等）---
-            dist_to_ball = np.linalg.norm(my_pos - ball_pos)
-            is_kicker = dist_to_ball < 1.0
+            target = np.array([-5.0, 0.0])
+        self.agent.skills_manager.execute(
+            "Walk", target_2d=target, is_target_absolute=True
+        )
 
-            if is_kicker:
-                self.agent.skills_manager.execute(
-                    "Walk",
-                    target_2d=ball_pos,
-                    is_target_absolute=True,
-                    orientation=orientation,
+    def run_our_set_piece(self) -> None:
+        world = self.agent.world
+        if world.number == 7:
+            self.run_attack()
+            return
+
+        beam_pose = self.BEAM_POSES[type(world.field)].get(world.number)
+        if beam_pose is None:
+            self.agent.skills_manager.execute("Neutral")
+            return
+        target = np.asarray(beam_pose[:2], dtype=float)
+        if world.is_ball_fresh(1.0):
+            # Maintain legal spacing while offering a passing option.
+            target[0] = min(target[0], world.ball_pos[0] - 2.0)
+        self.agent.skills_manager.execute(
+            "Walk", target_2d=target, is_target_absolute=True
+        )
+
+    def run_their_set_piece(self) -> None:
+        world = self.agent.world
+        own_goal = np.asarray(world.field.get_our_goal_position(), dtype=float)
+        formations = {
+            1: (own_goal[0] + 1.3, 0.0),
+            2: (own_goal[0] + 10.0, -4.0),
+            3: (own_goal[0] + 10.0, 4.0),
+            4: (own_goal[0] + 14.0, 0.0),
+            5: (own_goal[0] + 15.0, -7.0),
+            6: (own_goal[0] + 15.0, 7.0),
+            7: (own_goal[0] + 17.0, 0.0),
+        }
+        target = np.asarray(formations.get(world.number, formations[7]), dtype=float)
+
+        if world.is_ball_fresh(1.0):
+            offset = target - world.ball_pos[:2]
+            distance = np.linalg.norm(offset)
+            if distance < 2.2:
+                direction = (
+                    offset / distance if distance > 1e-6 else np.array([-1.0, 0.0])
                 )
-            else:
-                y_offset = (number - 4) * 4
-                support_pos = np.array([ball_pos[0] - 5, y_offset])
-                self.agent.skills_manager.execute(
-                    "Walk",
-                    target_2d=support_pos,
-                    is_target_absolute=True,
-                )
-
-    def run_their_set_piece(self):
-        """对方开球/任意球等定位球——全员退防。"""
-        number = self.agent.world.number
-        playmode = self.agent.world.playmode
-        our_goal = self.agent.world.field.get_our_goal_position()[:2]
-        ball_pos = self.agent.world.ball_pos[:2]
-
-        # 从球门指向场地中心的方向（球门在左侧则+1，在右侧则-1）
-        toward_center = -np.sign(our_goal[0])
-
-        if playmode == PlayModeEnum.THEIR_KICK_OFF:
-            # --- 对方开球：全员必须在己方半场且中圈(9.15m)之外 ---
-            # MyField half=27.5m, 距中心至少10m → offset ≤ 17.5
-            kickoff_positions = {
-                1:  (our_goal[0] + toward_center * 1.5,  0.0),    # 门将（豁免中圈规则）
-                2:  (our_goal[0] + toward_center * 10,  -5.0),    # 后卫，距中心17.5m
-                3:  (our_goal[0] + toward_center * 10,   5.0),    # 后卫，距中心17.5m
-                4:  (our_goal[0] + toward_center * 14,  -7.0),    # 中场，距中心13.5m
-                5:  (our_goal[0] + toward_center * 14,   7.0),    # 中场，距中心13.5m
-                6:  (our_goal[0] + toward_center * 16,  -4.0),    # 中场，距中心11.5m
-                7:  (our_goal[0] + toward_center * 16,   4.0),    # 前锋，距中心11.5m
-            }
-            defend_pos = np.array(kickoff_positions.get(
-                number, (our_goal[0] + toward_center * 12, (number - 4) * 5)))
-        else:
-            # --- 其他定位球：在球门和球之间排人墙 ---
-            fm = {
-                1:  (our_goal[0] + toward_center * 1.5,  0.0),
-                2:  (our_goal[0] + toward_center * 8,   -3.0),
-                3:  (our_goal[0] + toward_center * 8,    3.0),
-                4:  (our_goal[0] + toward_center * 12,  -5.0),
-                5:  (our_goal[0] + toward_center * 12,   5.0),
-                6:  (our_goal[0] + toward_center * 5,   -1.5),
-                7:  (our_goal[0] + toward_center * 5,    1.5),
-            }
-            default = (our_goal[0] + toward_center * 10, (number - 4) * 3)
-            defend_pos = np.array(fm.get(number, default))
+                target = world.ball_pos[:2] + 2.2 * direction
 
         self.agent.skills_manager.execute(
-            "Walk",
-            target_2d=defend_pos,
-            is_target_absolute=True,
+            "Walk", target_2d=target, is_target_absolute=True
         )

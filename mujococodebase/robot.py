@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
+import logging
 from typing import override
 import numpy as np
 from mujococodebase.server import Server
+
+logger = logging.getLogger(__name__)
 
 
 class Robot(ABC):
@@ -11,6 +14,7 @@ class Robot(ABC):
     This class defines the main structure and common data used by any robot,
     such as motor positions, sensors, and control messages.
     """
+
     def __init__(self, agent):
         """
         Creates a new robot linked to the given agent.
@@ -28,15 +32,21 @@ class Robot(ABC):
             for motor in self.ROBOT_MOTORS
         }
 
-        self.motor_positions: dict = {motor: 0.0 for motor in self.ROBOT_MOTORS}  # degrees
+        self.motor_positions: dict = {
+            motor: 0.0 for motor in self.ROBOT_MOTORS
+        }  # degrees
 
-        self.motor_speeds: dict = {motor: 0.0 for motor in self.ROBOT_MOTORS}  # degrees/s
+        self.motor_speeds: dict = {
+            motor: 0.0 for motor in self.ROBOT_MOTORS
+        }  # degrees/s
 
-        self._global_cheat_orientation = np.array([0, 0, 0, 1])  # quaternion [x, y, z, w]
+        self._global_cheat_orientation = np.array(
+            [0, 0, 0, 1]
+        )  # quaternion [x, y, z, w]
 
-        self.global_orientation_quat = np.array([0, 0, 0, 1]) # quaternion [x, y, z, w]
+        self.global_orientation_quat = np.array([0, 0, 0, 1])  # quaternion [x, y, z, w]
 
-        self.global_orientation_euler = np.zeros(3) # euler [roll, pitch, yaw]
+        self.global_orientation_euler = np.zeros(3)  # euler [roll, pitch, yaw]
 
         self.gyroscope = np.zeros(3)  # angular velocity [roll, pitch, yaw] (degrees/s)
 
@@ -67,22 +77,58 @@ class Robot(ABC):
         For now, directly sets positions, as the simulator is doing the control
         Args:
             motor_name: Name of the motor.
-            target_position: Desired position in radians.
+            target_position: Desired position in degrees (the wire protocol unit).
             kp: Proportional gain.
             kd: Derivative gain.
         """
+        if motor_name not in self.motor_targets:
+            raise KeyError(f"Unknown motor '{motor_name}'")
+
+        values = np.asarray([target_position, kp, kd], dtype=float)
+        if not np.all(np.isfinite(values)):
+            logger.error(
+                "Rejected non-finite motor command for %s: position=%r kp=%r kd=%r",
+                motor_name,
+                target_position,
+                kp,
+                kd,
+            )
+            return
+
+        lower, upper = self.MOTOR_LIMITS_DEG[motor_name]
+        safe_position = float(np.clip(target_position, lower, upper))
+        safe_kp = float(np.clip(kp, 0.0, 100.0))
+        safe_kd = float(np.clip(kd, 0.0, 10.0))
         self.motor_targets[motor_name] = {
-            "target_position": target_position,
-            "kp": kp,
-            "kd": kd,
+            "target_position": safe_position,
+            "kp": safe_kp,
+            "kd": safe_kd,
         }
+
+    def get_ordered_motor_state(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return joint positions and speeds in the policy's fixed motor order."""
+        positions = np.array(
+            [self.motor_positions.get(name, 0.0) for name in self.ROBOT_MOTORS],
+            dtype=float,
+        )
+        speeds = np.array(
+            [self.motor_speeds.get(name, 0.0) for name in self.ROBOT_MOTORS],
+            dtype=float,
+        )
+        return (
+            np.nan_to_num(positions, nan=0.0, posinf=0.0, neginf=0.0),
+            np.nan_to_num(speeds, nan=0.0, posinf=0.0, neginf=0.0),
+        )
 
     def commit_motor_targets_pd(self) -> None:
         """
         Sends all motor target commands to the simulator.
         """
         for motor_name, target_description in self.motor_targets.items():
-            motor_msg = f"({motor_name} {target_description["target_position"]:.2f} 0.0 {target_description["kp"]:.2f} {target_description["kd"]:.2f} 0.0)"
+            target = target_description["target_position"]
+            kp = target_description["kp"]
+            kd = target_description["kd"]
+            motor_msg = f"({motor_name} {target:.2f} 0.0 {kp:.2f} {kd:.2f} 0.0)"
             self.server.commit(motor_msg)
 
 
@@ -90,6 +136,7 @@ class T1(Robot):
     """
     Booster T1
     """
+
     @override
     def __init__(self, agent):
         super().__init__(agent)
@@ -157,6 +204,39 @@ class T1(Robot):
         )
 
     @property
+    def MOTOR_LIMITS_DEG(self) -> dict[str, tuple[float, float]]:
+        """T1 MuJoCo joint limits, converted from radians to degrees."""
+        radian_limits = (
+            (-1.57, 1.57),
+            (-0.35, 1.22),
+            (-3.31, 1.22),
+            (-1.74, 1.57),
+            (-2.27, 2.27),
+            (-2.44, 0.0),
+            (-3.31, 1.22),
+            (-1.57, 1.74),
+            (-2.27, 2.27),
+            (0.0, 2.44),
+            (-1.57, 1.57),
+            (-1.8, 1.57),
+            (-0.2, 1.57),
+            (-1.0, 1.0),
+            (0.0, 2.34),
+            (-0.87, 0.35),
+            (-0.44, 0.44),
+            (-1.8, 1.57),
+            (-1.57, 0.2),
+            (-1.0, 1.0),
+            (0.0, 2.34),
+            (-0.87, 0.35),
+            (-0.44, 0.44),
+        )
+        return {
+            motor: tuple(float(v) for v in np.rad2deg(limit))
+            for motor, limit in zip(self.ROBOT_MOTORS, radian_limits, strict=True)
+        }
+
+    @property
     def MOTOR_FROM_READABLE_TO_SERVER(self) -> dict:
         """
         Maps readable joint names to their simulator motor codes.
@@ -185,6 +265,23 @@ class T1(Robot):
             "Right_Knee_Pitch": "rle4",
             "Right_Ankle_Pitch": "rle5",
             "Right_Ankle_Roll": "rle6",
+        }
+
+    @property
+    def MOTOR_FROM_SENSOR_TO_SERVER(self) -> dict[str, str]:
+        """Map T1 joint sensor identifiers to motor command identifiers."""
+        sensor_groups = (
+            ("q_hj", ("he1", "he2")),
+            ("q_laj", ("lae1", "lae2", "lae3", "lae4")),
+            ("q_raj", ("rae1", "rae2", "rae3", "rae4")),
+            ("q_tj", ("te1",)),
+            ("q_llj", ("lle1", "lle2", "lle3", "lle4", "lle5", "lle6")),
+            ("q_rlj", ("rle1", "rle2", "rle3", "rle4", "rle5", "rle6")),
+        )
+        return {
+            f"{prefix}{index}": motor
+            for prefix, motors in sensor_groups
+            for index, motor in enumerate(motors, start=1)
         }
 
     @property

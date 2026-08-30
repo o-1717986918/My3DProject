@@ -1,8 +1,79 @@
-# BahiaRT Mujoco base code
+# My3DProject competition client
 
-This is a Python-based base code developed for the RCSSServerMJ. It was created to simplify the onboarding process for new teams joining the RoboCup 3D Soccer Simulation League using the Mujoco Simulator.
+This repository is a Python 3.13 team client for the RCSSServerMJ RoboCup 3D
+Soccer Simulation League. It started from the BahiaRT MuJoCo base and now adds
+a seven-player match controller, canonical team coordinates, safe motor output,
+ball tracking, role formations, set-play handling, and a repeatable
+approach-align-kick-recover loop.
 
-This code was influenced by the early demonstrations from MagmaOffenburg team of a client for the RCSSServerMJ, and the FCPortugal base code for the SimSpark simulator.
+Development and competition execution are supported in WSL2 Ubuntu 22.04 with
+the `my3d-team` Conda environment. See `docs/competition-runbook.md` for the
+full operating and troubleshooting procedure, and `docs/validation.md` for the
+latest evidence-backed validation status.
+
+## WSL quick start
+
+From the repository directory inside WSL:
+
+```bash
+conda env create -f environment.yml
+conda activate my3d-team
+git submodule update --init --recursive
+pytest -q
+```
+
+If the environment already exists, update it instead:
+
+```bash
+conda env update -n my3d-team -f environment.yml --prune
+conda activate my3d-team
+```
+
+Start the official server in terminal A:
+
+```bash
+export RCSSSERVERMJ_BIN="$HOME/.local/bin/rcssservermj"
+scripts/run_server.sh realtime
+```
+
+Start one seven-player team in terminal B:
+
+```bash
+export MY3D_PYTHON="$CONDA_PREFIX/bin/python"
+scripts/run_team.sh My3DTeam 127.0.0.1 60000
+```
+
+For deterministic local 7v7 self-play, start the server first and then run:
+
+```bash
+export MY3D_PYTHON="$CONDA_PREFIX/bin/python"
+scripts/run_selfplay.sh 127.0.0.1 60000 60001
+```
+
+`run_selfplay.sh` starts two seven-player teams, sends kickoff after all clients
+have had time to join, and then drops the ball to enter deterministic `PLAY_ON`.
+The deterministic kickoff is assigned to the left team so the active/passive
+beam formations match the referee placement checks.
+
+Run the complete competition acceptance gate, including a real
+`APPROACH -> ALIGN -> KICK -> RECOVER` transition:
+
+```bash
+export MY3D_PYTHON="$CONDA_PREFIX/bin/python"
+export RCSSSERVERMJ_BIN="$HOME/.local/bin/rcssservermj"
+scripts/run_acceptance_match.sh 600
+```
+
+Launch a real-time WSLg viewer and a bounded 7v7 demonstration:
+
+```bash
+scripts/run_visual_match.sh 3000
+```
+
+The Apollo3D learned get-up network is enabled automatically when its pinned
+submodule asset is present. Set `MY3D_GETUP_BACKEND=keyframe` to force the
+built-in fallback. See `docs/apollo-integration.md` before distributing a team
+package that contains the GPL-3.0-or-later Apollo asset.
 
 ## Installation
 
@@ -62,23 +133,30 @@ CLI parameter (a usage help is also available):
 You can also use a shell script to start the entire team, optionally specifying host and port:
 
 ```bash
-./start.sh [host] [port]
+scripts/run_team.sh [team-name] [host] [agent-port]
 ```
 
 Using **Hatch**:
 ```bash
-hatch run ./start.sh [host] [port]
+hatch run scripts/run_team.sh [team-name] [host] [agent-port]
 ```
 
 Using **Poetry**:
 ```bash
-poetry run ./start.sh [host] [port]
+poetry run scripts/run_team.sh [team-name] [host] [agent-port]
 ```
 
 CLI parameter:
 
-- `[host]` Server IP address (default: 'localhost')
-- `[port]` Server port for agents (default: 60000)
+- `[team-name]` Team name (default: `My3DTeam`)
+- `[host]` Server IP address (default: `127.0.0.1`)
+- `[agent-port]` Server port for agents (default: `60000`)
+
+An optional fourth argument limits cycles for smoke tests, for example:
+
+```bash
+scripts/run_team.sh My3DTeam 127.0.0.1 60000 800
+```
 
 ### Binary building
 To compete, a binary is needed. It provides a compact, portable version and protects the source code. To create a binary, just run the script ```build_binary.sh```
@@ -103,6 +181,12 @@ Once binary generation is finished, the result will be inside the build folder, 
 In the Brazil Open Mujoco Demo, the adult humanoid field will be used, with 3 players in each team. The ```start3v3.sh``` script can be used for that purpose.
 
 ### Authors and acknowledgment
+
+The match client remains influenced by the early MagmaOffenburg
+RCSSServerMJ demonstrations and the FCPortugal SimSpark base. Architecture
+comparisons with ApolloCodebase are documented in `docs/reference-projects.md`;
+Apollo remains an isolated GPL-3.0-or-later Git submodule.
+
 This project was developed and contributed by:
 - **Alan Nascimento**
 - **Luís Magalhães**

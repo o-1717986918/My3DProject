@@ -1,0 +1,42 @@
+schema_version: 1
+recorded_at: 2026-08-30
+
+training_framework:
+  name: MuJoCo Playground
+  version: 0.2.0
+  repository: https://github.com/google-deepmind/mujoco_playground
+  commit: 124a73fa3303f75a62f8fe04d329b829ed0ebdfb
+  license: Apache-2.0
+  local_source: /home/win98/rl_sources/mujoco_playground
+
+training_runtime:
+  python: 3.12
+  jax: 0.6.2
+  jax_cuda12_plugin: 0.6.2
+  flax: 0.11.2
+  brax: 0.14.2
+  mujoco: 3.12.0
+  warp: 1.16.0
+  compatibility_note: JAX 0.11.1 removes jax.device_put_replicated required by Brax 0.14.2
+
+competition_physics:
+  name: RCSSServerMJ
+  version: 0.2.1
+  resource_root: /home/win98/.local/pipx/venvs/rcsssmj/lib/python3.10/site-packages/rcsssmj/resources
+  package_license: MIT
+  t1_resource_license: Apache-2.0
+  soccer_resource_license: MIT-package-no-separate-license-found
+  robot_xml_sha256: b81087d7d04ecfa1064ee5392cc632fc69b4d7de644b3a5318b0c5e12276d083
+  soccer_world_xml_sha256: b4aad4d084c85714b51f09a3f401541cd0a2ae833ad25000dd2356cef04e407e
+
+reference_only:
+  - name: ApolloCodebase
+    repository: https://github.com/XiangruiJiang/ApolloCodebase
+    commit: 71018c968969d6e55130b0e1987cd5b4f5c3b4df
+    license: GPL-3.0
+    reuse_policy: isolated inference and architecture reference only
+  - name: ICRA 2026 humanoid striker
+    repository: https://github.com/Daffan/humanoid-soccer
+    commit: 378a12ac7446cd175f973c04e32912eb9acbee10
+    license: Apache-2.0
+    reuse_policy: method/config reference; independently reimplement audited concepts

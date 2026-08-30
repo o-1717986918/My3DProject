@@ -5,8 +5,22 @@ poetry.lock
 poetry.toml
 **/*.log
 **/*.txt
+!training/locks/*.txt
 **/build/
 **/install/
 **/log/
 *.spec
 dist/
+artifacts/
+*.jsonl
+
+# Reinforcement-learning outputs are large and host-specific.
+training/.venv/
+training/checkpoints/
+training/runs/
+training/videos/
+training/wandb/
+training/vendor/
+training/**/*.onnx
+training/**/*.npz
+training/**/*.pkl

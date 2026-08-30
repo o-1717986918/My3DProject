@@ -1,6 +1,6 @@
 import logging
 import socket
-from select import select
+import time
 from mujococodebase.world_parser import WorldParser
 
 logger = logging.getLogger(__file__)
@@ -19,20 +19,29 @@ class Server:
 
     def connect(self) -> None:
         logger.info("Connecting to server at %s:%d...", self.__host, self.__port)
+        attempts = 0
         while True:
             try:
                 self.__socket.connect((self.__host, self.__port))
                 break
             except ConnectionRefusedError:
-                logger.error(
-                    "Connection refused. Make sure the server is running and listening on {self.__host}:{self.__port}."
-                )
+                attempts += 1
+                if attempts == 1 or attempts % 20 == 0:
+                    logger.warning(
+                        "Connection refused at %s:%d; retrying...",
+                        self.__host,
+                        self.__port,
+                    )
+                time.sleep(0.25)
 
         logger.info(f"Server connection established to {self.__host}:{self.__port}.")
 
     def shutdown(self) -> None:
+        try:
+            self.__socket.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         self.__socket.close()
-        self.__socket.shutdown(socket.SHUT_RDWR)
 
     def send_immediate(self, msg: str) -> None:
         """
@@ -43,17 +52,14 @@ class Server:
                 (len(msg)).to_bytes(4, byteorder="big") + msg.encode()
             )  # Add message length in the first 4 bytes
         except BrokenPipeError:
-            print("\nError: socket was closed by rcssserver3d!")
-            exit()
+            raise ConnectionResetError("socket was closed by RCSSServerMJ")
 
     def send(self) -> None:
         """
         Send all committed messages
         """
-        if len(select([self.__socket], [], [], 0.0)[0]) == 0:
+        if self.__send_buff:
             self.send_immediate(("".join(self.__send_buff)))
-        else:
-            logger.info("Server_Comm.py: Received a new packet while thinking!")
         self.__send_buff = []
 
     def commit(self, msg: str) -> None:

@@ -1,0 +1,9 @@
+name: my3d-team
+channels:
+  - defaults
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+      - -e .
+      - pytest>=9.0,<10.0

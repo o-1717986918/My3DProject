@@ -1,0 +1,3 @@
+[submodule "external/ApolloCodebase"]
+	path = external/ApolloCodebase
+	url = https://github.com/XiangruiJiang/ApolloCodebase.git

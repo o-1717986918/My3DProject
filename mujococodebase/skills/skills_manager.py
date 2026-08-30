@@ -1,6 +1,5 @@
 from mujococodebase.skills.keyframe.get_up.get_up import GetUp
 from mujococodebase.skills.keyframe.kick.kick_right import KickRight
-from mujococodebase.skills.keyframe.keyframe import KeyframeSkill
 from mujococodebase.skills.keyframe.poses.neutral.neutral import Neutral
 from mujococodebase.skills.skill import Skill
 from mujococodebase.skills.walk.walk import Walk

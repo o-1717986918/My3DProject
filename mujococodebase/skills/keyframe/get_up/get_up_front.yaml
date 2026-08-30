@@ -35,7 +35,7 @@ keyframes:
       Ankle_Roll: 0.000
 
 
-  - delta: 0.8125
+  - delta: 0.9
     motor_positions:
       Head_yaw: 0.000
       Head_pitch: 0.000
@@ -45,13 +45,13 @@ keyframes:
       Elbow_Yaw: 0.000
       Waist: 0.000
       Hip_Pitch: 200.536
-      Hip_Roll: 143.239
-      Hip_Yaw: 114.592
+      Hip_Roll: 0.000
+      Hip_Yaw: 0.000
       Knee_Pitch: -171.887
       Ankle_Pitch: 89.954
-      Ankle_Roll: 24.919
+      Ankle_Roll: 0.000
 
-  - delta: 0.45
+  - delta: 0.65
     motor_positions:
       Head_yaw: 0.000
       Head_pitch: 0.000
@@ -60,19 +60,19 @@ keyframes:
       Elbow_Pitch: -85.944
       Elbow_Yaw: 0.000
       Waist: 0.000
-      Hip_Pitch: 20.054
-      Hip_Roll: 11.459
+      Hip_Pitch: 60.000
+      Hip_Roll: 0.000
       Hip_Yaw: 0.000
-      Knee_Pitch: -42.972
-      Ankle_Pitch: 0.000
+      Knee_Pitch: -100.000
+      Ankle_Pitch: 40.000
       Ankle_Roll: 0.000
-    kp: 50
-    kd: 2
+    kp: 70
+    kd: 2.5
     p_gains:
-       Ankle_Pitch: 50
-       Ankle_Roll: 50
+       Ankle_Pitch: 80
+       Ankle_Roll: 80
 
-  - delta: 0.13
+  - delta: 0.6
     motor_positions:
       Head_yaw: 0.000
       Head_pitch: 0.000
@@ -81,11 +81,11 @@ keyframes:
       Elbow_Pitch: -85.944
       Elbow_Yaw: 0.000
       Waist: 0.000
-      Hip_Pitch: 20.054
-      Hip_Roll: 7.162
+      Hip_Pitch: 25.000
+      Hip_Roll: 0.000
       Hip_Yaw: 0.000
-      Knee_Pitch: -42.972
-      Ankle_Pitch: 0.000
+      Knee_Pitch: -55.000
+      Ankle_Pitch: 25.000
       Ankle_Roll: 0.000
-    kp: 200
-    kd: 1.95
+    kp: 80
+    kd: 2.5

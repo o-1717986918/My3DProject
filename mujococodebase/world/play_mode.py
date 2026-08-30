@@ -70,10 +70,10 @@ class PlayModeEnum(Enum):
     """Their team has a penalty kick (from the penalty spot)."""
 
     OUR_PENALTY_SHOOT = auto()
-    """Our team has a penalty shoot (starting from somewhere on the field, allowed to touch the ball more than once)."""
+    """Our penalty shoot; repeated ball touches are allowed."""
 
     THEIR_PENALTY_SHOOT = auto()
-    """Their team has a penalty shoot (starting from somewhere on the field, allowed to touch the ball more than once)."""
+    """Their penalty shoot; repeated ball touches are allowed."""
 
     @classmethod
     def get_playmode_from_string(

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-quality:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install runtime and development tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --editable . pytest
+
+      - name: Static quality gates
+        run: |
+          python -m compileall -q mujococodebase run_player.py scripts
+          black --check mujococodebase run_player.py scripts tests training
+          flake8 mujococodebase run_player.py scripts tests training
+          bash -n scripts/*.sh start7v7.sh
+
+      - name: Runtime unit tests
+        run: python -m pytest tests
+
+  training-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install contract-test dependencies
+        run: python -m pip install "pytest>=9,<10" "PyYAML>=6,<7"
+
+      - name: Validate the deployment contract
+        env:
+          PYTHONPATH: training
+        run: python -m pytest training/tests/test_contract.py

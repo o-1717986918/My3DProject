@@ -1,6 +1,7 @@
 import numpy as np
 import onnxruntime as ort
 
+
 def export_model(model_class, weights_path, output_file):
     """
     Export a PyTorch model to ONNX format automatically detecting input shape.
@@ -32,7 +33,14 @@ def load_network(model_path):
     """
     Load an ONNX model into memory for fast reuse.
     """
-    session = ort.InferenceSession(model_path)
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 1
+    options.inter_op_num_threads = 1
+    session = ort.InferenceSession(
+        model_path,
+        sess_options=options,
+        providers=["CPUExecutionProvider"],
+    )
     input_name = session.get_inputs()[0].name
     output_name = session.get_outputs()[0].name
     return {"session": session, "input_name": input_name, "output_name": output_name}

@@ -1,4 +1,3 @@
-import logging
 from mujococodebase.skills.skill import Skill
 import yaml
 
@@ -70,8 +69,8 @@ class KeyframeSkill(Skill):
                 self.agent.robot.set_motor_target_position(
                     motor_name=server_motor_name,
                     target_position=position,
-                    kp=self.kp,
-                    kd=self.kd,
+                    kp=p_gain,
+                    kd=d_gain,
                 )
 
         keyframe_time: float = current_keyframe["delta"]
