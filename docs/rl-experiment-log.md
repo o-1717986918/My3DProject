@@ -378,3 +378,22 @@ exactly zero. `reference_residual_v3` implements the first two changes with
 initial standard deviation 0.5 (about 0.075 rad before clipping), five passes,
 `1e-4` learning rate and desired KL 0.01. Failure-phase sampling remains a
 separate next ablation so its effect can be measured rather than bundled.
+
+That seed-127 ablation completed the same 2,359,296 environment steps. Mean
+episode length progressed 20.47, 21.00, 18.84, a temporary 24.44 at checkpoint
+1,179,648, 20.75, 19.34 and 21.06. KL stayed near the wider 0.01 target, but
+the final deterministic action-acceleration cost grew to 502.6 and all episodes
+still fell. Greater exploration found a slightly better transient correction,
+not a stable policy, so the run is rejected and only its best checkpoint is
+retained for the next curriculum ablation.
+
+The CPU tool then replayed exactly one episode from each of the 34 reference
+frames and converted actual termination phases into a cyclic failure-focused
+reset distribution. A three-tap exponential kernel (decay 0.8) shifts weight
+toward the frames before failure and mixes in 10% uniform probability. The
+distribution is symmetric, has normalized entropy 0.924 and peaks at mirrored
+bins 6 and 23 with probability 0.0802 each. Its local JSON is bound to the
+reference SHA and has SHA-256
+`6cfecc97b517f3df4d5baf3c9a4f6d357acf6994c939a3db4fa49a3ccdb63d51`.
+Training uses these weights, while held-out evaluation deliberately resets
+uniformly so earlier learning curves remain comparable.

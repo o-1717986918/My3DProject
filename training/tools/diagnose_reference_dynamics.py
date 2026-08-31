@@ -18,6 +18,7 @@ from my3d_rl.reference_dynamics import (
     circular_interpolate,
     compute_inverse_dynamics_reference,
     configure_pd_actuators,
+    failure_phase_sampling_weights,
 )
 from my3d_rl.run_env import TRAIN_TO_SERVER_SIGN
 
@@ -118,9 +119,11 @@ def _evaluate_targets(
     forward_velocity: list[float] = []
     joint_error: list[float] = []
     flight_by_episode: list[bool] = []
+    phase_outcomes: list[dict[str, Any]] = []
 
     for episode in range(episodes):
         phase = episode / episodes
+        start_phase = phase
         data = mujoco.MjData(model)
         data.qpos[:] = model.qpos0
         root_position = circular_interpolate(reference["root_position"], phase)
@@ -177,6 +180,14 @@ def _evaluate_targets(
                 break
         episode_length.append(alive_steps)
         flight_by_episode.append(had_flight)
+        phase_outcomes.append(
+            {
+                "start_phase": start_phase,
+                "episode_length_steps": alive_steps,
+                "termination_phase": phase,
+                "completed": alive_steps == maximum_steps,
+            }
+        )
 
     lengths = np.asarray(episode_length)
     return {
@@ -188,6 +199,7 @@ def _evaluate_targets(
         "alive_weighted_forward_speed_m_s": float(np.mean(forward_velocity)),
         "joint_tracking_rmse_rad": float(np.sqrt(np.mean(np.square(joint_error)))),
         "actual_flight_episode_rate": float(np.mean(flight_by_episode)),
+        "phase_outcomes": phase_outcomes,
     }
 
 
@@ -210,6 +222,7 @@ def main() -> None:
     parser.add_argument("--inverse-blends", type=_parse_floats, default=[0.25, 0.5, 0.75, 1.0])
     parser.add_argument("--output", type=Path)
     parser.add_argument("--output-target", type=Path)
+    parser.add_argument("--output-phase-weights", type=Path)
     args = parser.parse_args()
     if args.episodes < 1 or args.steps < 1 or args.speed_scale <= 0.0:
         raise ValueError("episodes, steps and speed scale must be positive")
@@ -286,6 +299,20 @@ def main() -> None:
             prefix="train_",
         )
 
+    baseline = experiments["reference_phase_lead_0_frames"]
+    failure_phases = np.array(
+        [
+            outcome["termination_phase"]
+            for outcome in baseline["phase_outcomes"]
+            if not outcome["completed"]
+        ],
+        dtype=np.float64,
+    )
+    phase_weights = failure_phase_sampling_weights(
+        failure_phases,
+        bin_count=reference["joint_position"].shape[0],
+    )
+
     payload = {
         "schema_version": 1,
         "purpose": "reference_pd_lag_and_inverse_dynamics_feasibility",
@@ -322,6 +349,20 @@ def main() -> None:
             ),
         },
         "experiments": experiments,
+        "failure_phase_sampling": {
+            "source_experiment": "reference_phase_lead_0_frames",
+            "algorithm": "cyclic_noncausal_exponential_kernel_plus_uniform",
+            "kernel_size": 3,
+            "kernel_decay": 0.8,
+            "uniform_ratio": 0.1,
+            "weights": phase_weights.tolist(),
+            "entropy_normalized": float(
+                -np.sum(phase_weights * np.log(phase_weights))
+                / np.log(phase_weights.size)
+            ),
+            "maximum_probability": float(np.max(phase_weights)),
+            "maximum_probability_bin": int(np.argmax(phase_weights)),
+        },
     }
     rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     if args.output:
@@ -357,6 +398,22 @@ def main() -> None:
                     sort_keys=True,
                 )
             ),
+        )
+    if args.output_phase_weights:
+        args.output_phase_weights.parent.mkdir(parents=True, exist_ok=True)
+        args.output_phase_weights.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "purpose": "fixed_failure_phase_reset_distribution",
+                    "reference_sha256": reference_sha,
+                    **payload["failure_phase_sampling"],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
         )
     print(rendered, end="")
 

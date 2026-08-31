@@ -190,6 +190,28 @@ def test_reference_residual_reset_scales_cadence_velocity_and_control(tmp_path):
     np.testing.assert_allclose(np.asarray(state.obs["state"])[:69], 0.0, atol=1.0e-6)
 
 
+def test_reference_residual_reset_accepts_fixed_phase_weights(tmp_path):
+    path = tmp_path / "reference-residual-weighted-reset.npz"
+    _write_reference_residual_fixture(path)
+    env = DirectionalRun(
+        config_overrides={
+            "use_fixed_command": True,
+            "fixed_command": [1.8, 0.0, 0.0],
+            "reference_init_probability": 1.0,
+            "reference_phase_sampling_weights": [0.0, 0.0, 1.0, 0.0],
+        },
+        contract=load_policy_contract(REFERENCE_CONTRACT),
+        motion_reference=path,
+    )
+
+    states = jax.jit(jax.vmap(env.reset))(
+        jax.random.split(jax.random.PRNGKey(73), 16)
+    )
+    phases = np.asarray(states.info["gait_phase"])
+    assert np.all(phases >= 0.5)
+    assert np.all(phases < 0.75)
+
+
 def test_formal_profile_uses_bounded_action_and_official_t1_widths():
     profile = get_ppo_profile("t1_tanh_v1")
 

@@ -55,6 +55,42 @@ def circular_interpolate(values: np.ndarray, phase: float) -> np.ndarray:
     return (1.0 - fraction) * values[lower] + fraction * values[upper]
 
 
+def failure_phase_sampling_weights(
+    failure_phases: np.ndarray,
+    *,
+    bin_count: int,
+    kernel_size: int = 3,
+    kernel_decay: float = 0.8,
+    uniform_ratio: float = 0.1,
+) -> np.ndarray:
+    """Build cyclic failure-focused reset weights in the BeyondMimic pattern.
+
+    A non-causal decaying kernel places probability on the frames immediately
+    preceding a recorded failure.  A uniform mixture keeps every phase
+    reachable and makes the resulting categorical distribution finite.
+    """
+    phases = np.asarray(failure_phases, dtype=np.float64).reshape(-1)
+    if bin_count < 2 or kernel_size < 1:
+        raise ValueError("phase sampling requires at least two bins and one kernel tap")
+    if not 0.0 < kernel_decay <= 1.0:
+        raise ValueError("kernel decay must lie in (0, 1]")
+    if not 0.0 < uniform_ratio <= 1.0:
+        raise ValueError("uniform ratio must lie in (0, 1]")
+    if phases.size == 0 or not np.isfinite(phases).all():
+        raise ValueError("failure phases must be a non-empty finite array")
+    bins = np.floor(np.mod(phases, 1.0) * bin_count).astype(np.int64)
+    counts = np.bincount(bins, minlength=bin_count).astype(np.float64)
+    kernel = kernel_decay ** np.arange(kernel_size, dtype=np.float64)
+    kernel /= np.sum(kernel)
+    focused = sum(
+        weight * np.roll(counts, -offset)
+        for offset, weight in enumerate(kernel)
+    )
+    focused /= np.sum(focused)
+    weights = (1.0 - uniform_ratio) * focused + uniform_ratio / bin_count
+    return weights / np.sum(weights)
+
+
 def _joint_addresses(
     model: mujoco.MjModel, contract: PolicyContract, prefix: str
 ) -> tuple[np.ndarray, np.ndarray, int, int]:

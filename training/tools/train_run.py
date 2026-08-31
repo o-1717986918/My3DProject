@@ -293,6 +293,7 @@ def main() -> None:
     parser.add_argument("--restore-checkpoint", type=Path)
     parser.add_argument("--bootstrap-onnx", type=Path)
     parser.add_argument("--motion-reference", type=Path)
+    parser.add_argument("--reference-phase-weights", type=Path)
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
 
@@ -329,6 +330,27 @@ def main() -> None:
             raise ValueError(
                 "motion reference SHA-256 differs from the policy contract"
             )
+    phase_sampling = None
+    if args.reference_phase_weights:
+        if args.stage != "reference_residual" or args.motion_reference is None:
+            raise ValueError(
+                "reference phase weights require the reference_residual stage"
+            )
+        phase_sampling = json.loads(
+            args.reference_phase_weights.read_text(encoding="utf-8")
+        )
+        if phase_sampling.get("reference_sha256") != _sha256(args.motion_reference):
+            raise ValueError("phase weights were generated for another reference")
+        weights = np.asarray(phase_sampling.get("weights"), dtype=np.float64)
+        expected_frames = motion_reference_validation["frame_count"]
+        if (
+            weights.shape != (expected_frames,)
+            or not np.isfinite(weights).all()
+            or np.any(weights < 0.0)
+            or not np.sum(weights) > 0.0
+        ):
+            raise ValueError("reference phase weights are invalid")
+        phase_sampling["weights"] = (weights / np.sum(weights)).tolist()
     if (profile.batch_size * profile.num_minibatches) % args.num_envs:
         raise ValueError(
             "num_envs must divide batch_size * num_minibatches "
@@ -348,6 +370,10 @@ def main() -> None:
         "action_clip": max(abs(value) for value in contract.action_clip),
         **STAGES[args.stage],
     }
+    if phase_sampling is not None:
+        stage_overrides["reference_phase_sampling_weights"] = phase_sampling[
+            "weights"
+        ]
     env = DirectionalRun(
         config_overrides=stage_overrides,
         contract=contract,
@@ -360,11 +386,16 @@ def main() -> None:
             if contract.control_mode == "motion_reference_residual_joint_position"
             else 0.0
         )
+        evaluation_overrides = {
+            **stage_overrides,
+            "reference_init_probability": evaluation_reference_probability,
+        }
+        # Failure-focused resets are a training curriculum. Held-out metrics
+        # retain uniform phases so they stay comparable to earlier profiles.
+        if phase_sampling is not None:
+            evaluation_overrides["reference_phase_sampling_weights"] = []
         eval_env = DirectionalRun(
-            config_overrides={
-                **stage_overrides,
-                "reference_init_probability": evaluation_reference_probability,
-            },
+            config_overrides=evaluation_overrides,
             contract=contract,
             motion_reference=args.motion_reference,
         )
@@ -418,6 +449,17 @@ def main() -> None:
             _sha256(args.motion_reference) if args.motion_reference else None
         ),
         "motion_reference_validation": motion_reference_validation,
+        "reference_phase_weights": (
+            str(args.reference_phase_weights.resolve())
+            if args.reference_phase_weights
+            else None
+        ),
+        "reference_phase_weights_sha256": (
+            _sha256(args.reference_phase_weights)
+            if args.reference_phase_weights
+            else None
+        ),
+        "reference_phase_sampling": phase_sampling,
     }
     manifest_path = args.run_dir / "run-manifest.json"
     manifest_path.write_text(

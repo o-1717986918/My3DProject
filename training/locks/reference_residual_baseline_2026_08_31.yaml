@@ -52,6 +52,24 @@ optimizer_runs:
     final_fall_episode_rate: 1.0
     all_checkpoints_committed: true
     decision: reject_no_sustained_learning_improvement
+  - name: high_exploration_multi_epoch_ablation
+    local_run: /home/win98/rl_runs/run-reference-residual-v3-explore-s127-20260831-1252
+    git_revision: c1095c15756fd3d5de20ca8f65cf4becee2473db
+    profile: reference_residual_v3
+    seed: 127
+    environment_steps: 2359296
+    initial_mean_episode_length_steps: 20.46875
+    best_checkpoint_steps: 1179648
+    best_mean_episode_length_steps: 24.4375
+    final_mean_episode_length_steps: 21.0625
+    final_kl: 0.009001759812235832
+    final_policy_mean_min: -0.6358883380889893
+    final_policy_mean_max: 0.7232655882835388
+    final_policy_std_mean: 0.5013686418533325
+    final_action_acceleration_cost: 502.5588073730469
+    final_fall_episode_rate: 1.0
+    all_checkpoints_committed: true
+    decision: reject_transient_gain_with_oscillatory_actions
 
 zero_residual_open_loop:
   implementation: warp
@@ -96,6 +114,21 @@ inverse_dynamics_diagnostic:
   floating_base_force_max_abs_n: 1536.9063996620787
   decision: diagnostic_only_reference_not_dynamically_feasible
 
+fixed_failure_phase_sampling:
+  source_report: /tmp/reference-dynamics-phase.json
+  local_weights: /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v3_failure_phase_weights_v1.json
+  weights_sha256: 6cfecc97b517f3df4d5baf3c9a4f6d357acf6994c939a3db4fa49a3ccdb63d51
+  source_episodes: 34
+  source_mean_episode_length_steps: 19.970588235294116
+  algorithm: cyclic_noncausal_exponential_kernel_plus_uniform
+  kernel_size: 3
+  kernel_decay: 0.8
+  uniform_ratio: 0.1
+  normalized_entropy: 0.9239968654846693
+  maximum_probability: 0.08018322082931534
+  maximum_probability_bins: [6, 23]
+  status: ready_for_resumed_ablation
+
 interpretation:
   zero_action_decoder_invariant_passed: true
   optimizer_checkpoint_integration_passed: true
@@ -104,5 +137,6 @@ interpretation:
   phase_lag_is_primary_failure_cause: false
   inverse_dynamics_feedforward_passed: false
   low_noise_single_epoch_ppo_passed: false
+  high_exploration_multi_epoch_ppo_passed: false
   release_candidate_available: false
-  next_stage: high_exploration_multi_epoch_ablation_then_failure_phase_sampling_or_new_retarget
+  next_stage: fixed_failure_phase_resume_ablation_then_new_gmr_retarget

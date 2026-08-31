@@ -110,6 +110,7 @@ def default_config() -> config_dict.ConfigDict:
         reset_root_velocity_noise=0.10,
         reset_yaw_range=0.20,
         reference_init_probability=0.0,
+        reference_phase_sampling_weights=[],
         push_enable=False,
         push_interval_steps=150,
         push_magnitude=[0.05, 0.25],
@@ -335,6 +336,28 @@ class DirectionalRun(mjx_env.MjxEnv):
             self._reference_nominal_frequency = 1.0
             self._reference_forward_speed = 1.0
 
+        phase_weights = np.asarray(
+            self._config.reference_phase_sampling_weights, dtype=np.float64
+        )
+        self._weighted_reference_phase_reset = phase_weights.size > 0
+        if self._weighted_reference_phase_reset:
+            if phase_weights.shape != (self._reference_frame_count,):
+                raise ValueError(
+                    "reference phase weights must match the reference frame count"
+                )
+            if (
+                not np.isfinite(phase_weights).all()
+                or np.any(phase_weights < 0.0)
+                or not np.sum(phase_weights) > 0.0
+            ):
+                raise ValueError("reference phase weights must be finite and non-negative")
+            phase_weights = phase_weights / np.sum(phase_weights)
+            self._reference_phase_logits = jp.log(
+                jp.asarray(np.maximum(phase_weights, 1.0e-30), dtype=jp.float32)
+            )
+        else:
+            self._reference_phase_logits = jp.zeros(self._reference_frame_count)
+
     def _configure_pd_actuators(self) -> None:
         for effector in self.contract.effector_order:
             pos_id = self._mj_model.actuator(self.prefix + effector + "_pos").id
@@ -425,7 +448,16 @@ class DirectionalRun(mjx_env.MjxEnv):
         gait_frequency = self._phase_frequency_for_command(
             command, sampled_gait_frequency
         )
-        gait_phase = jax.random.uniform(phase_rng)
+        phase_bin_rng, phase_offset_rng = jax.random.split(phase_rng)
+        if self._weighted_reference_phase_reset:
+            phase_bin = jax.random.categorical(
+                phase_bin_rng, self._reference_phase_logits
+            )
+            gait_phase = (
+                phase_bin + jax.random.uniform(phase_offset_rng)
+            ) / self._reference_frame_count
+        else:
+            gait_phase = jax.random.uniform(phase_rng)
         (
             reference_position,
             reference_velocity,
