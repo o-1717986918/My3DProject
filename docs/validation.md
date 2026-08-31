@@ -134,10 +134,11 @@ The minimum match loop is operational: legal active/passive kickoff formation,
 perception, canonical localisation, ball search, approach, alignment, repeated
 stable ball contact, learned four-direction recovery, set-play response,
 zone-based single-player ball ownership, forward support, and process shutdown.
-The next performance work is stronger learned kicking, teammate communication,
-collision avoidance, and opponent-aware role arbitration. These are
-competitive-quality improvements rather than blockers for starting and
-completing a 7v7 match.
+The accepted next stage is coordinated strategy development and evidence-based
+RoboCup2D algorithm migration. It starts with a strategy-to-execution contract,
+measured target-directed passing, and teammate intent communication before
+adding pass selection, off-ball support, marking, and bounded action chains.
+The complete gates are recorded in `docs/strategy-development-plan.md`.
 
 The v4/GMR capability is present in the formal action stack behind explicit
 activation and integrity checks. It is not release-default locomotion: stable

@@ -119,6 +119,11 @@ Operational details and the current evidence are in
 `docs/competition-runbook.md` and `docs/validation.md`. Research and reference
 comparisons remain under `docs/`.
 
+The accepted next-stage direction is coordinated strategy development and
+evidence-based RoboCup2D algorithm migration. Its architecture, implementation
+order, promotion gates, telemetry contract, and release definition are in
+`docs/strategy-development-plan.md`.
+
 ## License and attribution
 
 The combined project is distributed under GPL-3.0-or-later; see `LICENSE`.
