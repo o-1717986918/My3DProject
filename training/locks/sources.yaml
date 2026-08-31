@@ -105,6 +105,12 @@ reference_only:
     reuse_policy: pinned T1 retargeting source; use only with the audited local patch
     required_patch: training/patches/holosoma-t1-retargeting.patch
     patch_reason: fix LAFAN joint order, robot-only qpos overwrite, and MuJoCo 3.12 hinge Jacobians
+  - name: General Motion Retargeting
+    repository: https://github.com/YanjieZe/GMR
+    commit: bb1bbe40774794fceb2a7c579a3464a28e68c844
+    license: MIT
+    reuse_policy: candidate replacement retargeter and feasibility comparison; do not redistribute LAFAN-derived outputs
+    implementation_gap: direct LAFAN BVH config is present for Booster T1 29-DoF, while the RCSS-compatible 23-DoF T1 is configured for SMPL-X rather than LAFAN BVH
   - name: RoboNaldo training
     repository: https://github.com/lu-yidan/RoboNaldo-YD
     commit: dd924110393be512986953b195e3f352300f6c08

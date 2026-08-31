@@ -35,6 +35,23 @@ optimizer_runs:
     all_reported_values_finite: true
     checkpoint_written: true
     decision: optimizer_path_pass_trackability_gate_fail
+  - name: zero_head_formal_single_seed
+    local_run: /home/win98/rl_runs/run-reference-residual-v3-formal-s113-20260831-1235
+    git_revision: b73b09e042f721685187435d12315de70a46d959
+    profile: reference_residual_v2
+    seed: 113
+    environment_steps: 2359296
+    initial_mean_episode_length_steps: 20.9375
+    best_checkpoint_steps: 1966080
+    best_mean_episode_length_steps: 22.53125
+    final_mean_episode_length_steps: 19.96875
+    final_kl: 0.002582741202786565
+    final_policy_mean_min: -0.071266308426857
+    final_policy_mean_max: 0.043625686317682266
+    final_policy_std_mean: 0.09982844442129135
+    final_fall_episode_rate: 1.0
+    all_checkpoints_committed: true
+    decision: reject_no_sustained_learning_improvement
 
 zero_residual_open_loop:
   implementation: warp
@@ -57,10 +74,35 @@ zero_residual_open_loop:
     alive_weighted_forward_speed_m_s: 2.6419913749876187
     proxy_flight_episode_rate: 0.9375
 
+inverse_dynamics_diagnostic:
+  report: /tmp/reference-dynamics-formal.json
+  local_target_sidecar: /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v3_inverse_target_v1.npz
+  cpu_engine: MuJoCo 3.12.0
+  episodes: 32
+  maximum_steps: 200
+  source_speed_scale: 1.0
+  phase_lead_scan_frames: [-2, -1, 0, 1, 2, 3]
+  baseline_mean_episode_length_steps: 20.375
+  best_phase_lead_frames: 3
+  best_phase_lead_mean_episode_length_steps: 21.5625
+  full_inverse_blend_mean_episode_length_steps: 22.84375
+  full_inverse_blend_maximum_episode_length_steps: 63
+  full_episode_rate: 0.0
+  joint_target_residual_mean_abs_rad: 0.06139669195047112
+  joint_target_residual_p90_abs_rad: 0.15
+  residual_saturation_rate: 0.24296675191815856
+  joint_torque_p90_abs_nm: 21.76082543178174
+  floating_base_force_p90_abs_n: 593.2889077673884
+  floating_base_force_max_abs_n: 1536.9063996620787
+  decision: diagnostic_only_reference_not_dynamically_feasible
+
 interpretation:
   zero_action_decoder_invariant_passed: true
   optimizer_checkpoint_integration_passed: true
   reference_open_loop_trackability_passed: false
   speed_scaling_is_primary_failure_cause: false
+  phase_lag_is_primary_failure_cause: false
+  inverse_dynamics_feedforward_passed: false
+  low_noise_single_epoch_ppo_passed: false
   release_candidate_available: false
-  next_stage: multi_epoch_residual_learning_then_exact_cpu_gate
+  next_stage: high_exploration_multi_epoch_ablation_then_failure_phase_sampling_or_new_retarget

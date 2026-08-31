@@ -351,3 +351,30 @@ completed an episode. Time scaling is therefore not the primary failure;
 the kinematic reference needs learned feedback/inverse-dynamics correction.
 The locked results are in
 `training/locks/reference_residual_baseline_2026_08_31.yaml`.
+
+The full seed-113 v2 run then trained for 2,359,296 environment steps. Its
+deterministic evaluation trajectory was 20.94 steps initially, 18.97, 19.62,
+19.19, 18.31, a temporary 22.53 at checkpoint 1,966,080, and 19.97 finally.
+Every final evaluation episode fell. KL remained controlled and ended at
+0.00258, while the deterministic mean stayed within normalized action bounds
+[-0.0713, 0.0436]. The optimizer is functioning, but this low-noise one-pass
+profile produced no sustained learning improvement and is rejected.
+
+An exact CPU diagnostic next separated PD phase lag from dynamic feasibility.
+Across 32 uniformly spaced start phases at the source cadence, the raw
+reference survived 20.38 steps on average. Scanning target leads from -2 to +3
+frames peaked at only 21.56 steps. A MuJoCo inverse-dynamics target raised the
+mean to 22.84 and the maximum to 63, but still completed zero 200-step
+episodes. Its bounded target correction had mean absolute size 0.0614 rad,
+p90 at the 0.15 rad limit and 24.3% saturation. More decisively, the prescribed
+floating-base trajectory required p90 593 N and a maximum 1537 N of unavailable
+generalized force. The inverse target is retained as a local diagnostic
+sidecar, not promoted into the policy contract.
+
+Inspection of the pinned official BeyondMimic source identified a controlled
+optimizer ablation that the local v2 run has not yet tested: five PPO passes,
+larger exploration and adaptive KL, while keeping the deterministic actor mean
+exactly zero. `reference_residual_v3` implements the first two changes with
+initial standard deviation 0.5 (about 0.075 rad before clipping), five passes,
+`1e-4` learning rate and desired KL 0.01. Failure-phase sampling remains a
+separate next ablation so its effect can be measured rather than bundled.

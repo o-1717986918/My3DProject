@@ -210,6 +210,34 @@ PROFILES = {
         init_noise_std=0.1,
         zero_mean_init=True,
     ),
+    # The v2 run proved that a 0.1 standard deviation and one PPO pass keep KL
+    # controlled, but they did not explore corrections as large as the exact
+    # MuJoCo inverse-dynamics diagnostic requires.  This ablation retains the
+    # exact zero deterministic mean while increasing exploration to 0.5,
+    # matching the official BeyondMimic five-epoch update pattern and using a
+    # wider adaptive trust region.  It is an experiment profile, not a release
+    # default; v2 remains immutable for reproduction.
+    "reference_residual_v3": PpoProfile(
+        name="reference_residual_v3",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=5,
+        discounting=0.99,
+        entropy_cost=5.0e-3,
+        learning_rate=1.0e-4,
+        normalize_observations=True,
+        adaptive_kl=True,
+        policy_contract="run_policy_v3",
+        desired_kl=0.01,
+        learning_rate_min=1.0e-5,
+        learning_rate_max=3.0e-4,
+        init_noise_std=0.5,
+        zero_mean_init=True,
+    ),
 }
 
 

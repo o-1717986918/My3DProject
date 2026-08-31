@@ -69,6 +69,7 @@ Applicability is evaluated independently:
 | MuJoCo Playground current T1 joystick task | A | T1 / MJWarp and MuJoCo | experimental ONNX policy | Apache-2.0 | **Direct baseline only.** Replayed locally; it is stable walking, not running. Adopt observation, contact and testing patterns, not the policy as a run teacher. |
 | Booster Gym | A | T1 / Isaac Gym, MuJoCo deployment | lower-body checkpoint | Apache-2.0 | **Direct baseline only.** Useful for T1 geometry and sim-to-sim checks; local audit found no sustained flight. |
 | Holosoma | A | T1 / MJWarp | retargeting and tracking code | Apache-2.0 | **Adopt.** Remains the best open T1 retargeter. Keep the pinned project patch and local-only LAFAN-derived data. |
+| General Motion Retargeting (GMR) | B | T1 / MuJoCo | official retargeter and T1 assets | MIT | **Run as the next reference ablation.** The paper and implementation explicitly optimise retargeting for downstream tracking. The current checkout directly maps LAFAN BVH to T1 29-DoF, but its RCSS-compatible T1 23-DoF path expects SMPL-X, so a reviewed input/config bridge is still required. |
 | Chasing Autonomy / `robot_rl` | B | G1 / Isaac Lab | running configs, library consumer, policies and trajectory files | repository has no top-level LICENSE; metadata says MIT while several files say all rights reserved; trajectory repository has no declared license | **Adapt method only.** Do not copy code or distribute trajectories. The whole-body multiple-shooting generator described in the paper was not found in the repository; the CasADi trajectory optimiser present there is navigation MPC. |
 | FC Portugal running task | B | NAO / SimSpark RoboCup 3D | complete training task | GPL-3.0 | **High-value method reference.** Its analytic step generator plus learned residual is the closest competition precedent. Reimplement the pattern independently to preserve project licensing. |
 | RuN | C | G1 / Isaac Gym | no official code located | paper license only | **Method corroboration.** Frozen conditional motion generator plus residual policy supports the selected architecture, but training a generator is deferred. |
@@ -165,6 +166,14 @@ bins, maintain an exponential moving average of failure frequency, smooth it
 across nearby earlier bins, mix it with a uniform distribution, and sample
 resets from the resulting distribution. This targets failed take-off and
 landing phases without permanently forgetting the rest of the cycle.
+
+The pinned official BeyondMimic implementation confirms the quantitative
+training gap in the first local residual experiment: it uses 4096 environments,
+24 rollout steps, five PPO epochs, an initial action standard deviation of 1.0,
+and adaptive failure-bin sampling. The local v2 residual experiment used only
+64 environments, one PPO epoch and standard deviation 0.1. A controlled
+high-exploration/multi-epoch ablation is therefore required before concluding
+that residual PPO itself is ineffective.
 
 ### 4. Symmetry during training
 
@@ -273,9 +282,10 @@ select a checkpoint from training reward alone.
 - [RSL-RL](https://github.com/leggedrobotics/rsl_rl)
 - [MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground)
 - [Holosoma](https://github.com/amazon-far/holosoma)
+- [GMR](https://github.com/YanjieZe/GMR) and
+  [Retargeting Matters](https://arxiv.org/abs/2510.02252)
 - [Daffan humanoid striker](https://arxiv.org/abs/2512.06571)
 - [DribbleMaster](https://arxiv.org/abs/2505.12679)
 - [SoccerDiffusion](https://arxiv.org/abs/2504.20808)
 - [MuJoCo MJX documentation](https://mujoco.readthedocs.io/en/stable/mjx.html)
   and [MuJoCo Warp documentation](https://mujoco.readthedocs.io/en/stable/mjwarp/)
-

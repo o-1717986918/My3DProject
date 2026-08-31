@@ -242,6 +242,37 @@ def test_reference_residual_profile_starts_at_zero_with_low_noise():
     np.testing.assert_allclose(standard_deviation, 0.1)
 
 
+def test_reference_residual_exploration_profile_keeps_zero_mean():
+    profile = get_ppo_profile("reference_residual_v3")
+    sizes = {"state": (80,), "privileged_state": (86,)}
+    networks = profile.network_factory()(
+        sizes,
+        23,
+        preprocess_observations_fn=brax_types.identity_observation_preprocessor,
+    )
+    params = networks.policy_network.init(jax.random.PRNGKey(23))
+    spec = {
+        key: jax.ShapeDtypeStruct(shape, jax.numpy.float32)
+        for key, shape in sizes.items()
+    }
+    normalizer = running_statistics.init_state(spec)
+    mean, standard_deviation = networks.policy_network.apply(
+        normalizer,
+        params,
+        {
+            "state": jax.numpy.zeros((2, 80)),
+            "privileged_state": jax.numpy.zeros((2, 86)),
+        },
+    )
+
+    assert profile.zero_mean_init
+    assert profile.num_updates_per_batch == 5
+    assert profile.normalize_observations
+    assert profile.desired_kl == 0.01
+    np.testing.assert_allclose(mean, 0.0)
+    np.testing.assert_allclose(standard_deviation, 0.5)
+
+
 def test_motion_reset_initializes_complete_reference_state(tmp_path):
     frames = 4
     root_position = np.zeros((frames, 3), dtype=np.float32)
