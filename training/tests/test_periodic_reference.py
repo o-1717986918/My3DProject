@@ -5,6 +5,7 @@ from my3d_rl.periodic_reference import (
     circular_gradient,
     mirror_root_quaternion_xyzw,
     project_half_cycle,
+    scale_root_yaw_deviation,
 )
 from scipy.spatial.transform import Rotation
 
@@ -58,6 +59,18 @@ def test_root_heading_is_canonicalized_to_world_forward():
 
     assert abs(center) < 1.0e-12
     np.testing.assert_allclose(canonical_yaw, [-0.1, 0.0, 0.1], atol=1.0e-12)
+
+
+def test_root_yaw_deviation_scaling_preserves_centre_and_pitch_roll():
+    euler = np.array([[0.2, 0.1, -0.05], [0.4, -0.1, 0.08]])
+    source = Rotation.from_euler("zyx", euler).as_quat()
+
+    scaled = Rotation.from_quat(scale_root_yaw_deviation(source, 0.25)).as_euler(
+        "zyx"
+    )
+
+    np.testing.assert_allclose(scaled[:, 0], [0.275, 0.325], atol=1.0e-12)
+    np.testing.assert_allclose(scaled[:, 1:], euler[:, 1:], atol=1.0e-12)
 
 
 def test_circular_gradient_preserves_constant_cycle_progress():

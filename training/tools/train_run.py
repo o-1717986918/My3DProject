@@ -294,6 +294,11 @@ def main() -> None:
     parser.add_argument("--bootstrap-onnx", type=Path)
     parser.add_argument("--motion-reference", type=Path)
     parser.add_argument("--reference-phase-weights", type=Path)
+    parser.add_argument(
+        "--fixed-vx",
+        type=float,
+        help="override reference_residual forward speed for a staged curriculum",
+    )
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
 
@@ -306,6 +311,12 @@ def main() -> None:
     contract = load_policy_contract(contract_path)
     if args.restore_checkpoint and args.bootstrap_onnx:
         raise ValueError("restore-checkpoint and bootstrap-onnx are mutually exclusive")
+    if args.fixed_vx is not None and (
+        args.stage != "reference_residual" or not 0.2 <= args.fixed_vx <= 3.0
+    ):
+        raise ValueError(
+            "fixed-vx must be in [0.2, 3.0] and requires reference_residual"
+        )
     if args.bootstrap_onnx and profile.factory_kind != "legacy_teacher":
         raise ValueError("bootstrap-onnx requires the legacy_warmstart_v1 profile")
     if (
@@ -370,6 +381,8 @@ def main() -> None:
         "action_clip": max(abs(value) for value in contract.action_clip),
         **STAGES[args.stage],
     }
+    if args.fixed_vx is not None:
+        stage_overrides["fixed_command"] = [args.fixed_vx, 0.0, 0.0]
     if phase_sampling is not None:
         stage_overrides["reference_phase_sampling_weights"] = phase_sampling[
             "weights"

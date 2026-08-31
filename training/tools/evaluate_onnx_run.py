@@ -13,12 +13,14 @@ import numpy as np
 import onnxruntime as ort
 
 from my3d_rl.contract import load_policy_contract
+from my3d_rl.motion_reference import validate_motion_reference
 from my3d_rl.policy_symmetry import (
     mirror_run_action,
     mirror_run_observation,
     training_mirror_map,
 )
 from my3d_rl.rcss_scene import build_single_t1_soccer_model
+from my3d_rl.reference_dynamics import circular_interpolate
 from my3d_rl.run_env import NOMINAL_TRAINING_POSE, TRAIN_TO_SERVER_SIGN
 
 
@@ -38,6 +40,31 @@ def _sha256(path: Path) -> str:
 
 def _percentile(values: np.ndarray, q: float) -> float:
     return float(np.percentile(values, q))
+
+
+def _reference_quaternion(
+    reference_quaternion_wxyz: np.ndarray, phase: float
+) -> np.ndarray:
+    """Match DirectionalRun's shortest-path normalized linear interpolation."""
+    frame = (phase % 1.0) * reference_quaternion_wxyz.shape[0]
+    lower = int(np.floor(frame)) % reference_quaternion_wxyz.shape[0]
+    upper = (lower + 1) % reference_quaternion_wxyz.shape[0]
+    fraction = frame - np.floor(frame)
+    upper_value = reference_quaternion_wxyz[upper]
+    if np.dot(reference_quaternion_wxyz[lower], upper_value) < 0.0:
+        upper_value = -upper_value
+    result = (
+        (1.0 - fraction) * reference_quaternion_wxyz[lower]
+        + fraction * upper_value
+    )
+    return result / max(float(np.linalg.norm(result)), 1.0e-8)
+
+
+def _yaw_rotate(vector: np.ndarray, yaw: float) -> np.ndarray:
+    c, s = np.cos(yaw), np.sin(yaw)
+    return np.array(
+        [c * vector[0] - s * vector[1], s * vector[0] + c * vector[1], vector[2]]
+    )
 
 
 def _has_contact(data: mujoco.MjData, geom_a: int, geom_b: int) -> bool:
@@ -78,6 +105,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--contract", type=Path)
+    parser.add_argument(
+        "--motion-reference",
+        type=Path,
+        help="required by motion-reference residual contracts",
+    )
     parser.add_argument("--episodes", type=int, default=64)
     parser.add_argument("--seed", type=int, default=4501)
     parser.add_argument("--vx", type=float, default=1.5)
@@ -123,6 +155,59 @@ def main() -> None:
         PHASE_CONTRACT if actor_size == 80 else DEFAULT_CONTRACT
     )
     contract = load_policy_contract(contract_path)
+    reference_centered = (
+        contract.control_mode == "motion_reference_residual_joint_position"
+    )
+    if reference_centered and args.motion_reference is None:
+        raise ValueError("reference-centred policy requires --motion-reference")
+    if not reference_centered and args.motion_reference is not None:
+        raise ValueError(
+            "--motion-reference is only valid for reference-centred policy"
+        )
+    reference_validation = None
+    reference: dict[str, np.ndarray] | None = None
+    reference_nominal_frequency = None
+    reference_forward_speed = None
+    gait_frequency = args.gait_frequency
+    reference_velocity_scale = 1.0
+    if args.motion_reference is not None:
+        reference_validation = validate_motion_reference(args.motion_reference)
+        if not reference_validation["passed"]:
+            raise ValueError(
+                "motion reference validation failed: "
+                + "; ".join(reference_validation["errors"])
+            )
+        if (
+            contract.reference_sha256 is not None
+            and reference_validation["sha256"] != contract.reference_sha256
+        ):
+            raise ValueError("motion reference SHA-256 differs from policy contract")
+        with np.load(args.motion_reference, allow_pickle=False) as archive:
+            reference = {
+                name: np.asarray(archive[name])
+                for name in (
+                    "root_position",
+                    "root_quaternion_xyzw",
+                    "root_linear_velocity",
+                    "root_angular_velocity",
+                    "joint_position",
+                    "joint_velocity",
+                    "foot_contact",
+                )
+            }
+        frame_count = reference["joint_position"].shape[0]
+        reference_nominal_frequency = contract.frequency_hz / frame_count
+        reference_forward_speed = float(
+            np.mean(reference["root_linear_velocity"][:, 0])
+        )
+        if reference_forward_speed <= 0.0:
+            raise ValueError("reference must have positive mean forward velocity")
+        gait_frequency = (
+            reference_nominal_frequency * abs(args.vx) / reference_forward_speed
+            if np.linalg.norm([args.vx, args.vy]) > 1.0e-4
+            else 0.0
+        )
+        reference_velocity_scale = gait_frequency / reference_nominal_frequency
     mirror_source, mirror_factor = training_mirror_map(
         contract.joint_order, TRAIN_TO_SERVER_SIGN
     )
@@ -172,10 +257,12 @@ def main() -> None:
     nominal = NOMINAL_TRAINING_POSE.astype(np.float64)
     sign = TRAIN_TO_SERVER_SIGN.astype(np.float64)
     nominal_physical = np.clip(nominal * sign, lowers, uppers)
-    model.actuator_gainprm[pos_actuator, 0] = 25.0
-    model.actuator_biasprm[pos_actuator, 1] = -25.0
-    model.actuator_gainprm[vel_actuator, 0] = 0.6
-    model.actuator_biasprm[vel_actuator, 2] = -0.6
+    if contract.kp is None or contract.kd is None:
+        raise ValueError("run policy contract must declare PD gains")
+    model.actuator_gainprm[pos_actuator, 0] = contract.kp
+    model.actuator_biasprm[pos_actuator, 1] = -contract.kp
+    model.actuator_gainprm[vel_actuator, 0] = contract.kd
+    model.actuator_biasprm[vel_actuator, 2] = -contract.kd
 
     rng = np.random.default_rng(args.seed)
     command = np.array([args.vx, args.vy, args.yaw_rate], dtype=np.float32)
@@ -184,7 +271,9 @@ def main() -> None:
     forward_rmses: list[float] = []
     lateral_drifts: list[float] = []
     flight_phase: list[bool] = []
+    flight_phase_anytime: list[bool] = []
     max_flight_steps: list[int] = []
+    survived_control_steps: list[int] = []
     invalid_episodes = 0
     proxy_true_positive = 0
     proxy_true_negative = 0
@@ -197,27 +286,78 @@ def main() -> None:
 
     for _ in range(args.episodes):
         mujoco.mj_resetData(model, data)
-        joint_noise = rng.uniform(-0.02, 0.02, contract.action_size)
-        data.qpos[joint_qpos] = np.clip(nominal_physical + joint_noise, lowers, uppers)
-        yaw = rng.uniform(-0.05, 0.05)
-        data.qpos[root_qpos + 3 : root_qpos + 7] = [
-            np.cos(0.5 * yaw),
-            0.0,
-            0.0,
-            np.sin(0.5 * yaw),
-        ]
-        data.qvel[root_dof : root_dof + 6] = rng.uniform(-0.03, 0.03, 6)
+        gait_phase = float(rng.uniform())
+        joint_noise_limit = 0.005 if reference_centered else 0.02
+        root_velocity_noise_limit = 0.01 if reference_centered else 0.03
+        yaw_limit = 0.02 if reference_centered else 0.05
+        joint_noise = rng.uniform(
+            -joint_noise_limit, joint_noise_limit, contract.action_size
+        )
+        yaw = rng.uniform(-yaw_limit, yaw_limit)
+        if reference_centered:
+            assert reference is not None
+            reference_position_physical = circular_interpolate(
+                reference["joint_position"], gait_phase
+            )
+            reference_velocity_physical = (
+                reference_velocity_scale
+                * circular_interpolate(reference["joint_velocity"], gait_phase)
+            )
+            reference_root_position = circular_interpolate(
+                reference["root_position"], gait_phase
+            )
+            reference_root_quaternion = _reference_quaternion(
+                reference["root_quaternion_xyzw"][:, [3, 0, 1, 2]], gait_phase
+            )
+            yaw_cos, yaw_sin = np.cos(0.5 * yaw), np.sin(0.5 * yaw)
+            reference_w, reference_x, reference_y, reference_z = (
+                reference_root_quaternion
+            )
+            data.qpos[root_qpos + 2] = reference_root_position[2]
+            data.qpos[root_qpos + 3 : root_qpos + 7] = [
+                yaw_cos * reference_w - yaw_sin * reference_z,
+                yaw_cos * reference_x - yaw_sin * reference_y,
+                yaw_cos * reference_y + yaw_sin * reference_x,
+                yaw_cos * reference_z + yaw_sin * reference_w,
+            ]
+            root_linear_velocity = reference_velocity_scale * circular_interpolate(
+                reference["root_linear_velocity"], gait_phase
+            )
+            root_angular_velocity = reference_velocity_scale * circular_interpolate(
+                reference["root_angular_velocity"], gait_phase
+            )
+            data.qvel[root_dof : root_dof + 3] = _yaw_rotate(
+                root_linear_velocity, yaw
+            )
+            data.qvel[root_dof + 3 : root_dof + 6] = _yaw_rotate(
+                root_angular_velocity, yaw
+            )
+            data.qvel[joint_dof] = reference_velocity_physical
+            initial_physical = reference_position_physical
+        else:
+            data.qpos[root_qpos + 3 : root_qpos + 7] = [
+                np.cos(0.5 * yaw),
+                0.0,
+                0.0,
+                np.sin(0.5 * yaw),
+            ]
+            initial_physical = nominal_physical
+        data.qpos[joint_qpos] = np.clip(
+            initial_physical + joint_noise, lowers, uppers
+        )
+        data.qvel[root_dof : root_dof + 6] += rng.uniform(
+            -root_velocity_noise_limit, root_velocity_noise_limit, 6
+        )
         data.qpos[ball_joint.qposadr[0] : ball_joint.qposadr[0] + 3] = [
             10.0,
             8.0,
             0.11,
         ]
-        data.ctrl[pos_actuator] = nominal_physical
+        data.ctrl[pos_actuator] = initial_physical
         mujoco.mj_forward(model, data)
 
         initial_xy = data.qpos[root_qpos : root_qpos + 2].copy()
         previous_action = np.zeros(contract.action_size, dtype=np.float32)
-        gait_phase = float(rng.uniform())
         forward_velocity: list[float] = []
         airborne_substeps: list[bool] = []
         fell = False
@@ -226,10 +366,23 @@ def main() -> None:
         for step in range(episode_steps):
             joint_position_training = data.qpos[joint_qpos] * sign
             joint_velocity_training = data.qvel[joint_dof] * sign
+            if reference_centered:
+                assert reference is not None
+                reference_position_training = circular_interpolate(
+                    reference["joint_position"], gait_phase
+                ) * sign
+                reference_velocity_training = (
+                    reference_velocity_scale
+                    * circular_interpolate(reference["joint_velocity"], gait_phase)
+                    * sign
+                )
+            else:
+                reference_position_training = nominal
+                reference_velocity_training = np.zeros(contract.action_size)
             joint_triplets = np.stack(
                 [
-                    (joint_position_training - nominal) / 4.6,
-                    joint_velocity_training / 110.0,
+                    (joint_position_training - reference_position_training) / 4.6,
+                    (joint_velocity_training - reference_velocity_training) / 110.0,
                     previous_action / 10.0,
                 ],
                 axis=1,
@@ -246,7 +399,7 @@ def main() -> None:
                 ]
             ).astype(np.float32)
             if actor_size == 80:
-                moving = float(np.linalg.norm(command[:2]) > 1.0e-4)
+                moving = float(gait_frequency > 1.0e-8)
                 angle = 2.0 * np.pi * gait_phase
                 observation = np.concatenate(
                     [
@@ -271,13 +424,17 @@ def main() -> None:
                 )
             action = np.clip(
                 np.nan_to_num(action, nan=0.0, posinf=10.0, neginf=-10.0),
-                -10.0,
-                10.0,
+                contract.action_clip[0],
+                contract.action_clip[1],
             )
-            targets = np.clip((nominal + action_scale * action) * sign, lowers, uppers)
+            targets = np.clip(
+                (reference_position_training + action_scale * action) * sign,
+                lowers,
+                uppers,
+            )
             data.ctrl[pos_actuator] = targets
             previous_action = action.astype(np.float32)
-            gait_phase = (gait_phase + 0.02 * args.gait_frequency) % 1.0
+            gait_phase = (gait_phase + 0.02 * gait_frequency) % 1.0
 
             for _ in range(4):
                 mujoco.mj_step(model, data)
@@ -334,6 +491,7 @@ def main() -> None:
         lateral = -s0 * delta_world[0] + c0 * delta_world[1]
         airborne_array = np.asarray(airborne_substeps[warmup_steps * 4 :], dtype=bool)
         longest_flight = _max_consecutive(airborne_array)
+        longest_flight_anytime = _max_consecutive(np.asarray(airborne_substeps))
 
         completed.append(
             not fell and not invalid and len(forward_velocity) == episode_steps
@@ -343,7 +501,9 @@ def main() -> None:
         lateral_drifts.append(abs(float(lateral)))
         # Two consecutive 5 ms physics frames reject one-frame contact noise.
         flight_phase.append(longest_flight >= 2)
+        flight_phase_anytime.append(longest_flight_anytime >= 2)
         max_flight_steps.append(longest_flight)
+        survived_control_steps.append(len(forward_velocity))
         invalid_episodes += int(invalid)
 
     speeds = np.asarray(mean_forward_speeds)
@@ -364,7 +524,17 @@ def main() -> None:
         "action_scale_source": (
             "policy_contract" if args.action_scale is None else "cli_override"
         ),
-        "gait_frequency_hz": (args.gait_frequency if actor_size == 80 else None),
+        "pd_gains": {"kp": contract.kp, "kd": contract.kd},
+        "gait_frequency_hz": (gait_frequency if actor_size == 80 else None),
+        "gait_frequency_source": (
+            "speed_scaled_motion_reference" if reference_centered else "cli"
+        ),
+        "motion_reference": reference_validation,
+        "reference_nominal_frequency_hz": reference_nominal_frequency,
+        "reference_forward_speed_m_s": reference_forward_speed,
+        "reference_velocity_scale": (
+            reference_velocity_scale if reference_centered else None
+        ),
         "symmetry_ensemble": args.symmetry_ensemble,
         "duration_seconds": 10.0,
         "warmup_seconds": 2.0,
@@ -384,6 +554,21 @@ def main() -> None:
             "p90_m": _percentile(drifts, 90),
         },
         "flight_phase_episode_rate": flight_rate,
+        "flight_phase_anytime_episode_rate": float(np.mean(flight_phase_anytime)),
+        "survival": {
+            "median_control_steps": _percentile(
+                np.asarray(survived_control_steps), 50
+            ),
+            "p10_control_steps": _percentile(
+                np.asarray(survived_control_steps), 10
+            ),
+            "p90_control_steps": _percentile(
+                np.asarray(survived_control_steps), 90
+            ),
+            "maximum_control_steps": int(max(survived_control_steps)),
+            "median_seconds": 0.02
+            * _percentile(np.asarray(survived_control_steps), 50),
+        },
         "max_flight_duration": {
             "median_seconds": _percentile(np.asarray(max_flight_steps) * 0.005, 50),
             "p90_seconds": _percentile(np.asarray(max_flight_steps) * 0.005, 90),

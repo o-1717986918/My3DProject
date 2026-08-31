@@ -19,7 +19,9 @@ def main() -> None:
     parser.add_argument("--impl", choices=("jax", "warp"), default="jax")
     parser.add_argument("--num-envs", type=int, default=16)
     parser.add_argument("--steps", type=int, default=2)
-    parser.add_argument("--contract-version", choices=("v1", "v2", "v3"), default="v1")
+    parser.add_argument(
+        "--contract-version", choices=("v1", "v2", "v3", "v4"), default="v1"
+    )
     parser.add_argument("--motion-reference", type=Path)
     args = parser.parse_args()
 

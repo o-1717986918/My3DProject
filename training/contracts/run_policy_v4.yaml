@@ -1,0 +1,135 @@
+schema_version: 4
+policy_name: run_policy_v4
+robot: Booster T1
+experimental: true
+control:
+  frequency_hz: 50
+  mode: motion_reference_residual_joint_position
+  action_size: 23
+  action_clip: [-1.0, 1.0]
+  action_scale: 0.15
+  kp: 50.0
+  kd: 1.2
+  units: normalized_residual
+
+joint_order:
+  - AAHead_yaw
+  - Head_pitch
+  - Left_Shoulder_Pitch
+  - Left_Shoulder_Roll
+  - Left_Elbow_Pitch
+  - Left_Elbow_Yaw
+  - Right_Shoulder_Pitch
+  - Right_Shoulder_Roll
+  - Right_Elbow_Pitch
+  - Right_Elbow_Yaw
+  - Waist
+  - Left_Hip_Pitch
+  - Left_Hip_Roll
+  - Left_Hip_Yaw
+  - Left_Knee_Pitch
+  - Left_Ankle_Pitch
+  - Left_Ankle_Roll
+  - Right_Hip_Pitch
+  - Right_Hip_Roll
+  - Right_Hip_Yaw
+  - Right_Knee_Pitch
+  - Right_Ankle_Pitch
+  - Right_Ankle_Roll
+
+effector_order:
+  - he1
+  - he2
+  - lae1
+  - lae2
+  - lae3
+  - lae4
+  - rae1
+  - rae2
+  - rae3
+  - rae4
+  - te1
+  - lle1
+  - lle2
+  - lle3
+  - lle4
+  - lle5
+  - lle6
+  - rle1
+  - rle2
+  - rle3
+  - rle4
+  - rle5
+  - rle6
+
+actor_observation:
+  size: 80
+  frame: body_local_and_motion_reference
+  fields:
+    - {name: interleaved_reference_joint_position_error_velocity_error_previous_residual_action, size: 69, units: normalized}
+    - {name: body_angular_velocity, size: 3, units: normalized_rad_s}
+    - {name: velocity_command, size: 3, units: m_s_m_s_rad_s}
+    - {name: projected_gravity, size: 3, units: normalized}
+    - {name: gait_phase_cos_sin, size: 2, units: normalized}
+  normalization:
+    joint_position_error_divisor: 4.6
+    joint_velocity_error_divisor: 110.0
+    previous_residual_action_divisor: 10.0
+    body_angular_velocity_divisor: 50.0
+    observation_clip: [-10.0, 10.0]
+
+decoder:
+  formula: q_target_physical=clip((q_reference_training(phase)+0.15*clip(action,-1,1))*training_to_server_sign,joint_limits)
+  zero_action_invariant: q_target_physical=q_reference_physical_at_phase
+  phase_interpolation: circular_linear
+  reference_artifact:
+    path_policy: external_local_only_not_committed
+    format: motion_reference_v1_npz
+    expected_sha256: 02cd640919d81f0417246559bae491439e7afbfda614039d5ecae1293076c523
+    nominal_frame_count: 34
+    nominal_frequency_hz: 1.4705882352941178
+    nominal_forward_speed_m_s: 2.4514666103488847
+    source_pipeline: GMR_LAFAN1_to_Booster_T1_29DoF_then_exact_23DoF_mapping
+    speed_scaling: phase_frequency=nominal_frequency*abs(command_vx)/reference_forward_speed
+  training_to_server_sign:
+    - 1.0
+    - -1.0
+    - 1.0
+    - -1.0
+    - -1.0
+    - 1.0
+    - -1.0
+    - -1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - -1.0
+    - -1.0
+    - 1.0
+    - 1.0
+    - -1.0
+    - -1.0
+    - -1.0
+    - -1.0
+    - -1.0
+    - -1.0
+    - -1.0
+
+gait_phase:
+  encoding: [cos, sin]
+  location: actor_observation_tail
+  reset: uniform_0_1
+  frequency_source: speed_scaled_motion_reference
+  stationary_encoding: [0.0, 0.0]
+
+deployment:
+  format: ONNX_residual_actor_plus_external_reference_decoder
+  input_name: observations
+  output_name: residual_actions
+  input_shape: [1, 80]
+  output_shape: [1, 23]
+  requires_finite_output: true
+  reference_required: true
+  release_status: training_only
+  fallback: run_policy_v1_then_existing_stable_walk

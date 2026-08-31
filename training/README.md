@@ -8,10 +8,10 @@ policy for Booster T1. It is intentionally separate from the deterministic team
 decision maker. See [`../docs/rl-training-plan.md`](../docs/rl-training-plan.md)
 for the acceptance gates.
 
-Fast locomotion has two immutable contracts: `run_policy_v1` preserves the
-deployed 78-value actor; `run_policy_v2` appends cosine/sine gait phase for an
-80-value actor while keeping the same 23 actions. Neither experimental model
-is the competition default until every release gate passes.
+Fast locomotion keeps immutable `run_policy_v1`/`v2` compatibility contracts.
+The experimental v3/v4 contracts add reference-centred residual decoding;
+v4 binds the pinned GMR reference and `Kp=50`, `Kd=1.2`. All retain 23 actions,
+and none becomes the competition default until every release gate passes.
 
 ## Environments
 
@@ -30,6 +30,10 @@ Create the isolated CPU retargeting environment with:
 ```bash
 conda env create -f training/environment-motion.yml
 ```
+
+GMR is also installed only in `my3d-motion`. Keep its checkout outside the
+repository at the source-lock commit; generated LAFAN derivatives remain
+local-only under the dataset licence.
 
 Clone Holosoma at the source-lock commit, apply the project patch, then install
 `src/holosoma_retargeting` editable into `my3d-motion`; the environment file
@@ -74,6 +78,9 @@ PYTHONPATH=training python training/tools/smoke_run_env.py \
   /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v3.npz
 ```
 
+For the GMR v4 reference, pass `--contract-version v4` and the artifact whose
+SHA-256 is locked in `locks/gmr_reference_baseline_2026_08_31.yaml`.
+
 Before long training, replay an identical short action trace in CPU MuJoCo and
 MJX-Warp. The JSON includes every decoded target, reference phase, root/torso
 state, foot height, contact proxy, first threshold crossing and maximum error:
@@ -110,12 +117,45 @@ PYTHONPATH=training python training/tools/evaluate_onnx_run.py \
   --model /tmp/run-v2.onnx --episodes 64 --vx 1.5 --action-scale 0.5
 ```
 
+Standard normal-policy Brax and legacy checkpoints share the exporter.
+Reference-centred ONNX acceptance must supply both the exact contract and
+external reference:
+
+```bash
+PYTHONPATH=training python training/tools/export_run_onnx.py <checkpoint> \
+  --network-profile reference_residual_v4 --output /tmp/run-v4.onnx \
+  --parity-output /tmp/run-v4-parity.json
+PYTHONPATH=training python training/tools/evaluate_onnx_run.py \
+  --model /tmp/run-v4.onnx --contract training/contracts/run_policy_v4.yaml \
+  --motion-reference /home/win98/rl_datasets/motion_refs/t1_run2_subject4_gmr_periodic_v1.npz \
+  --episodes 64 --vx 1.8 --output /tmp/run-v4-cpu-acceptance.json
+```
+
+The exporter embeds a learned observation normalizer when the profile uses
+one and verifies CPU-to-CPU numerical parity. The evaluator reports survival
+quantiles and never treats post-fall states as valid tracking data.
+
 Before a retargeted running clip can enter motion-prior training, validate its
 50 Hz T1 arrays, provenance and aerial phase:
 
 ```bash
 PYTHONPATH=training python training/tools/validate_motion_reference.py \
   /path/to/t1-run-reference.npz --output /tmp/t1-run-reference-report.json
+```
+
+Import a GMR result with a pinned source checkout and explicit warm-up/source
+frame ranges:
+
+```bash
+PYTHONPATH=training python training/tools/import_gmr_motion.py \
+  /home/win98/rl_datasets/lafan1/raw_run/run2_subject4.bvh \
+  /home/win98/rl_datasets/motion_refs/t1-gmr-parent.npz \
+  --intermediate /home/win98/rl_datasets/motion_refs/t1-gmr-intermediate.npz \
+  --gmr-root /home/win98/reference_sources/GMR \
+  --gmr-revision bb1bbe40774794fceb2a7c579a3464a28e68c844 \
+  --retarget-start 1900 --frame-start 1940 --frame-end-inclusive 2030 \
+  --source-url https://github.com/ubisoft/ubisoft-laforge-animation-dataset \
+  --source-version LAFAN1-release --source-license CC-BY-NC-ND-4.0
 ```
 
 Project an accepted even-length clip onto the versioned half-cycle-symmetric,
@@ -158,6 +198,11 @@ The 196608-step form is one minimum optimizer epoch for this profile and is an
 optimizer/checkpoint integration test. The manifest records both requested
 and effective step counts. It is not a running result and cannot be selected
 for deployment.
+
+`--fixed-vx` is available only for the `reference_residual` stage and records
+the effective command in the manifest. The v5 low-speed curriculum is a
+rejected, reproducible ablation; do not continue it without a new reference or
+observation hypothesis.
 
 Measure the zero-residual reference before attributing a failure to PPO:
 
@@ -216,6 +261,7 @@ asset hashes, three-seed held-out evaluation, ONNX parity report, and
 RCSSServerMJ acceptance result are present. Runtime inference must retain the
 existing kick as a safe fallback.
 
-As of 2026-08-31 the motion pipeline, true-flight evaluator and periodic R1
-reference work, but no running checkpoint passes the CPU gate. The competition
-runtime therefore continues to use the original stable `walk.onnx`.
+As of 2026-08-31 the Holosoma and independent GMR motion pipelines, true-flight
+evaluator, periodic projector, standard/legacy ONNX exporter and exact CPU
+acceptance loop work. No running checkpoint passes the CPU completion gate, so
+the competition runtime continues to use the original stable `walk.onnx`.

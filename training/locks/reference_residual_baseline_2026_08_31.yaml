@@ -127,7 +127,17 @@ fixed_failure_phase_sampling:
   normalized_entropy: 0.9239968654846693
   maximum_probability: 0.08018322082931534
   maximum_probability_bins: [6, 23]
-  status: ready_for_resumed_ablation
+  resumed_run: /home/win98/rl_runs/run-reference-residual-v3-phase-s127-20260831-1310
+  resumed_from_checkpoint_steps: 1179648
+  resumed_environment_steps: 2359296
+  resumed_initial_mean_episode_length_steps: 20.9375
+  resumed_best_checkpoint_steps: 1179648
+  resumed_best_mean_episode_length_steps: 24.28125
+  resumed_final_mean_episode_length_steps: 21.25
+  resumed_final_kl: 0.00811849
+  resumed_final_action_acceleration_cost: 577.924
+  resumed_final_fall_episode_rate: 1.0
+  status: reject_no_improvement_over_uniform_sampling
 
 interpretation:
   zero_action_decoder_invariant_passed: true
@@ -138,5 +148,6 @@ interpretation:
   inverse_dynamics_feedforward_passed: false
   low_noise_single_epoch_ppo_passed: false
   high_exploration_multi_epoch_ppo_passed: false
+  fixed_failure_phase_sampling_passed: false
   release_candidate_available: false
-  next_stage: fixed_failure_phase_resume_ablation_then_new_gmr_retarget
+  next_stage: new_gmr_retarget_and_exact_rcss_open_loop_gate

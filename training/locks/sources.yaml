@@ -109,8 +109,8 @@ reference_only:
     repository: https://github.com/YanjieZe/GMR
     commit: bb1bbe40774794fceb2a7c579a3464a28e68c844
     license: MIT
-    reuse_policy: candidate replacement retargeter and feasibility comparison; do not redistribute LAFAN-derived outputs
-    implementation_gap: direct LAFAN BVH config is present for Booster T1 29-DoF, while the RCSS-compatible 23-DoF T1 is configured for SMPL-X rather than LAFAN BVH
+    reuse_policy: pinned retargeter with exact-name 29-DoF to competition 23-DoF mapping; do not redistribute LAFAN-derived outputs
+    local_integration: direct LAFAN BVH retarget to Booster T1 29-DoF, zero-fill two head joints, drop six wrist/hand joints, then exact RCSS joint-limit validation
   - name: RoboNaldo training
     repository: https://github.com/lu-yidan/RoboNaldo-YD
     commit: dd924110393be512986953b195e3f352300f6c08
@@ -136,6 +136,9 @@ motion_datasets:
     reuse_policy: local non-commercial research only; never commit or distribute adapted motion
 
 paper_only:
+  - name: ASAP Aligning Simulation and Real-World Physics for Learning Agile Humanoid Whole-Body Skills
+    identifier: arXiv:2502.01143
+    reuse_policy: two-stage dynamics-alignment reference; deferred while the current bottleneck remains inside one simulator
   - name: Chasing Autonomy
     identifier: arXiv:2603.25902
     reuse_policy: dynamically optimized periodic gait and CLF-guided tracking method reference

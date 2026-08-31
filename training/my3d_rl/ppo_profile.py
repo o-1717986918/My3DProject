@@ -238,6 +238,57 @@ PROFILES = {
         init_noise_std=0.5,
         zero_mean_init=True,
     ),
+    # GMR reference generation changes the pinned artifact, not the actor
+    # interface or optimizer hypothesis.  Keeping a separate profile prevents
+    # a v3 checkpoint from being resumed against the incompatible v4 decoder.
+    "reference_residual_v4": PpoProfile(
+        name="reference_residual_v4",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=5,
+        discounting=0.99,
+        entropy_cost=5.0e-3,
+        learning_rate=1.0e-4,
+        normalize_observations=True,
+        adaptive_kl=True,
+        policy_contract="run_policy_v4",
+        desired_kl=0.01,
+        learning_rate_min=1.0e-5,
+        learning_rate_max=3.0e-4,
+        init_noise_std=0.5,
+        zero_mean_init=True,
+    ),
+    # The fixed-command v4 run exposed two deployment hazards: its running
+    # normalizer assigned near-zero variance to command channels, and the
+    # five-pass/high-entropy update moved away from its best checkpoint late
+    # in training.  v5 keeps the explicit observation scales used by the
+    # runtime, starts with less exploratory noise, and uses a tighter trust
+    # region so checkpoints can transfer through a low-to-high-speed course.
+    "reference_curriculum_v5": PpoProfile(
+        name="reference_curriculum_v5",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=3,
+        discounting=0.99,
+        entropy_cost=1.0e-3,
+        learning_rate=5.0e-5,
+        normalize_observations=False,
+        adaptive_kl=True,
+        policy_contract="run_policy_v4",
+        desired_kl=0.005,
+        learning_rate_min=5.0e-6,
+        learning_rate_max=1.0e-4,
+        init_noise_std=0.3,
+        zero_mean_init=True,
+    ),
 }
 
 

@@ -1,0 +1,140 @@
+schema_version: 1
+recorded_at: 2026-08-31
+status: rejected_for_release
+
+source:
+  retargeter: General Motion Retargeting
+  repository: https://github.com/YanjieZe/GMR
+  commit: bb1bbe40774794fceb2a7c579a3464a28e68c844
+  license: MIT
+  input_dataset: LAFAN1
+  input_file: run2_subject4.bvh
+  input_sha256: cecbb82267dae06e4aabfaa761f7126b8bf384b38c159d92f9677b9c687100e7
+  input_license: CC-BY-NC-ND-4.0
+  redistribution: forbidden_local_research_artifact_only
+
+retargeting:
+  external_intermediate_sha256: e53f00ce825b723d9c7e8bf92df02df567356abdaa1ad7c53d607e5037a94b59
+  parent_reference_sha256: 4037557dff67839c6652b8987067bbfb991d8c01e8b13e703598613c747333d7
+  selected_source_frames_inclusive: [1940, 2030]
+  output_frequency_hz: 50
+  exact_name_mapping:
+    source_robot: booster_t1_29dof
+    competition_joint_count: 23
+    zero_filled: [AAHead_yaw, Head_pitch]
+    dropped_wrist_hand_joint_count: 6
+  joint_limit_clipping:
+    value_count: 44
+    maximum_abs_correction_rad: 0.1
+    mean_abs_correction_rad: 0.0016606435664670912
+  exact_rcss_replay:
+    non_foot_pitch_contact_frames: 0
+    minimum_contact_distance_m: -0.014
+
+periodic_reference:
+  external_path: /home/win98/rl_datasets/motion_refs/t1_run2_subject4_gmr_periodic_v1.npz
+  sha256: 02cd640919d81f0417246559bae491439e7afbfda614039d5ecae1293076c523
+  parent_frames_inclusive: [77, 110]
+  frame_count: 34
+  cycle_seconds: 0.68
+  cycle_displacement_m: 1.6669972950372418
+  source_body_forward_speed_m_s: 2.4514666103488847
+  validation_average_speed_m_s: 2.4754650592803955
+  contact_frames: {left: 13, right: 13}
+  longest_flight_frames: 4
+  maximum_root_yaw_deviation_rad: 0.13696905934167164
+  maximum_lateral_excursion_m: 0.04540308148520128
+  joint_wrap_step_rad: 0.18657850318704727
+  joint_velocity_wrap_rad_s: 4.891509583994774
+  root_velocity_wrap_m_s: 0.9063583399905206
+  stance_slip_p90_m_s: 0.7023685483892965
+  non_foot_pitch_contact_frames: 0
+  joint_limit_max_violation_rad: 0.0
+  passed_static_gates: true
+
+pd_gain_ablation_at_source_speed:
+  - {kp: 25.0, kd: 0.6, mean_survival_steps: 22.4706, joint_rmse_rad: 0.3117}
+  - {kp: 50.0, kd: 1.2, mean_survival_steps: 24.294, joint_rmse_rad: 0.2461}
+  - {kp: 100.0, kd: 2.5, mean_survival_steps: 23.794, joint_rmse_rad: 0.1859}
+  - {kp: 200.0, kd: 5.0, mean_survival_steps: 22.971, joint_rmse_rad: 0.1594}
+selected_pd: {kp: 50.0, kd: 1.2}
+
+zero_residual_warp_speed_scan:
+  episodes: 64
+  maximum_steps: 100
+  seed: 1901
+  rows:
+    - {command_m_s: 0.8, mean_steps: 36.5625, median_steps: 34.0, maximum_steps: 75, proxy_flight_episode_rate: 0.40625}
+    - {command_m_s: 1.2, mean_steps: 32.390625, median_steps: 32.0, maximum_steps: 60, proxy_flight_episode_rate: 0.390625}
+    - {command_m_s: 1.5, mean_steps: 28.828125, median_steps: 28.0, maximum_steps: 45, proxy_flight_episode_rate: 0.6875}
+    - {command_m_s: 1.8, mean_steps: 26.5, median_steps: 26.0, maximum_steps: 40, proxy_flight_episode_rate: 0.75}
+    - {command_m_s: 2.1, mean_steps: 24.921875, median_steps: 24.0, maximum_steps: 37, proxy_flight_episode_rate: 0.796875}
+
+v4_training:
+  run: /home/win98/rl_runs/run-reference-residual-v4-gmr-formal-s139
+  profile: reference_residual_v4
+  command_m_s: 1.8
+  environment_steps: 2359296
+  seed: 139
+  evaluation_curve_steps: [0, 393216, 786432, 1179648, 1572864, 1966080, 2359296]
+  evaluation_curve_episode_length: [26.484375, 27.046875, 26.34375, 28.703125, 27.359375, 26.296875, 27.40625]
+  best_checkpoint: 000001179648
+  final_kl: 0.014921975322067738
+  final_action_acceleration_cost: 18.759078979492188
+  all_evaluation_episodes_fell: true
+
+best_v4_onnx:
+  path: /home/win98/rl_runs/run-reference-residual-v4-gmr-formal-s139/exports/000001179648.onnx
+  sha256: a107ffe6591ab89ad23018a6a65396fd3d2c59cd31924585fe482cf0606f4fa7
+  export_parity:
+    comparison: JAX_CPU_vs_ONNX_Runtime_CPU
+    samples: 256
+    max_abs_error: 1.1920928955078125e-7
+    mean_abs_error: 5.761522814395903e-9
+    passed: true
+  exact_cpu_acceptance:
+    episodes: 64
+    seed: 4501
+    command_m_s: 1.8
+    completion_rate: 0.0
+    survival_steps: {p10: 20.0, median: 27.0, p90: 32.0, maximum: 40}
+    median_forward_speed_m_s: 1.7724517463557556
+    median_forward_rmse_m_s: 0.4607625394271583
+    median_absolute_lateral_drift_m: 0.15998853741520025
+    anytime_flight_episode_rate: 0.8125
+    post_warmup_flight_episode_rate: 0.0
+    candidate_gate_passed: false
+
+v5_curriculum_ablation:
+  profile: reference_curriculum_v5
+  rationale:
+    - disable running observation normalization so fixed command channels remain transferable
+    - reduce initial standard deviation from 0.5 to 0.3
+    - reduce PPO passes from 5 to 3 and tighten desired KL to 0.005
+  low_speed_smoke:
+    run: /home/win98/rl_runs/run-reference-curriculum-v5-vx08-smoke-s149
+    command_m_s: 0.8
+    curve_steps: [0, 196608, 393216]
+    curve_episode_length: [34.53125, 35.375, 35.265625]
+  low_speed_formal:
+    run: /home/win98/rl_runs/run-reference-curriculum-v5-vx08-formal-s151
+    restored_from: low_speed_smoke_000000196608
+    curve_steps: [0, 196608, 393216, 589824, 786432, 983040, 1179648]
+    curve_episode_length: [34.609375, 32.734375, 35.75, 34.796875, 34.734375, 34.28125, 34.84375]
+    best_episode_length: 35.75
+  medium_speed_transfer:
+    run: /home/win98/rl_runs/run-reference-curriculum-v5-vx12-smoke-s153
+    restored_from: low_speed_formal_000000393216
+    command_m_s: 1.2
+    curve_steps: [0, 196608, 393216]
+    curve_episode_length: [32.75, 32.78125, 32.671875]
+  conclusion: no_material_low_speed_improvement_and_no_positive_speed_transfer
+
+decision:
+  deploy_to_competition_runtime: false
+  keep_existing_stable_walk: true
+  closed_hypotheses:
+    - additional PPO tuning on the old Holosoma reference
+    - fixed failure-phase weighting on the old reference
+    - low_speed_to_medium_speed curriculum on this GMR periodic reference
+  next_research_gate: dynamically_feasible_reference_or_richer_whole_body_tracking_observation

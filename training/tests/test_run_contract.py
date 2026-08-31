@@ -18,6 +18,9 @@ from my3d_rl.run_env import (
 CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v1.yaml"
 PHASE_CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v2.yaml"
 REFERENCE_CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v3.yaml"
+GMR_REFERENCE_CONTRACT = (
+    Path(__file__).parents[1] / "contracts" / "run_policy_v4.yaml"
+)
 
 
 def _write_reference_residual_fixture(path: Path) -> None:
@@ -140,6 +143,22 @@ def test_reference_residual_contract_requires_external_motion(tmp_path):
     )
     with np.testing.assert_raises_regex(ValueError, "requires a motion reference"):
         DirectionalRun(contract=contract)
+
+
+def test_gmr_reference_contract_changes_only_the_pinned_reference() -> None:
+    previous = load_policy_contract(REFERENCE_CONTRACT)
+    gmr = load_policy_contract(GMR_REFERENCE_CONTRACT)
+
+    assert gmr.policy_name == "run_policy_v4"
+    assert gmr.reference_sha256 == (
+        "02cd640919d81f0417246559bae491439e7afbfda614039d5ecae1293076c523"
+    )
+    assert gmr.joint_order == previous.joint_order
+    assert gmr.observation_fields == previous.observation_fields
+    assert gmr.action_clip == previous.action_clip
+    assert gmr.action_scale == previous.action_scale
+    assert gmr.kp == 50.0
+    assert gmr.kd == 1.2
 
 
 def test_reference_residual_zero_action_reconstructs_phase_target(tmp_path):
@@ -293,6 +312,27 @@ def test_reference_residual_exploration_profile_keeps_zero_mean():
     assert profile.desired_kl == 0.01
     np.testing.assert_allclose(mean, 0.0)
     np.testing.assert_allclose(standard_deviation, 0.5)
+
+
+def test_gmr_reference_profile_uses_v4_contract() -> None:
+    profile = get_ppo_profile("reference_residual_v4")
+
+    assert profile.policy_contract == "run_policy_v4"
+    assert profile.zero_mean_init
+    assert profile.num_updates_per_batch == 5
+    assert profile.init_noise_std == 0.5
+
+
+def test_reference_curriculum_profile_is_transfer_safe() -> None:
+    profile = get_ppo_profile("reference_curriculum_v5")
+
+    assert profile.policy_contract == "run_policy_v4"
+    assert profile.zero_mean_init
+    assert not profile.normalize_observations
+    assert profile.num_updates_per_batch == 3
+    assert profile.init_noise_std == 0.3
+    assert profile.learning_rate_max == 1.0e-4
+    assert profile.desired_kl == 0.005
 
 
 def test_motion_reset_initializes_complete_reference_state(tmp_path):

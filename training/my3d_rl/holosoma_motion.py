@@ -223,6 +223,7 @@ def ground_reference_on_rcss(
     contract: PolicyContract,
     *,
     contact_penetration: float = 0.001,
+    maximum_penetration: float = 0.014,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Align stance frames to the exact RCSS T1 foot boxes and replay contacts."""
     result = np.asarray(qpos, dtype=np.float64).copy()
@@ -243,6 +244,11 @@ def ground_reference_on_rcss(
     result[:, 2] += offsets
 
     lowest_after, contacts_after, replay = replay_rcss_surface(result, contract)
+    safety_lift = np.maximum(0.0, -maximum_penetration - lowest_after.min(axis=1))
+    if np.any(safety_lift):
+        result[:, 2] += safety_lift
+        offsets += safety_lift
+        lowest_after, contacts_after, replay = replay_rcss_surface(result, contract)
     replay.update(
         {
             "contact_count_before": contacts_before.sum(axis=0).astype(int).tolist(),
@@ -250,6 +256,9 @@ def ground_reference_on_rcss(
             "ground_offset_min_m": float(offsets.min()),
             "ground_offset_max_m": float(offsets.max()),
             "ground_offset_max_step_m": float(np.abs(np.diff(offsets)).max()),
+            "penetration_safety_lift_frame_count": int(np.count_nonzero(safety_lift)),
+            "penetration_safety_lift_max_m": float(safety_lift.max()),
+            "maximum_allowed_penetration_m": maximum_penetration,
             "foot_lowest_min_m": lowest_after.min(axis=0).tolist(),
             "foot_lowest_max_m": lowest_after.max(axis=0).tolist(),
         }

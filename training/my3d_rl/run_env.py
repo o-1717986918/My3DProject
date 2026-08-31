@@ -165,6 +165,10 @@ class DirectionalRun(mjx_env.MjxEnv):
         config_overrides = dict(config_overrides or {})
         if "action_scale" not in config_overrides and self.contract.action_scale:
             config_overrides["action_scale"] = self.contract.action_scale
+        if "kp" not in config_overrides and self.contract.kp is not None:
+            config_overrides["kp"] = self.contract.kp
+        if "kd" not in config_overrides and self.contract.kd is not None:
+            config_overrides["kd"] = self.contract.kd
         super().__init__(config, config_overrides)
         self.prefix = prefix
         self._resource_root = resource_root

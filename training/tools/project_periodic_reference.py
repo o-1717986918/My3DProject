@@ -20,6 +20,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--frame-start", type=int, default=0)
+    parser.add_argument("--frame-end-inclusive", type=int)
     parser.add_argument(
         "--contract",
         type=Path,
@@ -28,6 +30,9 @@ def main() -> None:
     parser.add_argument("--source-half-weight", type=float, default=0.8)
     parser.add_argument("--smoothing-passes", type=int, default=4)
     parser.add_argument("--stance-correction-iterations", type=int, default=1)
+    parser.add_argument("--stance-smoothing-passes", type=int, default=1)
+    parser.add_argument("--root-yaw-scale", type=float, default=1.0)
+    parser.add_argument("--root-xy-smoothing-passes", type=int, default=0)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
 
@@ -52,18 +57,39 @@ def main() -> None:
         }
         metadata = json.loads(str(archive["metadata_json"].item()))
 
+    end = (
+        source["joint_position"].shape[0] - 1
+        if args.frame_end_inclusive is None
+        else args.frame_end_inclusive
+    )
+    if (
+        args.frame_start < 0
+        or end < args.frame_start
+        or end >= source["joint_position"].shape[0]
+    ):
+        raise ValueError(
+            f"invalid inclusive source frame range {args.frame_start}:{end}"
+        )
+    source = {
+        name: values[args.frame_start : end + 1] for name, values in source.items()
+    }
+
     arrays, projection = build_periodic_reference(
         source,
         load_policy_contract(args.contract),
         source_half_weight=args.source_half_weight,
         smoothing_passes=args.smoothing_passes,
         stance_correction_iterations=args.stance_correction_iterations,
+        stance_smoothing_passes=args.stance_smoothing_passes,
+        root_yaw_scale=args.root_yaw_scale,
+        root_xy_smoothing_passes=args.root_xy_smoothing_passes,
     )
     command = " ".join(shlex.quote(value) for value in sys.argv)
     metadata.update(
         {
             "parent_reference": str(args.input.resolve()),
             "parent_reference_sha256": sha256(args.input),
+            "parent_frame_range_inclusive": [args.frame_start, end],
             "conversion_command": command,
             "periodic_projection": projection,
             "rcss_replay": projection["rcss_replay"],

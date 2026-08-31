@@ -397,3 +397,82 @@ reference SHA and has SHA-256
 `6cfecc97b517f3df4d5baf3c9a4f6d357acf6994c939a3db4fa49a3ccdb63d51`.
 Training uses these weights, while held-out evaluation deliberately resets
 uniformly so earlier learning curves remain comparable.
+
+The resumed seed-127 curriculum run completed another 2,359,296 environment
+steps from the earlier 1,179,648-step checkpoint. Uniform held-out evaluation
+progressed from 20.94 to 20.88, 18.88, a temporary 24.28, 21.19, 19.69 and
+21.25 steps. Every final episode still fell; final KL was 0.00812 and action
+acceleration cost increased to 577.9. The best and final survival values do not
+improve on uniform phase sampling (24.44 and 21.06), so the fixed-bin
+curriculum is rejected for this reference. Together with the exact
+inverse-dynamics result, this closes further PPO tuning on the current
+kinematic cycle. The next artifact must be retargeted independently through
+the pinned GMR T1 route and pass exact RCSS open-loop dynamics before formal
+training.
+
+## GMR T1 reference, v4 deployment loop and v5 curriculum — 2026-08-31
+
+The independent replacement route is now implemented. Pinned GMR commit
+`bb1bbe4...` retargets LAFAN `run2_subject4.bvh` directly to its Booster T1
+29-DoF model. The importer maps joints by exact MuJoCo names into the 23-joint
+competition order, zero-fills the two head joints, drops six wrist/hand joints,
+clips only against the exact RCSS limits, carries source contact labels, and
+records source/retargeter licences and hashes. The selected local parent has
+SHA-256 `4037557d...`; 44 scalar values required clipping, with maximum 0.1 rad
+and mean 0.00166 rad correction. No LAFAN-derived NPZ is committed or
+redistributed.
+
+The accepted 34-frame periodic projection has SHA-256 `02cd6409...`, a 0.68 s
+cycle, 1.667 m forward displacement, 13 contact frames per foot and four
+aerial frames. It passes exact joint-limit/non-foot collision, bilateral
+symmetry, cyclic joint/root velocity, yaw, lateral excursion and stance-slip
+gates. The minimal root-XY smoothing that passes the cyclic velocity seam is
+three passes; this setting is recorded rather than silently increasing the
+filter. A PD ablation selected `Kp=50`, `Kd=1.2`: it raised mean source-speed
+open-loop survival from 22.47 to 24.29 steps, while larger gains reduced joint
+error but did not improve survival.
+
+The official Booster Gym audit explains why this ablation was warranted: its
+T1 locomotion configuration uses substantially stiffer leg gains, a 50 Hz
+policy, explicit action/velocity penalties and privileged base velocity for
+the critic. The official BeyondMimic implementation remains the reference for
+whole-body targets and adaptive phase sampling. ASAP is retained as a later
+sim-to-real alignment method, not applied now because the measured failure is
+within the same RCSS/MJWarp task rather than a simulator-to-hardware gap.
+
+`run_policy_v4` binds the new reference hash and selected gains. Its zero-action
+1.8 m/s MJWarp mean survival is 26.5 steps, materially above the old reference's
+approximately 20 steps. Formal seed-139 PPO trained for 2,359,296 environment
+steps and peaked at 28.70 steps at checkpoint 1,179,648; every evaluation
+episode still fell. The standard Brax checkpoint exposed and fixed two
+deployment-tool gaps: ONNX export now supports the nested standard MLP with
+Swish and observation normalization, and the CPU evaluator now reproduces
+reference-centred phase/velocity initialization, contract action clipping and
+contract PD gains. Legacy actor export remains covered by a regression parity
+run.
+
+The best v4 ONNX has SHA-256 `a107ffe6...`; JAX CPU versus ONNX Runtime CPU
+parity over 256 samples has maximum error `1.19e-7`. Exact MuJoCo CPU evaluation
+at 1.8 m/s over 64 episodes reports median survival 27 steps (0.54 s), maximum
+40, median forward speed 1.772 m/s, median RMSE 0.461 m/s, median lateral drift
+0.160 m and zero full 10 s completions. An aerial interval occurred before
+failure in 81.25% of episodes, but none survived the two-second warm-up.
+Therefore this visibly produces running morphology without producing a usable
+competition runner, and it is rejected for deployment.
+
+A speed scan found a possible curriculum entrance at 0.8 m/s (36.56 mean
+zero-action steps versus 26.5 at 1.8 m/s). It also exposed a transfer hazard in
+v4: fixed command channels acquired near-zero running-normalizer variance.
+`reference_curriculum_v5` removes that redundant running normalization, lowers
+initial exploration standard deviation to 0.3, uses three PPO passes and a
+tighter 0.005 KL target. Low-speed training peaked at 35.75 held-out steps;
+restoring that checkpoint at 1.2 m/s started at 32.75 and ended at 32.67 after
+393,216 steps. This does not exceed the zero-residual baseline, so the
+low-to-medium-speed curriculum is closed rather than escalated to 1.8 m/s.
+
+The machine-readable record is
+`training/locks/gmr_reference_baseline_2026_08_31.yaml`. No experimental ONNX
+was copied into the competition runtime. The next motion milestone requires a
+dynamically feasible reference or a richer whole-body tracking observation;
+more epochs on either current periodic reference are not justified by these
+curves.

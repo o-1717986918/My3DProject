@@ -82,6 +82,21 @@ def canonicalize_root_heading(quaternions: np.ndarray) -> np.ndarray:
     return _continuous_quaternions((correction * rotations).as_quat())
 
 
+def scale_root_yaw_deviation(quaternions: np.ndarray, scale: float) -> np.ndarray:
+    """Scale cyclic yaw about its circular centre while preserving pitch/roll."""
+    if not 0.0 <= scale <= 1.0:
+        raise ValueError("root yaw scale must be in [0, 1]")
+    euler = Rotation.from_quat(_continuous_quaternions(quaternions)).as_euler("zyx")
+    center = float(
+        np.arctan2(np.mean(np.sin(euler[:, 0])), np.mean(np.cos(euler[:, 0])))
+    )
+    deviation = np.arctan2(
+        np.sin(euler[:, 0] - center), np.cos(euler[:, 0] - center)
+    )
+    euler[:, 0] = center + scale * deviation
+    return _continuous_quaternions(Rotation.from_euler("zyx", euler).as_quat())
+
+
 def _prepare_forward_cycle(
     root_position: np.ndarray,
     root_quaternion: np.ndarray,
@@ -184,6 +199,25 @@ def _smooth_circular(values: np.ndarray, passes: int) -> np.ndarray:
             + 0.5 * result
             + 0.25 * np.roll(result, -1, axis=0)
         )
+    return result
+
+
+def _smooth_progressive_root_xy(
+    root_position: np.ndarray, cycle_delta: np.ndarray, passes: int
+) -> np.ndarray:
+    """Smooth periodic XY residuals without changing cycle displacement."""
+    result = np.asarray(root_position, dtype=np.float64).copy()
+    if passes < 0:
+        raise ValueError("root smoothing passes cannot be negative")
+    if passes == 0:
+        return result
+    progress = (
+        np.arange(result.shape[0], dtype=np.float64)[:, None]
+        / result.shape[0]
+        * np.asarray(cycle_delta, dtype=np.float64)[None, :2]
+    )
+    residual = result[:, :2] - progress
+    result[:, :2] = progress + _smooth_circular(residual, passes)
     return result
 
 
@@ -412,6 +446,9 @@ def build_periodic_reference(
     source_half_weight: float = 0.8,
     smoothing_passes: int = 4,
     stance_correction_iterations: int = 1,
+    stance_smoothing_passes: int = 1,
+    root_yaw_scale: float = 1.0,
+    root_xy_smoothing_passes: int = 0,
 ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     """Project one even T1 sequence and return arrays plus an acceptance report."""
     if frequency_hz != 50.0:
@@ -455,6 +492,7 @@ def build_periodic_reference(
     root_quaternion = canonicalize_root_heading(
         _project_root_orientation(source_root_quaternion)
     )
+    root_quaternion = scale_root_yaw_deviation(root_quaternion, root_yaw_scale)
     joint_position = project_half_cycle(
         joint_position,
         joint_source,
@@ -500,10 +538,17 @@ def build_periodic_reference(
     _, contact, replay = replay_rcss_surface(qpos, contract)
     for _ in range(stance_correction_iterations):
         qpos = _plant_stance_feet(
-            qpos, contact, contract, cycle_delta, smoothing_passes=1
+            qpos,
+            contact,
+            contract,
+            cycle_delta,
+            smoothing_passes=stance_smoothing_passes,
         )
         _, contact, replay = replay_rcss_surface(qpos, contract)
 
+    qpos[:, :3] = _smooth_progressive_root_xy(
+        qpos[:, :3], cycle_delta, root_xy_smoothing_passes
+    )
     qpos[:, :3] = _project_root_position(qpos[:, :3], cycle_delta)
     _, contact, replay = replay_rcss_surface(qpos, contract)
 
@@ -579,6 +624,9 @@ def build_periodic_reference(
         "source_half_weight": source_half_weight,
         "smoothing_passes": smoothing_passes,
         "stance_correction_iterations": stance_correction_iterations,
+        "stance_smoothing_passes": stance_smoothing_passes,
+        "root_yaw_scale": root_yaw_scale,
+        "root_xy_smoothing_passes": root_xy_smoothing_passes,
         "symmetry": symmetry,
         "continuity": {
             "wrap_joint_step_max_rad": wrap_joint_step,
