@@ -334,6 +334,10 @@ def main() -> None:
             "num_envs must divide batch_size * num_minibatches "
             f"({profile.batch_size * profile.num_minibatches})"
         )
+    minimum_epoch_timesteps = (
+        profile.batch_size * profile.num_minibatches * profile.unroll_length
+    )
+    effective_num_timesteps = max(args.num_timesteps, minimum_epoch_timesteps)
 
     args.run_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = args.run_dir / "checkpoints"
@@ -341,7 +345,7 @@ def main() -> None:
     stage_overrides = {
         "impl": args.impl,
         "naconmax": max(2048, 16 * args.num_envs),
-        "action_clip": 10.0 if profile.distribution_type == "normal" else 1.0,
+        "action_clip": max(abs(value) for value in contract.action_clip),
         **STAGES[args.stage],
     }
     env = DirectionalRun(
@@ -351,10 +355,15 @@ def main() -> None:
     )
     eval_env = None
     if args.motion_reference:
+        evaluation_reference_probability = (
+            stage_overrides.get("reference_init_probability", 0.0)
+            if contract.control_mode == "motion_reference_residual_joint_position"
+            else 0.0
+        )
         eval_env = DirectionalRun(
             config_overrides={
                 **stage_overrides,
-                "reference_init_probability": 0.0,
+                "reference_init_probability": evaluation_reference_probability,
             },
             contract=contract,
             motion_reference=args.motion_reference,
@@ -383,6 +392,8 @@ def main() -> None:
         "git_revision": _git_revision(),
         "num_envs": args.num_envs,
         "requested_timesteps": args.num_timesteps,
+        "minimum_epoch_timesteps": minimum_epoch_timesteps,
+        "effective_timesteps": effective_num_timesteps,
         "seed": args.seed,
         "environment_config": env._config.to_dict(),
         "evaluation_environment_config": (
@@ -428,7 +439,7 @@ def main() -> None:
         _, _, final_metrics = ppo.train(
             environment=env,
             eval_env=eval_env,
-            num_timesteps=args.num_timesteps,
+            num_timesteps=effective_num_timesteps,
             num_envs=args.num_envs,
             episode_length=env._config.episode_length,
             action_repeat=1,

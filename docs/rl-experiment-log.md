@@ -320,3 +320,23 @@ This closes corrected R1 and the R2 interface gate, not policy learning. The
 new v3 contract maps zero residual to the periodic reference at every phase,
 uses reference-relative joint observations, scales cadence and reference
 velocities to the commanded forward speed, and preserves v1/v2 unchanged.
+
+## Reference-centred residual training — 2026-08-31
+
+The first optimizer run,
+`run-reference-residual-v3-smoke-s107-20260831-1215`, completed a real
+checkpoint at 196,608 environment steps. It is rejected: the default
+tanh-normal actor head did not initialise at zero residual, evaluation mean
+episode length fell from 56.4 to 43.8 control steps, and the one-epoch KL was
+8.61. The requested 4096 steps had been silently rounded by Brax to its
+196,608-step minimum batch, so the trainer now records and passes an explicit
+effective step count.
+
+The run also exposed that the generic motion evaluation environment forced
+reference initialisation probability to zero. That is useful for later
+normal-start robustness, but invalid for the first fixed-reference tracking
+gate. `reference_residual_v1` is retained unchanged for reproducibility. The
+replacement `reference_residual_v2` uses an exactly zero mean head, 0.1 initial
+standard deviation, one PPO pass, `1e-5` learning rate with bounded adaptive
+KL, no observation renormalisation, and reference-state evaluation. A
+regression test asserts the initial mean and standard deviation directly.

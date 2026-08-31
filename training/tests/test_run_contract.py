@@ -3,6 +3,8 @@ from pathlib import Path
 import jax
 import numpy as np
 import yaml
+from brax.training import types as brax_types
+from brax.training.acme import running_statistics
 
 from my3d_rl import load_policy_contract
 from my3d_rl.ppo_profile import get_ppo_profile
@@ -206,6 +208,38 @@ def test_motion_transfer_profile_has_explicit_conservative_kl_bounds():
     assert profile.learning_rate <= profile.learning_rate_max
     assert profile.learning_rate_max < 1.0e-5
     assert profile.desired_kl == 0.002
+
+
+def test_reference_residual_profile_starts_at_zero_with_low_noise():
+    rejected_profile = get_ppo_profile("reference_residual_v1")
+    profile = get_ppo_profile("reference_residual_v2")
+    sizes = {"state": (80,), "privileged_state": (86,)}
+    networks = profile.network_factory()(
+        sizes,
+        23,
+        preprocess_observations_fn=brax_types.identity_observation_preprocessor,
+    )
+    params = networks.policy_network.init(jax.random.PRNGKey(19))
+    spec = {
+        key: jax.ShapeDtypeStruct(shape, jax.numpy.float32)
+        for key, shape in sizes.items()
+    }
+    normalizer = running_statistics.init_state(spec)
+    mean, standard_deviation = networks.policy_network.apply(
+        normalizer,
+        params,
+        {
+            "state": jax.numpy.zeros((2, 80)),
+            "privileged_state": jax.numpy.zeros((2, 86)),
+        },
+    )
+
+    assert rejected_profile.distribution_type == "tanh_normal"
+    assert rejected_profile.learning_rate == 1.0e-4
+    assert profile.distribution_type == "normal"
+    assert profile.zero_mean_init
+    np.testing.assert_allclose(mean, 0.0)
+    np.testing.assert_allclose(standard_deviation, 0.1)
 
 
 def test_motion_reset_initializes_complete_reference_state(tmp_path):

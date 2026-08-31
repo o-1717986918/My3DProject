@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import functools
 from typing import Any, Callable
 
+import jax
 from brax.training.agents.ppo import networks as ppo_networks
 
 from .legacy_policy import make_legacy_ppo_networks
@@ -31,17 +32,30 @@ class PpoProfile:
     desired_kl: float = 0.01
     learning_rate_min: float = 1.0e-5
     learning_rate_max: float = 1.0e-2
+    init_noise_std: float = 1.0
+    zero_mean_init: bool = False
 
     def network_factory(self) -> Callable[..., Any]:
         if self.factory_kind == "legacy_teacher":
             return make_legacy_ppo_networks
+        options: dict[str, Any] = {
+            "policy_hidden_layer_sizes": self.policy_hidden_layer_sizes,
+            "value_hidden_layer_sizes": self.value_hidden_layer_sizes,
+            "policy_obs_key": "state",
+            "value_obs_key": "privileged_state",
+            "distribution_type": self.distribution_type,
+            "init_noise_std": self.init_noise_std,
+        }
+        if self.zero_mean_init:
+            options.update(
+                {
+                    "mean_kernel_init_fn": jax.nn.initializers.constant,
+                    "mean_kernel_init_kwargs": {"value": 0.0},
+                }
+            )
         return functools.partial(
             ppo_networks.make_ppo_networks,
-            policy_hidden_layer_sizes=self.policy_hidden_layer_sizes,
-            value_hidden_layer_sizes=self.value_hidden_layer_sizes,
-            policy_obs_key="state",
-            value_obs_key="privileged_state",
-            distribution_type=self.distribution_type,
+            **options,
         )
 
 
@@ -153,11 +167,8 @@ PROFILES = {
         learning_rate_min=2.5e-7,
         learning_rate_max=2.0e-6,
     ),
-    # The v3 actor predicts only a bounded correction around the periodic T1
-    # reference.  A fresh tanh-normal network therefore starts close to the
-    # demonstrated motion instead of inheriting the legacy nominal-pose
-    # decoder.  The residual authority is limited separately by the v3
-    # contract to 0.15 rad.
+    # Retained so the first rejected random-head smoke run remains exactly
+    # reproducible from its manifest and source revision.
     "reference_residual_v1": PpoProfile(
         name="reference_residual_v1",
         policy_hidden_layer_sizes=(512, 256, 128),
@@ -172,6 +183,32 @@ PROFILES = {
         learning_rate=1.0e-4,
         normalize_observations=True,
         policy_contract="run_policy_v3",
+    ),
+    # The v3 actor predicts only a bounded correction around the periodic T1
+    # reference.  A zero-mean normal network therefore starts exactly on the
+    # demonstrated motion instead of inheriting the legacy nominal-pose
+    # decoder.  The residual authority is limited separately by the v3
+    # contract to 0.15 rad.
+    "reference_residual_v2": PpoProfile(
+        name="reference_residual_v2",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=1,
+        discounting=0.995,
+        entropy_cost=1.0e-4,
+        learning_rate=1.0e-5,
+        normalize_observations=False,
+        adaptive_kl=True,
+        policy_contract="run_policy_v3",
+        desired_kl=0.002,
+        learning_rate_min=2.5e-6,
+        learning_rate_max=2.0e-5,
+        init_noise_std=0.1,
+        zero_mean_init=True,
     ),
 }
 

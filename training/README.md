@@ -147,15 +147,17 @@ the fixed-nominal legacy actor into this decoder:
 PYTHONPATH=training XLA_PYTHON_CLIENT_PREALLOCATE=false \
   python training/tools/train_run.py \
   --stage reference_residual --impl warp --num-envs 64 \
-  --num-timesteps 4096 --seed 107 --num-evals 2 --num-eval-envs 8 \
-  --network-profile reference_residual_v1 \
+  --num-timesteps 196608 --seed 107 --num-evals 2 --num-eval-envs 8 \
+  --network-profile reference_residual_v2 \
   --motion-reference \
   /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v3.npz \
   --run-dir /home/win98/rl_runs/run-reference-residual-v3-<name>
 ```
 
-The 4096-step form is an optimizer/checkpoint integration test. It is not a
-running result and cannot be selected for deployment.
+The 196608-step form is one minimum optimizer epoch for this profile and is an
+optimizer/checkpoint integration test. The manifest records both requested
+and effective step counts. It is not a running result and cannot be selected
+for deployment.
 
 Holosoma is pinned at `fb835ec8...` and requires the audited patch in
 `patches/holosoma-t1-retargeting.patch`. Verify a patched external checkout
