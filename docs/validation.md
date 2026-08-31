@@ -7,14 +7,17 @@ Server: RCSSServerMJ 0.2.1, `fifa7vs7`, `ssim26`, synchronous mode
 
 ## Automated checks
 
-- `pytest -q`: 29 passed.
+- `pytest -q`: 40 passed (29 existing runtime checks plus 11 guarded
+  reference-posture checks).
+- `PYTHONPATH=training pytest training/tests -q`: 43 passed in `my3d-rl`.
 - Client bytecode compilation: passed.
 - Shell syntax validation: passed.
 - Patch whitespace validation: passed.
 
 The tests cover canonical field orientation, perception freshness, joint-state
 mapping, finite/clamped motor output, beam lifecycle, attack phase transitions,
-head tracking, and player role assignment.
+head tracking, player role assignment, asset integrity, the 80-to-23 model
+boundary, posture entry guards, bounded blending, and same-cycle fallback.
 
 ## Single-player motion evidence
 
@@ -72,6 +75,18 @@ alignments=2 kicks=4 attack_recoveries=4 getups=6
 The preserved evidence is `/tmp/my3d-match.lW7C8y` on the validated WSL host.
 This path is host-local and is intentionally not committed.
 
+The guarded reference-posture integration was then evaluated against an
+800-cycle stable control and in three independent 800-cycle enabled matches. An
+uncapped experiment was rejected after only 2/18 bursts completed and 16 hit
+the posture guard. With the final 10% cap, the enabled matches completed 5/5,
+5/5, and 16/16 bursts with zero posture/inference aborts. All had 14
+connections, `PLAY_ON`, zero client failure, clean shutdown, and complete
+`ALIGN -> KICK -> RECOVER` loops. Their observed get-up counts were 5, 8, and
+3; the same-length stable control observed 5, so the integration is accepted
+only as a bounded posture hint, not a standalone runner. One preserved local
+record is `/tmp/my3d-match.Fu9mkj`; generated logs and restricted assets remain
+uncommitted.
+
 RCSSServerMJ printed one MuJoCo control warning during each player activation.
 The warning coincided with the server's full-model recompilation on
 `add_players`; it also occurred before meaningful policy control, while client
@@ -99,3 +114,8 @@ The next performance work is stronger learned kicking, teammate communication,
 collision avoidance, and opponent-aware role arbitration. These are
 competitive-quality improvements rather than blockers for starting and
 completing a 7v7 match.
+
+The v4/GMR capability is present in the formal action stack behind explicit
+activation and integrity checks. It is not release-default locomotion: stable
+`walk.onnx` remains dominant/default, and full running promotion still requires
+the R2/R3 command suite and three-seed ten-second acceptance.

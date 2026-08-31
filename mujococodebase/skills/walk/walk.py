@@ -2,6 +2,7 @@ import math
 import os
 import numpy as np
 from mujococodebase.skills.skill import Skill
+from mujococodebase.skills.walk.reference_run import ReferenceRunController
 from mujococodebase.utils.math_ops import MathOps
 from mujococodebase.utils.neural_network import run_network, load_network
 from scipy.spatial.transform import Rotation as R
@@ -71,6 +72,7 @@ class Walk(Skill):
         self.model = load_network(
             model_path=os.path.join(os.path.dirname(__file__), "walk.onnx")
         )
+        self.reference_run = ReferenceRunController(agent)
 
     def execute(
         self,
@@ -82,6 +84,7 @@ class Walk(Skill):
     ) -> bool:
         if reset:
             self.previous_action.fill(0.0)
+            self.reference_run.reset(self.agent.world.server_time)
 
         robot = self.agent.robot
         world = self.agent.world
@@ -96,7 +99,15 @@ class Walk(Skill):
                 raw_target, -robot.global_orientation_euler[2], is_rad=False
             )
         else:
-            velocity = target_2d
+            raw_target = target_2d
+            velocity = target_2d.copy()
+
+        local_target_delta = velocity.copy()
+        heading_error_deg = (
+            MathOps.vector_angle(local_target_delta)
+            if np.linalg.norm(local_target_delta) > 1.0e-8
+            else 0.0
+        )
 
         rel_orientation = None
         if orientation is None:
@@ -159,9 +170,25 @@ class Walk(Skill):
 
         self.previous_action = nn_action
 
+        run_target = self.reference_run.step(
+            stable_positions_rad=target_joint_positions,
+            current_positions_rad=radian_joint_positions,
+            current_velocities_rad_s=radian_joint_speeds,
+            local_target_delta_m=local_target_delta,
+            heading_error_deg=heading_error_deg,
+            is_target_absolute=is_target_absolute,
+        )
+        if run_target is not None:
+            target_joint_positions = run_target.positions_rad
+            kp = run_target.kp
+            kd = run_target.kd
+        else:
+            kp = 25.0
+            kd = 0.6
+
         for idx, target in enumerate(target_joint_positions):
             robot.set_motor_target_position(
-                robot.ROBOT_MOTORS[idx], target * 180 / math.pi, kp=25, kd=0.6
+                robot.ROBOT_MOTORS[idx], target * 180 / math.pi, kp=kp, kd=kd
             )
 
         return False

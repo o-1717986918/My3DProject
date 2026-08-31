@@ -476,3 +476,32 @@ was copied into the competition runtime. The next motion milestone requires a
 dynamically feasible reference or a richer whole-body tracking observation;
 more epochs on either current periodic reference are not justified by these
 curves.
+
+## Guarded competition posture integration — 2026-08-31
+
+The formal `Walk` action now contains an opt-in deployment adapter for the
+exact v4 actor (`a107ffe6...`) plus external GMR reference (`02cd6409...`). The
+adapter reconstructs the training 80-value observation, chooses the reference
+phase nearest the measured server pose, applies the v4 residual/sign decoder,
+and independently calculates stable `walk.onnx` output on the same cycle. It
+requires straight forward `PLAY_ON` movement by a field player, validates both
+asset hashes and the 80-to-23 ONNX boundary, rate-limits reference targets,
+uses a 16-cycle ramped window and two-second cooldown, and returns to stable
+walk immediately on posture or inference failure.
+
+The first real 800-cycle 7v7 actuator trial allowed the reference target to
+reach full ownership. It connected all 14 players and exited cleanly, but only
+2 of 18 activations completed; 16 hit the posture guard and nine get-ups were
+observed versus five in a same-length stable control. Full target ownership is
+therefore rejected and is not configurable in the final adapter.
+
+The accepted integration caps the v4 contribution at 10%, making it a posture
+hint while the evaluated walk model retains at least 90% authority. Three
+independent 800-cycle exact-server runs completed 5/5, 5/5, and 16/16
+activations with zero posture/inference aborts. All connected 14/14 players,
+entered `PLAY_ON`, completed the attack loop, logged zero client failure, and
+shut down cleanly. The runs observed five, eight, and three successful get-ups;
+the stable control observed five. This passes the new integration gate but not
+the running-policy R2 gate. `MY3D_RUN_BACKEND` therefore defaults to `stable`,
+the model/reference remain external and local-only, and v4 retains rejected
+release status.

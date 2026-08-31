@@ -261,7 +261,8 @@ silently changed.
 - [x] identical-action CPU/MJWarp parity trace and regression test;
 - [x] periodic exact-T1 reference projection and CPU/MJWarp initial-state parity;
 - [x] reference-centred residual tracking contract and environment interface;
-- [ ] feature-flagged runtime integration with fallback;
+- [x] feature-flagged, hash-locked runtime posture integration with same-cycle
+  stable-walk fallback;
 - [ ] single-player RCSS gate, headless 7v7 gate, and visual 7v7 gate;
 - [ ] three-seed release evaluation after the first candidate succeeds.
 
@@ -277,6 +278,16 @@ No candidate has been copied into the runtime and the original `walk.onnx`
 remains the competition default. Detailed commands, rejected runs and source
 choices are recorded in `rl-experiment-log.md` and
 `robot-soccer-action-research.md`.
+
+The rejected v4 actor and its external reference now have a guarded deployment
+adapter, not release status. A full-target 800-cycle 7v7 experiment completed
+only 2/18 bursts and tripped the posture guard 16 times, so that path was
+rejected. Capping the reference target to a 10% posture hint produced three
+independent 800-cycle headless 7v7 passes: they completed 5/5, 5/5, and 16/16
+bursts with zero posture/inference aborts, 14/14 connections, clean shutdown,
+and complete attack loops. This validates the integration and fallback
+boundary; it does not satisfy R2 or make v4 a running release. The external
+model/reference stay local-only and the feature remains disabled by default.
 
 The motion-prior stage improved normal-start MJX survival to 490/500 at a
 1.8 m/s command, but exact CPU evaluation rejected the exported policy for

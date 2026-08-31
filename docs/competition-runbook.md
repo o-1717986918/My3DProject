@@ -93,6 +93,37 @@ Set `KEEP_MATCH_LOGS=1` to preserve the server and team logs under `/tmp`.
 Set `MATCH_REQUIRE_ATTACK_LOOP=0` only for connection-only diagnostics; the
 default gate requires observed `ALIGN`, `KICK`, and `RECOVER` transitions.
 
+### Guarded reference-posture integration
+
+The formal `Walk` entry point can consume the current GMR/v4 posture policy,
+but it does not promote that rejected candidate to the main locomotion
+controller. The stable policy is computed on every cycle and owns at least 90%
+of the target. The reference backend is allowed only for non-goalkeepers in
+`PLAY_ON`, for an absolute target at least 3.5 m ahead, with at most 6 degrees
+heading error, an upright torso, low entry angular velocity, and valid height.
+A burst lasts 16 control cycles (0.32 s), ramps in and out, rate-limits its
+joint target, cools down for two seconds, and returns to stable walk in the
+same cycle if the posture guard or inference boundary fails.
+
+The backend is disabled by default. On the validated development host, enable
+the exact local-only assets with:
+
+```bash
+export MY3D_RUN_BACKEND=reference_v4_burst
+export MY3D_RUN_MODEL=/home/win98/rl_runs/run-reference-residual-v4-gmr-formal-s139/exports/000001179648.onnx
+export MY3D_RUN_REFERENCE=/home/win98/rl_datasets/motion_refs/t1_run2_subject4_gmr_periodic_v1.npz
+export MATCH_REQUIRE_RUN_BURST=1
+scripts/run_acceptance_match.sh 800
+```
+
+Runtime loading requires model SHA-256 `a107ffe6...` and reference SHA-256
+`02cd6409...`, plus the exact 80-to-23 ONNX interface and 34-by-23 reference
+shape. `MATCH_REQUIRE_RUN_BURST=1` requires at least one activation, zero
+posture/inference aborts, and at least 80% complete bursts. The LAFAN-derived
+reference is local-only under CC-BY-NC-ND-4.0 and must not be added to the
+repository or a redistribution package. Leave `MY3D_RUN_BACKEND` unset for the
+release-safe stable path.
+
 For a full match, omit the final cycle limit or run `./start7v7.sh`.
 
 For a WSLg visual demonstration with preserved server, match, and team logs:
@@ -145,6 +176,9 @@ single-player recovery checks.
 - Apollo model unavailable: initialize git submodules, or set
   `MY3D_APOLLO_GETUP_MODEL=/absolute/path/policy.onnx`. Force the independent
   fallback with `MY3D_GETUP_BACKEND=keyframe`.
+- Reference-run asset rejected: compare the model/reference SHA-256 with the
+  values above, verify the 80-to-23 ONNX boundary, and keep the backend at
+  `stable`; do not bypass the integrity checks.
 - A MuJoCo `CTRL` warning appears once when a player joins: RCSSServerMJ 0.2.1
   recompiles the entire MuJoCo model on every `add_players` activation. This
   warning was reproduced at activation while the client output checks remained
