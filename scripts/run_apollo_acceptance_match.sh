@@ -4,6 +4,7 @@
 set -euo pipefail
 
 max_cycles=${1:-600}
+launch_stagger=${APOLLO_LAUNCH_STAGGER:-0.05}
 python_bin=${MY3D_PYTHON:-python3}
 agent_port=${MATCH_AGENT_PORT:-$((28000 + $$ % 1000))}
 monitor_port=${MATCH_MONITOR_PORT:-$((agent_port + 1))}
@@ -37,6 +38,10 @@ trap cleanup EXIT INT TERM
 
 if ! [[ "$max_cycles" =~ ^[1-9][0-9]*$ ]]; then
     echo "usage: $0 [positive-cycle-count]" >&2
+    exit 2
+fi
+if ! [[ "$launch_stagger" =~ ^(0|[0-9]+([.][0-9]+)?)$ ]]; then
+    echo "APOLLO_LAUNCH_STAGGER must be a non-negative number of seconds" >&2
     exit 2
 fi
 
@@ -77,7 +82,7 @@ for team in My3D-A My3D-B; do
         # RCSSServerMJ 0.2.1 can reset connections when fourteen ONNX-backed
         # clients initialize in the same scheduler slice. This still starts
         # both complete teams well inside the official three-second limit.
-        sleep 0.05
+        sleep "$launch_stagger"
     done
 done
 
