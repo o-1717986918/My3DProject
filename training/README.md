@@ -64,6 +64,16 @@ PYTHONPATH=training python training/tools/smoke_run_env.py \
   --impl warp --contract-version v2 --num-envs 8 --steps 4
 ```
 
+Compile the v3 moving-reference residual environment with the local-only R1
+artifact:
+
+```bash
+PYTHONPATH=training python training/tools/smoke_run_env.py \
+  --impl warp --contract-version v3 --num-envs 8 --steps 4 \
+  --motion-reference \
+  /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v3.npz
+```
+
 Before long training, replay an identical short action trace in CPU MuJoCo and
 MJX-Warp. The JSON includes every decoded target, reference phase, root/torso
 state, foot height, contact proxy, first threshold crossing and maximum error:
@@ -114,19 +124,38 @@ periodic and contact-aware R1 reference before residual-policy training:
 ```bash
 PYTHONPATH=training python training/tools/project_periodic_reference.py \
   /home/win98/rl_datasets/motion_refs/t1_run2_subject4_straight76_109_v1.npz \
-  /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v1.npz \
+  /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v3.npz \
   --source-half-weight 0.8 --smoothing-passes 4 \
   --stance-correction-iterations 1 \
   --report /tmp/t1-periodic-reference.json
 ```
 
-The output must stay outside the repository. The projector recomputes cyclic
+The output must stay outside the repository. The projector checks body-local
+forward semantics, time-reverses a backward-labelled source when required,
+canonicalizes mean root heading to world +X, and recomputes cyclic
 velocities, replays exact RCSS contacts, and rejects endpoint, bilateral,
 joint-limit, collision, flight, yaw, lateral or stance-slip gate failures.
 Exact contact runs shorter than four frames remain in the replay/contact
 counts but are excluded from support-foot anchoring and slip statistics. The
 accepted local artifact SHA-256 and metrics are pinned in
 `locks/periodic_reference_baseline_2026_08_31.yaml`.
+
+Train only the bounded v3 residual around that reference; do not bootstrap
+the fixed-nominal legacy actor into this decoder:
+
+```bash
+PYTHONPATH=training XLA_PYTHON_CLIENT_PREALLOCATE=false \
+  python training/tools/train_run.py \
+  --stage reference_residual --impl warp --num-envs 64 \
+  --num-timesteps 4096 --seed 107 --num-evals 2 --num-eval-envs 8 \
+  --network-profile reference_residual_v1 \
+  --motion-reference \
+  /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v3.npz \
+  --run-dir /home/win98/rl_runs/run-reference-residual-v3-<name>
+```
+
+The 4096-step form is an optimizer/checkpoint integration test. It is not a
+running result and cannot be selected for deployment.
 
 Holosoma is pinned at `fb835ec8...` and requires the audited patch in
 `patches/holosoma-t1-retargeting.patch`. Verify a patched external checkout

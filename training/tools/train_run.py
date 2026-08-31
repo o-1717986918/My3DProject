@@ -169,6 +169,32 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.fall": -100.0,
         "reward.pose": 0.0,
     },
+    "reference_residual": {
+        "use_fixed_command": True,
+        "fixed_command": [1.8, 0.0, 0.0],
+        "stand_probability": 0.0,
+        "reset_joint_noise": 0.005,
+        "reset_root_velocity_noise": 0.01,
+        "reset_yaw_range": 0.02,
+        "reference_init_probability": 1.0,
+        "foot_contact_tolerance": 0.0,
+        "push_enable": False,
+        "action_delay_max_steps": 0,
+        "reward.tracking_linear": 2.0,
+        "reward.tracking_yaw": 6.0,
+        "reward.flight": 0.0,
+        "reward.single_support": 0.0,
+        "reward.phase_swing": 0.0,
+        "reward.motion_joint": 10.0,
+        "reward.motion_joint_velocity": 2.0,
+        "reward.motion_contact": 4.0,
+        "reward.motion_action": 2.0,
+        "reward.lateral_tracking": -20.0,
+        "reward.yaw_rate_error": -20.0,
+        "reward.alive": 0.5,
+        "reward.fall": -100.0,
+        "reward.pose": 0.0,
+    },
     "omni": {
         "lin_vel_x": [0.0, 1.8],
         "lin_vel_y": [-0.40, 0.40],
@@ -273,12 +299,16 @@ def main() -> None:
     if not args.run_dir.is_absolute() or args.run_dir.is_relative_to(Path.cwd()):
         raise ValueError("run-dir must live outside the repository")
     profile = get_ppo_profile(args.network_profile)
+    contract_path = (
+        Path(__file__).parents[1] / "contracts" / f"{profile.policy_contract}.yaml"
+    )
+    contract = load_policy_contract(contract_path)
     if args.restore_checkpoint and args.bootstrap_onnx:
         raise ValueError("restore-checkpoint and bootstrap-onnx are mutually exclusive")
     if args.bootstrap_onnx and profile.factory_kind != "legacy_teacher":
         raise ValueError("bootstrap-onnx requires the legacy_warmstart_v1 profile")
     if (
-        args.stage in {"motion_track", "motion_straight"}
+        args.stage in {"motion_track", "motion_straight", "reference_residual"}
         and args.motion_reference is None
     ):
         raise ValueError(f"{args.stage} requires --motion-reference")
@@ -291,6 +321,13 @@ def main() -> None:
             raise ValueError(
                 "motion reference failed validation: "
                 + "; ".join(motion_reference_validation["errors"])
+            )
+        if (
+            contract.reference_sha256 is not None
+            and _sha256(args.motion_reference) != contract.reference_sha256
+        ):
+            raise ValueError(
+                "motion reference SHA-256 differs from the policy contract"
             )
     if (profile.batch_size * profile.num_minibatches) % args.num_envs:
         raise ValueError(
@@ -307,10 +344,6 @@ def main() -> None:
         "action_clip": 10.0 if profile.distribution_type == "normal" else 1.0,
         **STAGES[args.stage],
     }
-    contract_path = (
-        Path(__file__).parents[1] / "contracts" / f"{profile.policy_contract}.yaml"
-    )
-    contract = load_policy_contract(contract_path)
     env = DirectionalRun(
         config_overrides=stage_overrides,
         contract=contract,

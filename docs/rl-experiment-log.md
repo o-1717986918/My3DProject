@@ -282,31 +282,41 @@ after exact grounding, and performs one bilateral least-squares stance
 correction. This is a recorded correction to the initial branch, not a hidden
 manual edit.
 
+The first passing artifact exposed a semantic gap in those geometric gates:
+its mean root yaw was approximately `-pi` while world velocity was +X, so its
+initial body-local velocity was negative. It represented a backward-labelled
+run despite passing symmetry, contact and continuity. The v2 projector now
+measures source motion in the body frame, time-reverses this clip, rotates the
+mean heading to world +X and requires the absolute yaw centre to be near zero.
+At a 1.8 m/s command the corrected reset measured +1.866 m/s body-local
+forward velocity rather than -2.118 m/s. The earlier artifact is superseded.
+
 The generated NPZ remains local-only under the source dataset's
 CC-BY-NC-ND-4.0 boundary. Its SHA-256 is
-`7f08758850e5b71bd0f80040982bd600cd6e77cd6d8ef90ccc66a09ba495b0de`;
+`ab81912570d746965162f1d84cfd6d215a1265bd28dfc2d371c72f095aa40f9a`;
 the parent SHA-256 is `2ad294330d7d7fc19e236169bdc862079c8228fd38a544703c38f698fee09820`.
 
 | R1 measurement | Result |
 |---|---:|
-| cycle | 34 frames / 0.68 s / 2.178 m |
-| exact foot-contact frames | left 10, right 10 |
-| longest exact aerial interval | 7 frames / 0.14 s |
-| half-cycle joint/root/orientation/contact error | 0 / `4.44e-16 m` / 0 / 0 |
-| joint seam / internal p95 step | 0.317 / 0.261 rad |
-| root-velocity seam / largest cyclic step | 0.147 / 0.850 m/s |
-| stable-stance slip mean / p90 / max | 0.107 / 0.222 / 0.230 m/s |
-| yaw deviation / lateral excursion | 0.094 rad / 0.0216 m |
+| cycle | 34 frames / 0.68 s / 2.172 m |
+| exact foot-contact frames | left 11, right 11 |
+| longest exact aerial interval | 6 frames / 0.12 s |
+| half-cycle joint/root/orientation/contact error | 0 / `2.22e-16 m` / 0 / 0 |
+| joint seam / internal p95 step | 0.306 / 0.250 rad |
+| root-velocity seam / largest cyclic step | 0.225 / 0.856 m/s |
+| stable-stance slip mean / p90 / max | 0.125 / 0.262 / 0.292 m/s |
+| yaw centre / deviation / lateral excursion | `5.62e-19` / 0.094 rad / 0.0294 m |
 | non-foot pitch-contact frames / joint-limit violation | 0 / 0 rad |
 
 Stable-stance metrics use exact contact runs of at least four frames. Shorter
 collisions remain visible in exact replay and contact counts, but do not become
-support-foot anchors. A ten-step CPU/MJWarp replay initialised from this
-reference also passed: target error 0, contact-proxy mismatch 0, root error
-`1.29e-6 m`, joint error `6.76e-7 rad`. The machine-readable record is
+support-foot anchors. Twenty-step CPU/MJWarp replays through the actual v3
+moving-reference decoder passed for both zero and full-amplitude sine
+residuals. Both had target error 0 and contact-proxy mismatch 0; their largest
+root errors were `2.21e-6 m` and `4.48e-6 m`. The machine-readable record is
 `training/locks/periodic_reference_baseline_2026_08_31.yaml`.
 
-This closes R1, not R2. The parity trace still decodes the fixed-nominal v2
-action target, so the next test must prove that the new reference-centred
-contract maps zero residual to the periodic reference at every phase before
-formal PPO training starts.
+This closes corrected R1 and the R2 interface gate, not policy learning. The
+new v3 contract maps zero residual to the periodic reference at every phase,
+uses reference-relative joint observations, scales cadence and reference
+velocities to the commanded forward speed, and preserves v1/v2 unchanged.

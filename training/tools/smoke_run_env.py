@@ -19,7 +19,8 @@ def main() -> None:
     parser.add_argument("--impl", choices=("jax", "warp"), default="jax")
     parser.add_argument("--num-envs", type=int, default=16)
     parser.add_argument("--steps", type=int, default=2)
-    parser.add_argument("--contract-version", choices=("v1", "v2"), default="v1")
+    parser.add_argument("--contract-version", choices=("v1", "v2", "v3"), default="v1")
+    parser.add_argument("--motion-reference", type=Path)
     args = parser.parse_args()
 
     contract_path = (
@@ -27,9 +28,18 @@ def main() -> None:
         / "contracts"
         / f"run_policy_{args.contract_version}.yaml"
     )
+    contract = load_policy_contract(contract_path)
     env = DirectionalRun(
-        config_overrides={"impl": args.impl},
-        contract=load_policy_contract(contract_path),
+        config_overrides={
+            "impl": args.impl,
+            "reference_init_probability": (
+                1.0
+                if contract.control_mode == "motion_reference_residual_joint_position"
+                else 0.0
+            ),
+        },
+        contract=contract,
+        motion_reference=args.motion_reference,
     )
     keys = jax.random.split(jax.random.PRNGKey(11), args.num_envs)
     reset = jax.jit(jax.vmap(env.reset))

@@ -15,6 +15,29 @@ from my3d_rl.run_env import (
 
 CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v1.yaml"
 PHASE_CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v2.yaml"
+REFERENCE_CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v3.yaml"
+
+
+def _write_reference_residual_fixture(path: Path) -> None:
+    frames = 4
+    joint_position = np.zeros((frames, 23), dtype=np.float32)
+    joint_position[:, 0] = np.arange(frames, dtype=np.float32) * 0.01
+    np.savez(
+        path,
+        root_position=np.tile(
+            np.array([0.0, 0.0, 0.61], dtype=np.float32), (frames, 1)
+        ),
+        root_quaternion_xyzw=np.tile(
+            np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32), (frames, 1)
+        ),
+        root_linear_velocity=np.tile(
+            np.array([3.2, 0.0, 0.0], dtype=np.float32), (frames, 1)
+        ),
+        root_angular_velocity=np.zeros((frames, 3), dtype=np.float32),
+        joint_position=joint_position,
+        joint_velocity=np.full((frames, 23), 1.6, dtype=np.float32),
+        foot_contact=np.ones((frames, 2), dtype=bool),
+    )
 
 
 def test_run_policy_contract_preserves_runtime_boundary():
@@ -102,6 +125,67 @@ def test_phase_policy_contract_extends_actor_without_changing_actions():
     assert contract.output_shape == (1, 23)
     assert contract.observation_fields[-1] == ("gait_phase_cos_sin", 2)
     assert env.observation_size == {"state": (80,), "privileged_state": (86,)}
+
+
+def test_reference_residual_contract_requires_external_motion(tmp_path):
+    contract = load_policy_contract(REFERENCE_CONTRACT)
+
+    assert contract.control_mode == "motion_reference_residual_joint_position"
+    assert contract.action_clip == (-1.0, 1.0)
+    assert contract.action_scale == 0.15
+    assert contract.reference_sha256 == (
+        "ab81912570d746965162f1d84cfd6d215a1265bd28dfc2d371c72f095aa40f9a"
+    )
+    with np.testing.assert_raises_regex(ValueError, "requires a motion reference"):
+        DirectionalRun(contract=contract)
+
+
+def test_reference_residual_zero_action_reconstructs_phase_target(tmp_path):
+    path = tmp_path / "reference-residual.npz"
+    _write_reference_residual_fixture(path)
+    env = DirectionalRun(
+        contract=load_policy_contract(REFERENCE_CONTRACT), motion_reference=path
+    )
+
+    phase = jax.numpy.array(0.125)
+    decoded = np.asarray(env.decode_action_targets(jax.numpy.zeros(23), phase))
+
+    expected = np.zeros(23)
+    expected[0] = 0.005
+    np.testing.assert_allclose(decoded, expected, atol=1.0e-7)
+    assert np.isclose(env._config.action_scale, 0.15)
+    with np.testing.assert_raises_regex(ValueError, "requires gait_phase"):
+        env.decode_action_targets(jax.numpy.zeros(23))
+
+
+def test_reference_residual_reset_scales_cadence_velocity_and_control(tmp_path):
+    path = tmp_path / "reference-residual-reset.npz"
+    _write_reference_residual_fixture(path)
+    env = DirectionalRun(
+        config_overrides={
+            "use_fixed_command": True,
+            "fixed_command": [1.8, 0.0, 0.0],
+            "reset_joint_noise": 0.0,
+            "reset_root_velocity_noise": 0.0,
+            "reset_yaw_range": 0.0,
+            "reference_init_probability": 1.0,
+        },
+        contract=load_policy_contract(REFERENCE_CONTRACT),
+        motion_reference=path,
+    )
+
+    state = jax.jit(env.reset)(jax.random.PRNGKey(71))
+    phase = state.info["gait_phase"]
+    expected_ctrl = env.decode_action_targets(jax.numpy.zeros(23), phase)
+
+    np.testing.assert_allclose(
+        np.asarray(state.data.ctrl)[env._pos_actuator],
+        np.asarray(expected_ctrl),
+        atol=1.0e-6,
+    )
+    assert np.isclose(np.asarray(state.info["gait_frequency"]), 7.03125)
+    assert np.isclose(np.asarray(state.data.qvel)[env._root_dof], 1.8, atol=1.0e-6)
+    np.testing.assert_allclose(np.asarray(state.obs["state"])[:69], 0.0, atol=1.0e-6)
 
 
 def test_formal_profile_uses_bounded_action_and_official_t1_widths():

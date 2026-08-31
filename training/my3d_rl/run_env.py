@@ -159,9 +159,12 @@ class DirectionalRun(mjx_env.MjxEnv):
         prefix: str = "train_",
         motion_reference: Path | None = None,
     ) -> None:
-        config = default_config() if config is None else config
-        super().__init__(config, config_overrides)
         self.contract = contract or load_policy_contract(DEFAULT_CONTRACT)
+        config = default_config() if config is None else config
+        config_overrides = dict(config_overrides or {})
+        if "action_scale" not in config_overrides and self.contract.action_scale:
+            config_overrides["action_scale"] = self.contract.action_scale
+        super().__init__(config, config_overrides)
         self.prefix = prefix
         self._resource_root = resource_root
         if self.contract.action_scale is None:
@@ -249,8 +252,17 @@ class DirectionalRun(mjx_env.MjxEnv):
                 "legacy or 80-value phase-aware actor boundary"
             )
         self._phase_observation = self.contract.observation_size == 80
+        self._reference_centered = (
+            self.contract.control_mode == "motion_reference_residual_joint_position"
+        )
         self._motion_reference_path = motion_reference
         self._motion_tracking = motion_reference is not None
+        if self._reference_centered and not self._phase_observation:
+            raise ValueError(
+                "reference-centred control requires gait phase observation"
+            )
+        if self._reference_centered and not self._motion_tracking:
+            raise ValueError("reference-centred control requires a motion reference")
         if self._motion_tracking:
             with np.load(motion_reference, allow_pickle=False) as archive:
                 reference_root_position = np.asarray(
@@ -299,6 +311,16 @@ class DirectionalRun(mjx_env.MjxEnv):
                 reference_root_angular_velocity
             )
             self._reference_frame_count = reference_position.shape[0]
+            self._reference_nominal_frequency = (
+                self.contract.frequency_hz / self._reference_frame_count
+            )
+            self._reference_forward_speed = float(
+                np.mean(reference_root_linear_velocity[:, 0])
+            )
+            if self._reference_centered and self._reference_forward_speed <= 0.0:
+                raise ValueError(
+                    "reference-centred control requires positive forward speed"
+                )
         else:
             self._reference_joint_position = jp.zeros((2, self.action_size))
             self._reference_joint_velocity = jp.zeros((2, self.action_size))
@@ -310,6 +332,8 @@ class DirectionalRun(mjx_env.MjxEnv):
             self._reference_root_linear_velocity = jp.zeros((2, 3))
             self._reference_root_angular_velocity = jp.zeros((2, 3))
             self._reference_frame_count = 2
+            self._reference_nominal_frequency = 1.0
+            self._reference_forward_speed = 1.0
 
     def _configure_pd_actuators(self) -> None:
         for effector in self.contract.effector_order:
@@ -341,19 +365,41 @@ class DirectionalRun(mjx_env.MjxEnv):
     ) -> jax.Array:
         """Decode one policy action into clamped physical joint targets.
 
-        ``gait_phase`` is part of the public decoder surface so the parity
-        harness remains valid when the next contract centres residual actions
-        on a moving reference.  The current v1/v2 contracts use a fixed
-        nominal pose, so the argument is intentionally unused for now.
+        v1/v2 centre on the fixed nominal pose.  v3 requires a phase and
+        centres the bounded residual on the interpolated motion reference.
         """
-        del gait_phase
         clipped_action = jp.clip(
             action, -self._config.action_clip, self._config.action_clip
         )
+        if self._reference_centered:
+            if gait_phase is None:
+                raise ValueError("reference-centred decoder requires gait_phase")
+            reference_position = self._reference_at_phase(gait_phase)[0]
+        else:
+            reference_position = self._nominal_training
         targets_training = (
-            self._nominal_training + self._config.action_scale * clipped_action
+            reference_position + self._config.action_scale * clipped_action
         )
         return jp.clip(targets_training * self._sign, self._lowers, self._uppers)
+
+    def _phase_frequency_for_command(
+        self, command: jax.Array, sampled_frequency: jax.Array
+    ) -> jax.Array:
+        """Scale the reference cadence by requested forward speed for v3."""
+        reference_frequency = (
+            self._reference_nominal_frequency
+            * jp.abs(command[0])
+            / self._reference_forward_speed
+        )
+        frequency = jp.where(
+            self._reference_centered, reference_frequency, sampled_frequency
+        )
+        return jp.where(jp.linalg.norm(command[:2]) > 1.0e-4, frequency, 0.0)
+
+    def _reference_velocity_scale(self, gait_frequency: jax.Array) -> jax.Array:
+        if not self._reference_centered:
+            return jp.array(1.0)
+        return gait_frequency / self._reference_nominal_frequency
 
     def reset(self, rng: jax.Array) -> mjx_env.State:
         (
@@ -369,6 +415,16 @@ class DirectionalRun(mjx_env.MjxEnv):
         qpos = jp.asarray(self._mj_model.qpos0)
         qvel = jp.zeros(self._mj_model.nv)
 
+        rng, command_rng = jax.random.split(rng)
+        command = self._sample_command(command_rng)
+        sampled_gait_frequency = jax.random.uniform(
+            gait_rng,
+            minval=self._config.gait_frequency[0],
+            maxval=self._config.gait_frequency[1],
+        )
+        gait_frequency = self._phase_frequency_for_command(
+            command, sampled_gait_frequency
+        )
         gait_phase = jax.random.uniform(phase_rng)
         (
             reference_position,
@@ -378,7 +434,10 @@ class DirectionalRun(mjx_env.MjxEnv):
             reference_root_quaternion,
             reference_root_linear_velocity,
             reference_root_angular_velocity,
-        ) = self._reference_at_phase(gait_phase)
+        ) = self._reference_at_phase(
+            gait_phase,
+            velocity_scale=self._reference_velocity_scale(gait_frequency),
+        )
         joint_noise = jax.random.uniform(
             joint_rng,
             (self.action_size,),
@@ -460,7 +519,9 @@ class DirectionalRun(mjx_env.MjxEnv):
         )
 
         ctrl = jp.zeros(self._mj_model.nu)
-        ctrl = ctrl.at[self._pos_actuator].set(self._nominal_physical)
+        ctrl = ctrl.at[self._pos_actuator].set(
+            self.decode_action_targets(jp.zeros(self.action_size), gait_phase)
+        )
         data = mjx_env.make_data(
             self._mj_model,
             qpos=qpos,
@@ -472,16 +533,6 @@ class DirectionalRun(mjx_env.MjxEnv):
         )
         data = mjx.forward(self._mjx_model, data)
 
-        rng, command_rng = jax.random.split(rng)
-        command = self._sample_command(command_rng)
-        gait_frequency = jax.random.uniform(
-            gait_rng,
-            minval=self._config.gait_frequency[0],
-            maxval=self._config.gait_frequency[1],
-        )
-        gait_frequency = jp.where(
-            jp.linalg.norm(command[:2]) > 1.0e-4, gait_frequency, 0.0
-        )
         delay_steps = jax.random.randint(
             delay_rng,
             (),
@@ -589,7 +640,12 @@ class DirectionalRun(mjx_env.MjxEnv):
             + (right_swing & (~right_contact)).astype(jp.float32)
         ) * moving.astype(jp.float32)
         reference_position, reference_velocity, reference_contact, *_ = (
-            self._reference_at_phase(gait_phase)
+            self._reference_at_phase(
+                gait_phase,
+                velocity_scale=self._reference_velocity_scale(
+                    state.info["gait_frequency"]
+                ),
+            )
         )
         joint_position_training = data.qpos[self._joint_qpos] * self._sign
         joint_velocity_training = data.qvel[self._joint_dof] * self._sign
@@ -603,10 +659,15 @@ class DirectionalRun(mjx_env.MjxEnv):
         motion_contact = jp.mean(
             (actual_contact == reference_contact).astype(jp.float32)
         )
-        reference_action = jp.clip(
-            (reference_position - self._nominal_training) / self._config.action_scale,
-            -self._config.action_clip,
-            self._config.action_clip,
+        reference_action = jp.where(
+            self._reference_centered,
+            jp.zeros(self.action_size),
+            jp.clip(
+                (reference_position - self._nominal_training)
+                / self._config.action_scale,
+                -self._config.action_clip,
+                self._config.action_clip,
+            ),
         )
         motion_action = jp.exp(-0.25 * jp.mean(jp.square(action - reference_action)))
         tracking_enabled = jp.asarray(self._motion_tracking, dtype=jp.float32)
@@ -625,9 +686,10 @@ class DirectionalRun(mjx_env.MjxEnv):
             )
         )
         joint_velocity = jp.sum(jp.square(data.qvel[self._joint_dof]))
-        pose = jp.sum(
-            jp.square(data.qpos[self._joint_qpos] * self._sign - self._nominal_training)
+        pose_center = jp.where(
+            self._reference_centered, reference_position, self._nominal_training
         )
+        pose = jp.sum(jp.square(data.qpos[self._joint_qpos] * self._sign - pose_center))
         q = data.qpos[self._joint_qpos]
         span = self._uppers - self._lowers
         soft_lower = self._lowers + 0.03 * span
@@ -685,9 +747,14 @@ class DirectionalRun(mjx_env.MjxEnv):
         resample = (state.info["step"] % self._config.command_resample_steps == 0) & (
             not self._config.use_fixed_command
         )
-        state.info["command"] = jp.where(
+        next_command = jp.where(
             resample, self._sample_command(command_rng), state.info["command"]
         )
+        state.info["command"] = next_command
+        if self._reference_centered:
+            state.info["gait_frequency"] = self._phase_frequency_for_command(
+                next_command, state.info["gait_frequency"]
+            )
         done = fall | invalid | (state.info["step"] >= self._config.episode_length)
         obs = self._get_obs(data, state.info)
         state.metrics.update(
@@ -727,7 +794,9 @@ class DirectionalRun(mjx_env.MjxEnv):
             done=done.astype(jp.float32),
         )
 
-    def _reference_at_phase(self, phase: jax.Array) -> tuple[
+    def _reference_at_phase(
+        self, phase: jax.Array, velocity_scale: jax.Array | float = 1.0
+    ) -> tuple[
         jax.Array,
         jax.Array,
         jax.Array,
@@ -744,9 +813,10 @@ class DirectionalRun(mjx_env.MjxEnv):
         position = (1.0 - fraction) * self._reference_joint_position[
             lower
         ] + fraction * self._reference_joint_position[upper]
-        velocity = (1.0 - fraction) * self._reference_joint_velocity[
-            lower
-        ] + fraction * self._reference_joint_velocity[upper]
+        velocity = velocity_scale * (
+            (1.0 - fraction) * self._reference_joint_velocity[lower]
+            + fraction * self._reference_joint_velocity[upper]
+        )
         root_position = (1.0 - fraction) * self._reference_root_position[
             lower
         ] + fraction * self._reference_root_position[upper]
@@ -761,16 +831,14 @@ class DirectionalRun(mjx_env.MjxEnv):
             1.0 - fraction
         ) * lower_quaternion + fraction * upper_quaternion
         root_quaternion /= jp.maximum(jp.linalg.norm(root_quaternion), 1.0e-8)
-        root_linear_velocity = (1.0 - fraction) * self._reference_root_linear_velocity[
-            lower
-        ] + fraction * self._reference_root_linear_velocity[upper]
-        root_angular_velocity = (
-            1.0 - fraction
-        ) * self._reference_root_angular_velocity[
-            lower
-        ] + fraction * self._reference_root_angular_velocity[
-            upper
-        ]
+        root_linear_velocity = velocity_scale * (
+            (1.0 - fraction) * self._reference_root_linear_velocity[lower]
+            + fraction * self._reference_root_linear_velocity[upper]
+        )
+        root_angular_velocity = velocity_scale * (
+            (1.0 - fraction) * self._reference_root_angular_velocity[lower]
+            + fraction * self._reference_root_angular_velocity[upper]
+        )
         contact_index = jp.where(fraction < 0.5, lower, upper)
         return (
             position,
@@ -850,11 +918,20 @@ class DirectionalRun(mjx_env.MjxEnv):
     def _get_obs(self, data: mjx.Data, info: dict[str, Any]) -> dict[str, jax.Array]:
         joint_positions_training = data.qpos[self._joint_qpos] * self._sign
         joint_velocities_training = data.qvel[self._joint_dof] * self._sign
+        if self._reference_centered:
+            reference_position, reference_velocity, *_ = self._reference_at_phase(
+                info["gait_phase"],
+                velocity_scale=self._reference_velocity_scale(info["gait_frequency"]),
+            )
+        else:
+            reference_position = self._nominal_training
+            reference_velocity = jp.zeros(self.action_size)
         joint_triplets = jp.stack(
             [
-                (joint_positions_training - self._nominal_training)
+                (joint_positions_training - reference_position)
                 / self._config.joint_position_scale,
-                joint_velocities_training / self._config.joint_velocity_scale,
+                (joint_velocities_training - reference_velocity)
+                / self._config.joint_velocity_scale,
                 info["last_action"] / self._config.previous_action_scale,
             ],
             axis=1,

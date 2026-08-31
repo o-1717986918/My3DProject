@@ -72,6 +72,60 @@ def mirror_root_quaternion_xyzw(quaternions: np.ndarray) -> np.ndarray:
     return _continuous_quaternions(result)
 
 
+def canonicalize_root_heading(quaternions: np.ndarray) -> np.ndarray:
+    """Rotate the cycle so mean root forward is world +X."""
+    values = _continuous_quaternions(quaternions)
+    rotations = Rotation.from_quat(values)
+    yaw = rotations.as_euler("zyx")[:, 0]
+    yaw_center = float(np.arctan2(np.mean(np.sin(yaw)), np.mean(np.cos(yaw))))
+    correction = Rotation.from_rotvec([0.0, 0.0, -yaw_center])
+    return _continuous_quaternions((correction * rotations).as_quat())
+
+
+def _prepare_forward_cycle(
+    root_position: np.ndarray,
+    root_quaternion: np.ndarray,
+    root_linear_velocity: np.ndarray,
+    joint_position: np.ndarray,
+    foot_contact: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, bool, float]:
+    """Canonicalize heading and reverse a source that moves body-backward."""
+    positions = np.asarray(root_position, dtype=np.float64)
+    quaternions = _continuous_quaternions(root_quaternion)
+    velocities = np.asarray(root_linear_velocity, dtype=np.float64)
+    joints = np.asarray(joint_position, dtype=np.float64)
+    contacts = np.asarray(foot_contact, dtype=bool)
+    yaw = Rotation.from_quat(quaternions).as_euler("zyx")[:, 0]
+    local_forward = np.cos(yaw) * velocities[:, 0] + np.sin(yaw) * velocities[:, 1]
+    mean_local_forward = float(np.mean(local_forward))
+    time_reversed = mean_local_forward < 0.0
+    if time_reversed:
+        positions = positions[::-1].copy()
+        quaternions = quaternions[::-1].copy()
+        joints = joints[::-1].copy()
+        contacts = contacts[::-1].copy()
+
+    reversed_yaw = Rotation.from_quat(quaternions).as_euler("zyx")[:, 0]
+    heading = float(
+        np.arctan2(np.mean(np.sin(reversed_yaw)), np.mean(np.cos(reversed_yaw)))
+    )
+    correction = Rotation.from_rotvec([0.0, 0.0, -heading])
+    relative_position = positions - positions[:1]
+    positions = correction.apply(relative_position)
+    quaternions = _continuous_quaternions(
+        (correction * Rotation.from_quat(quaternions)).as_quat()
+    )
+    return (
+        positions,
+        quaternions,
+        joints,
+        contacts,
+        abs(mean_local_forward),
+        time_reversed,
+        heading,
+    )
+
+
 def _continuous_quaternions(quaternions: np.ndarray) -> np.ndarray:
     result = np.asarray(quaternions, dtype=np.float64).copy()
     result /= np.maximum(np.linalg.norm(result, axis=1, keepdims=True), 1.0e-12)
@@ -365,6 +419,7 @@ def build_periodic_reference(
     required = {
         "root_position",
         "root_quaternion_xyzw",
+        "root_linear_velocity",
         "joint_position",
         "foot_contact",
     }
@@ -380,12 +435,26 @@ def build_periodic_reference(
     dt = 1.0 / frequency_hz
     joint_source, joint_factor = physical_mirror_map(contract.joint_order)
 
-    mean_forward_speed = float(
-        np.mean(np.asarray(source["root_linear_velocity"], dtype=np.float64)[:, 0])
+    (
+        source_root_position,
+        source_root_quaternion,
+        joint_position,
+        source_contact,
+        mean_forward_speed,
+        time_reversed_for_forward,
+        source_heading,
+    ) = _prepare_forward_cycle(
+        source["root_position"],
+        source["root_quaternion_xyzw"],
+        source["root_linear_velocity"],
+        joint_position,
+        source["foot_contact"],
     )
     cycle_delta = np.array([mean_forward_speed * frame_count * dt, 0.0, 0.0])
-    root_position = _project_root_position(source["root_position"], cycle_delta)
-    root_quaternion = _project_root_orientation(source["root_quaternion_xyzw"])
+    root_position = _project_root_position(source_root_position, cycle_delta)
+    root_quaternion = canonicalize_root_heading(
+        _project_root_orientation(source_root_quaternion)
+    )
     joint_position = project_half_cycle(
         joint_position,
         joint_source,
@@ -417,7 +486,6 @@ def build_periodic_reference(
     )
 
     half = frame_count // 2
-    source_contact = np.asarray(source["foot_contact"], dtype=bool)
     source_contact = np.concatenate(
         [source_contact[:half], source_contact[:half, ::-1]], axis=0
     )
@@ -493,17 +561,21 @@ def build_periodic_reference(
         "both_feet_have_stable_contact": min(slip["stable_contact_frames"]) >= 2,
         "non_foot_pitch_contact_free": replay["non_foot_pitch_contact_frames"] == 0,
         "root_yaw_deviation_lte_0_15": float(np.max(yaw_deviation)) <= 0.15,
+        "root_yaw_center_abs_lte_0_05": abs(yaw_center) <= 0.05,
         "lateral_excursion_lte_0_15": float(np.max(np.abs(root_position[:, 1])))
         <= 0.15,
     }
     report = {
         "schema_version": 1,
-        "projection": "bilateral_half_cycle_contact_aware_v1",
+        "projection": "bilateral_half_cycle_contact_aware_v2",
         "frame_count": frame_count,
         "frequency_hz": frequency_hz,
         "cycle_duration_seconds": frame_count * dt,
         "cycle_displacement_m": cycle_delta.tolist(),
         "commanded_average_forward_speed_m_s": mean_forward_speed,
+        "source_body_forward_speed_m_s": mean_forward_speed,
+        "source_time_reversed_for_forward_motion": time_reversed_for_forward,
+        "source_heading_correction_rad": -source_heading,
         "source_half_weight": source_half_weight,
         "smoothing_passes": smoothing_passes,
         "stance_correction_iterations": stance_correction_iterations,

@@ -63,27 +63,31 @@ measurement.
 ## 3. Versioned policy contract
 
 `run_policy_v1` preserves the legacy Python runtime boundary, while
-`run_policy_v2` adds gait phase. Both current contracts centre actions on a
-fixed nominal pose; the next motion-tracking contract will version the moving
-reference and residual scale explicitly rather than changing v2 silently:
+`run_policy_v2` adds gait phase. Both continue to centre actions on a fixed
+nominal pose and remain unchanged. Experimental `run_policy_v3` versions the
+moving-reference residual boundary explicitly:
 
-- input: `float32[1, 78]`;
+- input: `float32[1, 80]` including cosine/sine gait phase;
 - output: `float32[1, 23]`;
 - control rate: 50 Hz;
-- action: normal-policy output clipped to `[-10, 10]`, matching the existing
-  runtime, then decoded as a residual around the nominal pose;
-- physical target: `(nominal + 0.5 * action) * train_sim_flip`, followed by
-  the exact T1 joint-limit clamp already used by the competition runtime;
+- action: tanh-normal residual clipped to `[-1, 1]`;
+- physical target: `(reference(phase) + 0.15 * residual) * train_sim_flip`,
+  followed by the exact T1 joint-limit clamp;
+- zero residual reconstructs the reference target at every phase;
+- cadence and reference velocity scale by requested forward speed relative to
+  the reference's body-local forward speed;
 - PD gains: `kp=25`, `kd=0.6`;
 - finite-value checking and fallback to the existing stable walk model.
 
-The observation is one current frame, in this exact order:
+The v3 observation is one current frame, in this exact order:
 
-1. 23 interleaved triplets of normalized joint-position offset, normalized
-   joint velocity, and normalized previous action: 69 values;
+1. 23 interleaved triplets of normalized reference-relative joint-position
+   error, reference-relative joint-velocity error, and previous residual
+   action: 69 values;
 2. body angular velocity: 3 values;
 3. local target velocity `(vx, vy, yaw_rate)`: 3 values;
 4. projected gravity in the body frame: 3 values.
+5. gait-phase cosine/sine: 2 values.
 
 Training-only root velocity, height, contacts, and exact actuator state may be
 used by the critic or metrics, but never by the exported actor.
@@ -256,7 +260,7 @@ silently changed.
 - [x] open reliable-strategy refresh, evidence matrix and staged decision lock;
 - [x] identical-action CPU/MJWarp parity trace and regression test;
 - [x] periodic exact-T1 reference projection and CPU/MJWarp initial-state parity;
-- [ ] reference-centred residual tracking contract and environment;
+- [x] reference-centred residual tracking contract and environment interface;
 - [ ] feature-flagged runtime integration with fallback;
 - [ ] single-player RCSS gate, headless 7v7 gate, and visual 7v7 gate;
 - [ ] three-seed release evaluation after the first candidate succeeds.
@@ -281,8 +285,8 @@ episodes. A mathematically reflection-equivariant two-pass diagnostic reached
 64/64 upright and reduced drift to 1.15 m, but erased the qualifying aerial
 phase and still exceeded the 0.25 m drift gate. It is not a deployable model.
 
-The CPU-versus-Warp trajectory suite and periodic robot-native R1 reference
-now pass. The next implementation milestone is the versioned moving-reference
-decoder where zero action reproduces the reference target exactly, followed by
-a short optimizer/checkpoint integration run. More reward-only continuation is
-not supported by the evidence from this stage.
+The CPU-versus-Warp trajectory suite, body-forward periodic robot-native R1
+reference and versioned v3 moving-reference decoder now pass. The next
+implementation milestone is a short optimizer/checkpoint integration run,
+followed by fixed-speed training and exact CPU evaluation. More reward-only
+continuation is not supported by the evidence from this stage.

@@ -5,14 +5,14 @@ purpose: periodic_symmetric_contact_aware_t1_run_reference
 
 data_boundary:
   path_policy: local_only_not_committed
-  output_path: /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v1.npz
-  output_sha256: 7f08758850e5b71bd0f80040982bd600cd6e77cd6d8ef90ccc66a09ba495b0de
+  output_path: /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v3.npz
+  output_sha256: ab81912570d746965162f1d84cfd6d215a1265bd28dfc2d371c72f095aa40f9a
   parent_sha256: 2ad294330d7d7fc19e236169bdc862079c8228fd38a544703c38f698fee09820
   source_license: CC-BY-NC-ND-4.0
   redistribution: prohibited
 
 projection:
-  algorithm: bilateral_half_cycle_contact_aware_v1
+  algorithm: bilateral_half_cycle_contact_aware_v2
   contract: training/contracts/run_policy_v2.yaml
   frame_count: 34
   frequency_hz: 50.0
@@ -21,61 +21,79 @@ projection:
   smoothing_passes: 4
   stance_correction_iterations: 1
   stable_contact_minimum_run_frames: 4
-  cycle_displacement_m: [2.1778288888931274, 0.0, 0.0]
-  commanded_average_forward_speed_m_s: 3.2026895424898933
-  validated_average_horizontal_speed_m_s: 3.1924355030059814
+  cycle_displacement_m: [2.172438487559979, 0.0, 0.0]
+  commanded_average_forward_speed_m_s: 3.1947624817058515
+  validated_average_horizontal_speed_m_s: 3.1907315254211426
+  source_time_reversed_for_forward_motion: true
+  source_heading_correction_rad: -3.1313853974253987
 
 exact_cpu_replay:
-  contact_frames: [10, 10]
-  stable_contact_frames: [7, 7]
-  longest_flight_frames: 7
-  longest_flight_seconds: 0.14
-  minimum_contact_distance_m: -0.0010000000000000356
+  contact_frames: [11, 11]
+  stable_contact_frames: [8, 8]
+  longest_flight_frames: 6
+  longest_flight_seconds: 0.12
+  minimum_contact_distance_m: -0.002047257361192975
   non_foot_pitch_contact_frames: 0
   joint_limit_max_violation_rad: 0.0
 
 symmetry:
   joint_position_max_abs_rad: 0.0
-  root_position_max_abs_m: 4.440892098500626e-16
+  root_position_max_abs_m: 2.220446049250313e-16
   root_orientation_max_angle_rad: 0.0
   contact_mismatch_values: 0
 
 continuity:
-  wrap_joint_step_max_rad: 0.31679145209491255
-  internal_joint_step_p95_rad: 0.2605790364556015
-  wrap_to_internal_p95_ratio: 1.2157211739052876
-  joint_velocity_wrap_max_rad_s: 1.941427059518902
-  root_velocity_wrap_max_m_s: 0.14708900665233582
-  root_velocity_cyclic_step_max_m_s: 0.8497245973958317
+  wrap_joint_step_max_rad: 0.30627271262928846
+  internal_joint_step_p95_rad: 0.24987435610964898
+  wrap_to_internal_p95_ratio: 1.2257068608308528
+  joint_velocity_wrap_max_rad_s: 1.8954604362124887
+  root_velocity_wrap_max_m_s: 0.22485091343456887
+  root_velocity_cyclic_step_max_m_s: 0.8559654252774579
 
 stance_slip:
   metric_scope: exact_contact_runs_of_at_least_4_frames
-  mean_m_s: 0.10706414861757228
-  p90_m_s: 0.22212858541063532
-  max_m_s: 0.2295535487632013
+  mean_m_s: 0.12488601239987537
+  p90_m_s: 0.2616228804730813
+  max_m_s: 0.2924369683356613
 
 heading:
-  circular_yaw_center_rad: -3.141592653589793
-  yaw_deviation_max_rad: 0.09407083278957831
-  lateral_excursion_max_m: 0.021604132567439916
+  circular_yaw_center_rad: 5.620917564961792e-19
+  yaw_deviation_max_rad: 0.09406171355289554
+  lateral_excursion_max_m: 0.029359665662473344
+  mean_body_local_forward_direction: positive
 
-cpu_mjwarp_initial_state_parity:
-  steps: 10
-  action_pattern: zero
-  contact_proxy_mismatch_frames: 0
-  max_errors:
-    target_max_abs_rad: 0.0
-    joint_position_max_abs_rad: 6.760726124488414e-7
-    root_position_norm_m: 1.2919512756754176e-6
-    root_yaw_abs_rad: 1.2229954204912016e-7
-    torso_orientation_rad: 1.1920928955078128e-7
-    foot_height_max_abs_m: 4.1080141782723345e-7
-  parity_gate_passed: true
+cpu_mjwarp_reference_residual_parity:
+  contract: training/contracts/run_policy_v3.yaml
+  runs:
+    - action_pattern: zero
+      steps: 20
+      contact_proxy_mismatch_frames: 0
+      max_errors:
+        target_max_abs_rad: 0.0
+        joint_position_max_abs_rad: 2.7846649646653954e-6
+        root_position_norm_m: 2.2068796380424754e-6
+        root_yaw_abs_rad: 2.1720784736500853e-5
+        torso_orientation_rad: 2.2329876059210495e-6
+        foot_height_max_abs_m: 1.41959391773e-7
+      parity_gate_passed: true
+    - action_pattern: sine
+      action_amplitude: 1.0
+      steps: 20
+      contact_proxy_mismatch_frames: 0
+      max_errors:
+        target_max_abs_rad: 0.0
+        joint_position_max_abs_rad: 1.3314080168493753e-5
+        root_position_norm_m: 4.480971962433895e-6
+        root_yaw_abs_rad: 2.5066314060850914e-5
+        torso_orientation_rad: 6.448330085899533e-6
+        foot_height_max_abs_m: 3.7764339495816035e-7
+      parity_gate_passed: true
 
 interpretation:
   projection_gate_passed: true
   schema_and_provenance_gate_passed: true
   exact_cpu_replay_gate_passed: true
+  body_forward_semantics_gate_passed: true
   short_horizon_backend_parity_gate_passed: true
   release_policy_available: false
   next_stage: reference_centered_residual_tracking

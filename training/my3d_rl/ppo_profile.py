@@ -153,6 +153,26 @@ PROFILES = {
         learning_rate_min=2.5e-7,
         learning_rate_max=2.0e-6,
     ),
+    # The v3 actor predicts only a bounded correction around the periodic T1
+    # reference.  A fresh tanh-normal network therefore starts close to the
+    # demonstrated motion instead of inheriting the legacy nominal-pose
+    # decoder.  The residual authority is limited separately by the v3
+    # contract to 0.15 rad.
+    "reference_residual_v1": PpoProfile(
+        name="reference_residual_v1",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="tanh_normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=2,
+        discounting=0.995,
+        entropy_cost=1.0e-4,
+        learning_rate=1.0e-4,
+        normalize_observations=True,
+        policy_contract="run_policy_v3",
+    ),
 }
 
 

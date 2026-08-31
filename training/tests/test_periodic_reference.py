@@ -1,10 +1,12 @@
 import numpy as np
 
 from my3d_rl.periodic_reference import (
+    canonicalize_root_heading,
     circular_gradient,
     mirror_root_quaternion_xyzw,
     project_half_cycle,
 )
+from scipy.spatial.transform import Rotation
 
 
 def test_half_cycle_projection_is_exact_and_idempotent():
@@ -42,6 +44,20 @@ def test_sagittal_root_reflection_is_an_involution():
     twice = mirror_root_quaternion_xyzw(mirror_root_quaternion_xyzw(rotations))
 
     np.testing.assert_allclose(np.abs(np.sum(twice * rotations, axis=1)), 1.0)
+
+
+def test_root_heading_is_canonicalized_to_world_forward():
+    yaw = np.array([np.pi - 0.1, np.pi, -np.pi + 0.1])
+    rotvec = np.zeros((yaw.size, 3))
+    rotvec[:, 2] = yaw
+    quaternions = Rotation.from_rotvec(rotvec).as_quat()
+
+    canonical = canonicalize_root_heading(quaternions)
+    canonical_yaw = Rotation.from_quat(canonical).as_euler("zyx")[:, 0]
+    center = np.arctan2(np.mean(np.sin(canonical_yaw)), np.mean(np.cos(canonical_yaw)))
+
+    assert abs(center) < 1.0e-12
+    np.testing.assert_allclose(canonical_yaw, [-0.1, 0.0, 0.1], atol=1.0e-12)
 
 
 def test_circular_gradient_preserves_constant_cycle_progress():
