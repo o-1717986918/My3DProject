@@ -51,7 +51,8 @@ KickExecutionProfile make_kick_execution_profile(
         (*command.target_point_m)[0] - snapshot.self.position_m[0],
         (*command.target_point_m)[1] - snapshot.self.position_m[1],
     };
-    if (math::norm2(target_delta) < kMinimumTargetDistanceM) {
+    const double target_distance_m = math::norm2(target_delta);
+    if (target_distance_m < kMinimumTargetDistanceM) {
         return profile;
     }
 
@@ -89,6 +90,8 @@ KickExecutionProfile make_kick_execution_profile(
     profile.total_duration_s = drive_duration + kStabilizationDurationS;
     profile.requested_speed_mps = command.requested_ball_speed_mps;
     profile.relative_target_angle_deg = relative_angle_deg;
+    profile.target_distance_m = target_distance_m;
+    profile.mode = command.mode;
     return profile;
 }
 

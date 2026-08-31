@@ -79,6 +79,35 @@ actor_observation:
     - {name: phase, size: 2, units: sin_cos}
     - {name: support_hint, size: 3, units: one_hot}
 
+decoder:
+  baseline: apollo_walk_policy
+  composition: clipped_baseline_plus_residual
+  action_scale_rad:
+    - 0.10
+    - 0.10
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.15
+    - 0.35
+    - 0.25
+    - 0.25
+    - 0.45
+    - 0.25
+    - 0.20
+    - 0.35
+    - 0.25
+    - 0.25
+    - 0.45
+    - 0.25
+    - 0.20
+  gains: apollo_t1_per_joint
+
 deployment:
   format: ONNX
   input_name: observations

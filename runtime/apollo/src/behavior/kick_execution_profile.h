@@ -25,6 +25,8 @@ struct KickExecutionProfile {
     double total_duration_s{1.0};
     double requested_speed_mps{0.0};
     double relative_target_angle_deg{0.0};
+    double target_distance_m{0.0};
+    decision::KickMode mode{decision::KickMode::ForwardContact};
 };
 
 /// Converts a target-aware high-level kick into a conservative, bounded

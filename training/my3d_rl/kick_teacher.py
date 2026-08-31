@@ -19,6 +19,7 @@ import onnxruntime as ort
 from .contract import PolicyContract, load_policy_contract
 from .kick_env import DEFAULT_CONTRACT
 from .rcss_scene import DEFAULT_RESOURCE_ROOT, build_single_t1_soccer_model
+from .t1_control import APOLLO_DEFAULT_POSE, KICK_ACTION_SCALE, apollo_joint_gains
 
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
@@ -31,36 +32,6 @@ DEFAULT_WALK_POLICY = (
     / "walk"
     / "policy.onnx"
 )
-APOLLO_DEFAULT_POSE = np.array(
-    [
-        0.0,
-        0.0,
-        0.0,
-        -1.4,
-        0.0,
-        -0.4,
-        0.0,
-        1.4,
-        0.0,
-        0.4,
-        0.0,
-        -0.2,
-        0.0,
-        0.0,
-        0.4,
-        -0.2,
-        0.0,
-        -0.2,
-        0.0,
-        0.0,
-        0.4,
-        -0.2,
-        0.0,
-    ],
-    dtype=np.float64,
-)
-
-
 PARAMETER_NAMES = (
     "support_hip_roll",
     "support_ankle_roll",
@@ -130,6 +101,8 @@ class KickTeacherSpec:
     target_distance_m: float = 2.0
     target_angle_deg: float = 0.0
     requested_ball_speed_mps: float = 1.43
+    desired_arrival_speed_mps: float = 1.0
+    action_mode: str = "pass"
     duration_s: float = 1.20
     evaluation_duration_s: float = 3.0
     control_dt_s: float = 0.02
@@ -141,6 +114,7 @@ class KickTeacherSpec:
                 self.target_distance_m,
                 self.target_angle_deg,
                 self.requested_ball_speed_mps,
+                self.desired_arrival_speed_mps,
                 self.duration_s,
                 self.evaluation_duration_s,
                 self.control_dt_s,
@@ -156,6 +130,10 @@ class KickTeacherSpec:
             raise ValueError("target_angle_deg must be in [-30, 30]")
         if not 0.2 <= self.requested_ball_speed_mps <= 6.0:
             raise ValueError("requested_ball_speed_mps must be in [0.2, 6]")
+        if not 0.0 <= self.desired_arrival_speed_mps <= 6.0:
+            raise ValueError("desired_arrival_speed_mps must be in [0, 6]")
+        if self.action_mode not in {"pass", "shot", "clear"}:
+            raise ValueError("action_mode must be pass, shot, or clear")
         if self.duration_s <= 0.0 or self.control_dt_s <= 0.0:
             raise ValueError("durations must be positive")
         if self.evaluation_duration_s < self.duration_s:
@@ -335,7 +313,7 @@ class KickTeacherEvaluator:
         ):
             pos_id = self.model.actuator(prefix + effector + "_pos").id
             vel_id = self.model.actuator(prefix + effector + "_vel").id
-            kp, kd = self._apollo_joint_gains(joint_name)
+            kp, kd = apollo_joint_gains(joint_name)
             self.model.actuator_gainprm[pos_id, 0] = kp
             self.model.actuator_biasprm[pos_id, 1] = -kp
             self.model.actuator_gainprm[vel_id, 0] = kd
@@ -356,6 +334,7 @@ class KickTeacherEvaluator:
         self._ball_body = self.model.body("ball").id
         self._ball_qpos = self.model.joint("ball-root").qposadr[0]
         self._ball_dof = self.model.joint("ball-root").dofadr[0]
+        self._root_dof = self.model.joint(prefix + "root").dofadr[0]
         self._torso_body = self.model.body(prefix + "torso").id
         self._torso_site = self.model.site(prefix + "torso").id
         gyro = self.model.sensor(prefix + "torso_gyro")
@@ -372,32 +351,8 @@ class KickTeacherEvaluator:
         if self._walk_session.get_outputs()[0].shape != [1, 23]:
             raise ValueError("Apollo walk teacher must have a [1, 23] output")
         self._captured_targets = np.empty((0, self.contract.action_size))
-
-    @staticmethod
-    def _apollo_joint_gains(name: str) -> tuple[float, float]:
-        if name == "AAHead_yaw":
-            return 10.0, 1.0
-        if name == "Head_pitch":
-            return 20.0, 1.0
-        if name == "Waist":
-            return 85.0, 5.0
-        if "Shoulder" in name:
-            return 45.0, 2.5
-        if "Elbow" in name:
-            return 30.0, 1.2
-        if "Hip_Pitch" in name:
-            return 130.0, 10.0
-        if "Hip_Roll" in name:
-            return 90.0, 8.0
-        if "Hip_Yaw" in name:
-            return 70.0, 3.0
-        if "Knee" in name:
-            return 140.0, 6.0
-        if "Ankle_Pitch" in name:
-            return 45.0, 2.0
-        if "Ankle_Roll" in name:
-            return 40.0, 1.8
-        return 10.0, 0.1
+        self._captured_observations = np.empty((0, self.contract.observation_size))
+        self._captured_actions = np.empty((0, self.contract.action_size))
 
     def _stable_walk_target(
         self,
@@ -425,22 +380,115 @@ class KickTeacherEvaluator:
         action = np.clip(np.nan_to_num(action), -5.0, 5.0)
         return self._default_pose + 0.25 * action, action
 
+    def _kick_actor_observation(
+        self,
+        data: mujoco.MjData,
+        previous_action: np.ndarray,
+        action_time_s: float,
+    ) -> np.ndarray:
+        torso_xmat = data.site_xmat[self._torso_site].reshape(3, 3)
+        yaw = np.arctan2(torso_xmat[1, 0], torso_xmat[0, 0])
+        c, s = np.cos(yaw), np.sin(yaw)
+        world_to_yaw = np.array([[c, s], [-s, c]])
+        torso_pos = data.xpos[self._torso_body]
+        ball_pos = data.xpos[self._ball_body]
+        ball_world_vel = data.qvel[self._ball_dof : self._ball_dof + 3]
+        torso_world_vel = data.qvel[self._root_dof : self._root_dof + 3]
+        ball_local_xy = world_to_yaw @ (ball_pos[:2] - torso_pos[:2])
+        ball_local_vel_xy = world_to_yaw @ (ball_world_vel[:2] - torso_world_vel[:2])
+        target_angle = np.deg2rad(self.spec.target_angle_deg)
+        target_world = np.array([np.cos(target_angle), np.sin(target_angle)])
+        target_local = world_to_yaw @ target_world
+        gravity = torso_xmat.T @ np.array([0.0, 0.0, -1.0])
+        # A kick is a one-shot motion, not a periodic gait.  Encoding the
+        # complete action on one half-circle makes progression injective and
+        # clamps to a distinct terminal value after the kick has finished.
+        progress = np.clip(action_time_s / self.spec.duration_s, 0.0, 1.0)
+        phase = np.pi * progress
+        mode_index = {"pass": 0, "shot": 1, "clear": 2}[self.spec.action_mode]
+        action_mode = np.eye(3, dtype=np.float64)[mode_index]
+        actor = np.concatenate(
+            [
+                data.sensordata[self._gyro_slice],
+                gravity,
+                data.qpos[self._joint_qpos] - self._default_pose,
+                data.qvel[self._joint_dof],
+                previous_action,
+                np.array(
+                    [
+                        ball_local_xy[0],
+                        ball_local_xy[1],
+                        ball_pos[2] - torso_pos[2],
+                    ]
+                ),
+                np.array(
+                    [
+                        ball_local_vel_xy[0],
+                        ball_local_vel_xy[1],
+                        ball_world_vel[2],
+                    ]
+                ),
+                target_local,
+                np.array([self.spec.target_distance_m]),
+                np.array([self.spec.requested_ball_speed_mps]),
+                np.array([self.spec.desired_arrival_speed_mps]),
+                action_mode,
+                np.array([0.0, 1.0]),
+                np.array([np.sin(phase), np.cos(phase)]),
+                np.array([0.0, 1.0, 0.0]),
+            ]
+        ).astype(np.float32)
+        if actor.shape != (self.contract.observation_size,):
+            raise RuntimeError(
+                f"teacher observation has shape {actor.shape}, expected "
+                f"({self.contract.observation_size},)"
+            )
+        return actor
+
     def rollout(
         self,
-        parameters: np.ndarray,
+        parameters: np.ndarray | None,
         *,
         capture_targets: bool = False,
         ball_x_offset_m: float = 0.0,
         ball_y_offset_m: float = 0.0,
+        phase_reference_ball_x_offset_m: float | None = None,
+        phase_alignment_s_per_m: float = 0.0,
+        kick_policy_session: ort.InferenceSession | None = None,
     ) -> dict[str, float | bool]:
-        if not np.isfinite([ball_x_offset_m, ball_y_offset_m]).all():
+        if phase_reference_ball_x_offset_m is None:
+            phase_reference_ball_x_offset_m = ball_x_offset_m
+        if not np.isfinite(
+            [
+                ball_x_offset_m,
+                ball_y_offset_m,
+                phase_reference_ball_x_offset_m,
+                phase_alignment_s_per_m,
+            ]
+        ).all():
             raise ValueError("ball offsets must be finite")
+        if parameters is None and kick_policy_session is None:
+            raise ValueError("provide parameters, kick_policy_session, or both")
         control_times = np.arange(
             0.0,
             self.spec.evaluation_duration_s + 0.5 * self.spec.control_dt_s,
             self.spec.control_dt_s,
         )
-        deltas = build_joint_delta_trajectory(parameters, self.contract, control_times)
+        # Preserve every optimized node exactly, but align contact timing
+        # inside its Voronoi cell.  Apollo approaches at 0.50 m/s, so the
+        # longitudinal difference converts directly into a bounded time shift.
+        phase_shift_s = np.clip(
+            (ball_x_offset_m - phase_reference_ball_x_offset_m)
+            * phase_alignment_s_per_m,
+            -0.10,
+            0.10,
+        )
+        action_times = np.clip(control_times - phase_shift_s, 0.0, None)
+        deltas = (
+            build_joint_delta_trajectory(parameters, self.contract, action_times)
+            if parameters is not None
+            else np.zeros((control_times.size, self.contract.action_size))
+        )
         targets = np.clip(
             self._default_pose[None, :] + deltas, self._lowers, self._uppers
         )
@@ -463,25 +511,66 @@ class KickTeacherEvaluator:
         closest_directional_speed = 0.0
         maximum_progress = 0.0
         previous_action = np.zeros(self.contract.action_size, dtype=np.float64)
+        previous_kick_action = np.zeros(self.contract.action_size, dtype=np.float64)
         captured_targets: list[np.ndarray] = []
+        captured_observations: list[np.ndarray] = []
+        captured_actions: list[np.ndarray] = []
+        saturated_action_values = 0
+        action_value_count = 0
+        kick_policy_input = (
+            kick_policy_session.get_inputs()[0].name
+            if kick_policy_session is not None
+            else None
+        )
 
         substeps = int(round(self.spec.control_dt_s / self.spec.simulation_dt_s))
-        for control_index, residual_target in enumerate(
-            targets - self._default_pose[None, :]
+        for control_index, (action_time_s, residual_target) in enumerate(
+            zip(action_times, targets - self._default_pose[None, :], strict=True)
         ):
             elapsed = control_times[control_index]
             velocity_command = np.array(
-                [0.50, -0.04, 0.0] if elapsed < 0.65 else [0.0, 0.0, 0.0],
+                [0.50, -0.04, 0.0] if action_time_s < 0.65 else [0.0, 0.0, 0.0],
                 dtype=np.float64,
+            )
+            kick_observation = self._kick_actor_observation(
+                data, previous_kick_action, float(action_time_s)
             )
             stable_target, previous_action = self._stable_walk_target(
                 data, previous_action, velocity_command
             )
+            teacher_action = residual_target / KICK_ACTION_SCALE
+            if kick_policy_session is not None:
+                policy_action = kick_policy_session.run(
+                    None,
+                    {kick_policy_input: kick_observation[None, :]},
+                )[0][0].astype(np.float64)
+                policy_action = np.nan_to_num(
+                    policy_action, nan=0.0, posinf=1.0, neginf=-1.0
+                )
+                raw_kick_action = policy_action
+                label_action = (
+                    teacher_action if parameters is not None else policy_action
+                )
+            else:
+                raw_kick_action = teacher_action
+                label_action = raw_kick_action
+            saturated_action_values += int(
+                np.count_nonzero(np.abs(raw_kick_action) > 1.0)
+            )
+            action_value_count += raw_kick_action.size
+            kick_action = np.clip(raw_kick_action, -1.0, 1.0)
             target = np.clip(
-                stable_target + residual_target, self._lowers, self._uppers
+                stable_target + kick_action * KICK_ACTION_SCALE,
+                self._lowers,
+                self._uppers,
             )
             if capture_targets:
+                captured_observations.append(kick_observation)
+                captured_actions.append(
+                    np.clip(label_action, -1.0, 1.0).astype(np.float32)
+                )
                 captured_targets.append(target.copy())
+            previous_kick_action = kick_action
             data.ctrl[self._pos_actuator] = target
             for _ in range(substeps):
                 mujoco.mj_step(self.model, data)
@@ -505,11 +594,17 @@ class KickTeacherEvaluator:
                 torso_upright = float(data.xmat[self._torso_body].reshape(3, 3)[2, 2])
                 minimum_torso_height = min(minimum_torso_height, torso_height)
                 minimum_upright = min(minimum_upright, torso_upright)
+            if kick_policy_session is not None and (
+                minimum_torso_height < 0.35 or minimum_upright < 0.0
+            ):
+                break
             if control_index + 1 >= targets.shape[0]:
                 break
 
         if capture_targets:
             self._captured_targets = np.asarray(captured_targets)
+            self._captured_observations = np.asarray(captured_observations)
+            self._captured_actions = np.asarray(captured_actions)
 
         displacement = data.xpos[self._ball_body, :2] - initial_ball
         final_progress = float(np.dot(displacement, target_direction))
@@ -519,7 +614,11 @@ class KickTeacherEvaluator:
         )
         fell = minimum_torso_height < 0.35 or minimum_upright < 0.0
         contact = maximum_directional_speed >= 0.15 or maximum_progress >= 0.08
-        parameter_cost = float(np.mean(np.square(parameters / PARAMETER_UPPER)))
+        parameter_cost = (
+            float(np.mean(np.square(parameters / PARAMETER_UPPER)))
+            if parameters is not None
+            else 0.0
+        )
         score = (
             3.0 * min(max(maximum_progress, 0.0), self.spec.target_distance_m)
             - 2.0 * closest_range_error
@@ -546,10 +645,60 @@ class KickTeacherEvaluator:
             "minimum_upright": minimum_upright,
             "contact": contact,
             "fell": fell,
+            "action_saturation_fraction": (
+                saturated_action_values / action_value_count
+                if action_value_count
+                else 0.0
+            ),
         }
 
     def objective(self, parameters: np.ndarray) -> float:
         return float(self.rollout(parameters)["score"])
+
+    def rollout_policy(
+        self,
+        session: ort.InferenceSession,
+        *,
+        ball_x_offset_m: float = 0.0,
+        ball_y_offset_m: float = 0.0,
+    ) -> dict[str, float | bool]:
+        input_meta = session.get_inputs()[0]
+        output_meta = session.get_outputs()[0]
+        if input_meta.shape != [1, self.contract.observation_size]:
+            raise ValueError("kick ONNX input does not match the v2 contract")
+        if output_meta.shape != [1, self.contract.action_size]:
+            raise ValueError("kick ONNX output does not match the v2 contract")
+        return self.rollout(
+            None,
+            ball_x_offset_m=ball_x_offset_m,
+            ball_y_offset_m=ball_y_offset_m,
+            kick_policy_session=session,
+        )
+
+    def dagger_demonstration(
+        self,
+        teacher_parameters: np.ndarray,
+        session: ort.InferenceSession,
+        *,
+        ball_x_offset_m: float = 0.0,
+        ball_y_offset_m: float = 0.0,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, float | bool]]:
+        """Execute the learner and label every visited state with the teacher."""
+        metrics = self.rollout(
+            teacher_parameters,
+            capture_targets=True,
+            ball_x_offset_m=ball_x_offset_m,
+            ball_y_offset_m=ball_y_offset_m,
+            kick_policy_session=session,
+        )
+        sample_count = self._captured_observations.shape[0]
+        times = np.arange(sample_count, dtype=np.float64) * self.spec.control_dt_s
+        return (
+            times,
+            self._captured_observations.copy(),
+            self._captured_actions.copy(),
+            metrics,
+        )
 
     def optimize(
         self,
@@ -558,15 +707,18 @@ class KickTeacherEvaluator:
         population: int,
         generations: int,
         robust_samples: int = 1,
+        ball_x_offset_m: float = 0.0,
+        ball_y_offset_m: float = 0.0,
+        initial_parameters: np.ndarray | None = None,
     ) -> CEMResult:
         if robust_samples < 1:
             raise ValueError("robust_samples must be positive")
         perturbation_rng = np.random.default_rng(seed + 1_000_003)
-        perturbations = [(0.0, 0.0)]
+        perturbations = [(ball_x_offset_m, ball_y_offset_m)]
         perturbations.extend(
             (
-                float(perturbation_rng.uniform(-0.01, 0.08)),
-                float(perturbation_rng.uniform(-0.08, 0.08)),
+                float(ball_x_offset_m + perturbation_rng.uniform(-0.02, 0.02)),
+                float(ball_y_offset_m + perturbation_rng.uniform(-0.03, 0.03)),
             )
             for _ in range(robust_samples - 1)
         )
@@ -583,10 +735,20 @@ class KickTeacherEvaluator:
                 ],
                 dtype=np.float64,
             )
-            return float(np.mean(scores) - 0.25 * np.std(scores))
+            # Deployment needs a floor, not a high average hiding one bad ball
+            # placement.  Keep some pressure on mean quality while making the
+            # worst deterministic perturbation dominate the search objective.
+            return float(0.35 * np.mean(scores) + 0.65 * np.min(scores))
 
-        initial_mean = np.zeros(len(PARAMETER_NAMES), dtype=np.float64)
-        initial_std = 0.35 * (PARAMETER_UPPER - PARAMETER_LOWER)
+        if initial_parameters is None:
+            initial_mean = np.zeros(len(PARAMETER_NAMES), dtype=np.float64)
+            initial_std = 0.35 * (PARAMETER_UPPER - PARAMETER_LOWER)
+        else:
+            initial_mean = np.asarray(initial_parameters, dtype=np.float64)
+            if initial_mean.shape != (len(PARAMETER_NAMES),):
+                raise ValueError("initial_parameters has the wrong shape")
+            initial_mean = np.clip(initial_mean, PARAMETER_LOWER, PARAMETER_UPPER)
+            initial_std = 0.18 * (PARAMETER_UPPER - PARAMETER_LOWER)
         return cem_optimize(
             robust_objective,
             initial_mean=initial_mean,
@@ -606,6 +768,33 @@ class KickTeacherEvaluator:
         )
         self.rollout(parameters, capture_targets=True)
         return times, self._captured_targets.copy()
+
+    def demonstration(
+        self,
+        parameters: np.ndarray,
+        *,
+        ball_x_offset_m: float = 0.0,
+        ball_y_offset_m: float = 0.0,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, float | bool]]:
+        """Return exact observations/actions/targets for one optimized condition."""
+        times = np.arange(
+            0.0,
+            self.spec.evaluation_duration_s + 0.5 * self.spec.control_dt_s,
+            self.spec.control_dt_s,
+        )
+        metrics = self.rollout(
+            parameters,
+            capture_targets=True,
+            ball_x_offset_m=ball_x_offset_m,
+            ball_y_offset_m=ball_y_offset_m,
+        )
+        return (
+            times,
+            self._captured_observations.copy(),
+            self._captured_actions.copy(),
+            self._captured_targets.copy(),
+            metrics,
+        )
 
 
 def kick_trial_success(

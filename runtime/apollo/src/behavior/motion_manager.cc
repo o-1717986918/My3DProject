@@ -6,6 +6,7 @@
 #include "src/decision/role_manager.h"
 
 #include <algorithm>
+#include <exception>
 #include <variant>
 
 namespace behavior {
@@ -14,7 +15,17 @@ MotionManager::MotionManager(const app::RuntimeConfig& config)
     : walk_runner_(config.resolve_asset_path("networks/walk/policy.onnx")),
       neutral_runner_(config.resolve_asset_path("keyframes/neutral.yaml")),
       getup_runner_(config.resolve_asset_path("networks/getup/policy.onnx")),
-      parameterized_kick_enabled_(config.enable_parameterized_kick) {}
+      parameterized_kick_enabled_(config.enable_parameterized_kick) {
+    if (parameterized_kick_enabled_) {
+        try {
+            kick_residual_runner_.emplace(
+                config.resolve_asset_path("keyframes/kick_residual_table.yaml"));
+        } catch (const std::exception&) {
+            parameterized_kick_enabled_ = false;
+            kick_residual_runner_.reset();
+        }
+    }
+}
 
 MotionStepResult MotionManager::step(
     const world::WorldSnapshot& snapshot,
@@ -61,6 +72,12 @@ MotionStepResult MotionManager::step_kick(
         kick_start_time_ = snapshot.server_time;
         kick_profile_ = make_kick_execution_profile(
             snapshot, command, parameterized_kick_enabled_);
+        kick_residual_active_ = parameterized_kick_enabled_ &&
+            kick_residual_runner_.has_value() &&
+            kick_residual_runner_->begin(snapshot, kick_profile_);
+        if (parameterized_kick_enabled_ && !kick_residual_active_) {
+            kick_profile_ = make_kick_execution_profile(snapshot, command, false);
+        }
     }
 
     const double elapsed = std::max(0.0, snapshot.server_time - kick_start_time_);
@@ -70,23 +87,41 @@ MotionStepResult MotionManager::step_kick(
     walk_command.orientation_absolute = false;
     walk_command.role_id = decision::RoleManager::ROLE_AP;
 
-    const bool drive_forward = elapsed < kick_profile_.drive_duration_s;
-    const bool macro_complete = elapsed >= kick_profile_.total_duration_s;
+    const double drive_duration_s =
+        kick_residual_active_ ? 0.65 : kick_profile_.drive_duration_s;
+    const double total_duration_s =
+        kick_residual_active_ ? 1.20 : kick_profile_.total_duration_s;
+    const bool drive_forward = elapsed < drive_duration_s;
+    const bool macro_complete = elapsed >= total_duration_s;
     walk_command.target_2d_m = drive_forward
-        ? kick_profile_.local_drive_target_m
+        ? (kick_residual_active_
+            ? std::array<double, 2>{0.50, -0.04}
+            : kick_profile_.local_drive_target_m)
         : std::array<double, 2>{0.0, 0.0};
 
-    const auto result = walk_runner_.step(
-        snapshot, walk_command, reset, walk_command.role_id);
+    auto result = walk_runner_.step(
+        snapshot,
+        walk_command,
+        reset,
+        kick_residual_active_ ? std::nullopt : walk_command.role_id);
+    if (kick_residual_active_) {
+        kick_residual_runner_->apply(elapsed, result.joint_targets);
+    }
     const bool parameterized =
         kick_profile_.kind == KickProfileKind::ParameterizedContact;
     return {
         true,
         macro_complete
-            ? (parameterized ? "ParameterizedKickHold" : "KickHold")
+            ? (kick_residual_active_
+                ? "ParameterizedResidualKickHold"
+                : (parameterized ? "ParameterizedKickHold" : "KickHold"))
             : (drive_forward
-                ? (parameterized ? "ParameterizedKickForward" : "KickForward")
-                : (parameterized ? "ParameterizedKickStabilize" : "KickStabilize")),
+                ? (kick_residual_active_
+                    ? "ParameterizedResidualKickForward"
+                    : (parameterized ? "ParameterizedKickForward" : "KickForward"))
+                : (kick_residual_active_
+                    ? "ParameterizedResidualKickStabilize"
+                    : (parameterized ? "ParameterizedKickStabilize" : "KickStabilize"))),
         result.joint_targets,
     };
 }

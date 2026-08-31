@@ -54,6 +54,8 @@ int main() {
         fast.kind != behavior::KickProfileKind::ParameterizedContact ||
         !near(slow.local_drive_target_m[0], 0.50) ||
         !near(fast.local_drive_target_m[0], 0.85) ||
+        !near(slow.target_distance_m, 4.0) ||
+        slow.mode != decision::KickMode::TargetedPass ||
         !(fast.drive_duration_s > slow.drive_duration_s)) {
         std::cerr << "speed request was not mapped monotonically and boundedly\n";
         return 1;

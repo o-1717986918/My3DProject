@@ -47,7 +47,7 @@ XML rather than a visually similar replacement.  It uses:
 - 0.005 s physics steps and four substeps per 50 Hz action;
 - the competition ball mass, radius, and friction;
 - the competition position-plus-velocity PD actuator protocol;
-- a 90-value deployable actor observation, 100-value privileged critic state,
+- a 96-value deployable actor observation, 106-value privileged critic state,
   and 23 residual joint targets;
 - per-joint action scales and explicit joint-limit clipping;
 - randomized fixed-ball position and shot heading for curriculum stage one.
@@ -111,7 +111,7 @@ python training/tools/train_kick_smoke.py \
 Passed now:
 
 - pinned GPU training runtime and source provenance;
-- exact competition asset assembly and 90/23 interface contract;
+- exact competition asset assembly and 96/23 interface contract;
 - JAX and Warp environment compilation/step;
 - real PPO update and persistent checkpoint;
 - checkpoint reload with finite actor/critic/normalizer parameters;
@@ -546,3 +546,65 @@ All manifests and NPZ trajectories remain under
 runtime. The next R1 deliverable is a labeled multi-condition teacher dataset,
 supervised initialization, then randomized residual training and held-out
 ONNX/server evaluation.
+
+## Residual kick teacher, DAgger and guarded runtime table — 2026-09-01
+
+The first behavior-cloning target incorrectly combined Apollo's stable walk
+output with the kick offset. The walk policy carries temporal state that was
+not fully observable through `kick_policy_v2`, so a small per-step regression
+error compounded in closed loop: the nine-condition actor had ONNX parity
+`4.17e-7`, yet fell in 20/20 exact-CPU trials. One pure-learner DAgger round
+reduced validation MSE from `0.0429` to `0.0337` but still fell in 20/20.
+
+The decoder was corrected to `Apollo walk target + bounded kick residual` and
+the one-shot phase was made injective over the 1.2 s motion. This retained the
+accepted walk controller as a physical baseline and changed the failure mode:
+subsequent candidates made contact and remained upright rather than diverging.
+A fresh 2 m, `-15/0/+15` degree, three-lateral-position teacher grid passed
+9/9 exact nominal conditions. Its NPZ contained 1,359 samples. Residual BC
+reached train MSE `1.40e-4`, validation MSE `0.0163`, ONNX parity `3.58e-7`,
+but only 0/20 randomized closed-loop successes. Residual DAgger round one
+aggregated 5,436 samples, achieved validation MSE `7.88e-4`, and improved the
+randomized result to 3/20 with 0 falls and 20/20 contacts. Round two did not
+improve success, so the current MLP is retained as research evidence rather
+than deployed.
+
+The reliable branch therefore exports deterministic smooth residual
+keyframes. Local robust CEM was expanded from two central nodes to a 3-by-5
+ball-position grid. Independent nearest-node success progressed from 13/100
+for the nominal table, to 40/100 for two locally robust nodes, 63/100 for the
+first position grid, and 79/100 for the repaired grid on its first held-out
+seed. Stronger worst-sample CEM did not reliably cross the gate. The final
+locked 15-node candidate achieved 224/300 (`74.67%`) over ball offsets
+`x=[-0.01,0.08] m`, `y=[-0.08,0.08] m`, with 300/300 contacts and zero falls.
+A phase-alignment scan over `-2,-1,-0.5,0,0.5,1,2 s/m` selected zero; every
+fixed longitudinal timing correction reduced the held-out success rate.
+
+This result is useful but below the 90% promotion threshold. The generated
+runtime table is therefore explicitly `promotable: false`, the
+`--enable-parameterized-kick` flag still defaults off, and unsupported target,
+speed, mode, ball-pose or visibility conditions fall back in the same cycle.
+The C++ executor loads 15 nodes, selects only within the measured 2 m forward
+pass envelope, reproduces the six smooth keyframes and per-joint residual
+clips, adds them to the stable walk target, and returns to zero at 1.2 s.
+CTest passes 7/7 including the cross-language knee clipping value and fallback
+cases.
+
+Locked evidence:
+
+- teacher manifest SHA-256
+  `4605fc6b18f360c4079a9f8cf8c5bf463523c5d35f834f4bec351f4d44136108`;
+- teacher dataset SHA-256
+  `46dea0173f6b2b9dcdac07905de2fcac0330eb3e324c63216cd83d9fc7e21bf1`;
+- 300-trial evaluation SHA-256
+  `e3784288c8e45c50a9e4cb9cec909ae5dd255e5821aed48a0f013dde618b6a99`;
+- exported runtime table SHA-256
+  `791bcfcbddbc24b9b1b1e2f0b9b9d650f5100a6a226a59b717a2a08bed3d953d`;
+- Apollo walk baseline SHA-256
+  `6df65fa7d36fd4989fcb022e385de797d51f35c8375532841034716e4bc0d850`.
+
+R1 is not complete. The next action milestone is an adaptive setup/contact
+state machine and robust 2/3.5/5 m pass grid, followed by shot/clear envelopes,
+moving-ball transitions, three-seed exact evaluation and RCSSServerMJ server
+calibration. More epochs on the current BC actor or more fixed-phase CEM are
+not justified by these results.

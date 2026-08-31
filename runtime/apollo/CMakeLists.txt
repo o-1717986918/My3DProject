@@ -113,6 +113,7 @@ add_library(behavior_core
     src/behavior/getup_runner.cc
     src/behavior/keyframe_runner.cc
     src/behavior/kick_execution_profile.cc
+    src/behavior/kick_residual_runner.cc
     src/behavior/motion_manager.cc
     src/behavior/onnx_session.cc
     src/behavior/walk_runner.cc
@@ -284,4 +285,16 @@ if(BUILD_TESTING)
     target_include_directories(kick_execution_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(kick_execution_profile_test PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME kick_execution_profile_test COMMAND kick_execution_profile_test)
+
+    add_executable(kick_residual_runner_test
+        tests/kick_residual_runner_test.cc
+        src/behavior/kick_residual_runner.cc
+    )
+    target_link_libraries(
+        kick_residual_runner_test
+        PRIVATE world_core "${APOLLO_YAML_CPP_LINK}"
+    )
+    target_include_directories(kick_residual_runner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(kick_residual_runner_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME kick_residual_runner_test COMMAND kick_residual_runner_test)
 endif()

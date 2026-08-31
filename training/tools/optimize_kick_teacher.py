@@ -27,6 +27,10 @@ def main() -> None:
     parser.add_argument("--target-distance", type=float, default=2.0)
     parser.add_argument("--target-angle", type=float, default=0.0)
     parser.add_argument("--requested-speed", type=float, default=1.43)
+    parser.add_argument("--desired-arrival-speed", type=float, default=1.0)
+    parser.add_argument("--mode", choices=("pass", "shot", "clear"), default="pass")
+    parser.add_argument("--ball-x-offset", type=float, default=0.0)
+    parser.add_argument("--ball-y-offset", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=1701)
     parser.add_argument("--population", type=int, default=64)
     parser.add_argument("--generations", type=int, default=8)
@@ -47,6 +51,8 @@ def main() -> None:
         target_distance_m=args.target_distance,
         target_angle_deg=args.target_angle,
         requested_ball_speed_mps=args.requested_speed,
+        desired_arrival_speed_mps=args.desired_arrival_speed,
+        action_mode=args.mode,
     )
     evaluator = KickTeacherEvaluator(spec)
     result = evaluator.optimize(
@@ -54,9 +60,14 @@ def main() -> None:
         population=args.population,
         generations=args.generations,
         robust_samples=args.robust_samples,
+        ball_x_offset_m=args.ball_x_offset,
+        ball_y_offset_m=args.ball_y_offset,
     )
-    metrics = evaluator.rollout(result.parameters)
-    times, joint_targets = evaluator.trajectory(result.parameters)
+    times, observations, actions, joint_targets, metrics = evaluator.demonstration(
+        result.parameters,
+        ball_x_offset_m=args.ball_x_offset,
+        ball_y_offset_m=args.ball_y_offset,
+    )
 
     args.output_prefix.parent.mkdir(parents=True, exist_ok=True)
     trajectory_path = args.output_prefix.with_suffix(".npz")
@@ -65,6 +76,8 @@ def main() -> None:
         trajectory_path,
         times_s=times,
         joint_targets_rad=joint_targets,
+        observations=observations,
+        actions=actions,
         parameters=result.parameters,
         parameter_names=np.asarray(PARAMETER_NAMES),
         joint_order=np.asarray(evaluator.contract.joint_order),
@@ -87,10 +100,16 @@ def main() -> None:
             "target_distance_m": spec.target_distance_m,
             "target_angle_deg": spec.target_angle_deg,
             "requested_ball_speed_mps": spec.requested_ball_speed_mps,
+            "desired_arrival_speed_mps": spec.desired_arrival_speed_mps,
+            "action_mode": spec.action_mode,
             "duration_s": spec.duration_s,
             "evaluation_duration_s": spec.evaluation_duration_s,
             "control_dt_s": spec.control_dt_s,
             "simulation_dt_s": spec.simulation_dt_s,
+        },
+        "ball_offset_m": {
+            "x": args.ball_x_offset,
+            "y": args.ball_y_offset,
         },
         "parameter_names": list(PARAMETER_NAMES),
         "parameters": result.parameters.tolist(),

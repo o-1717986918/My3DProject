@@ -272,6 +272,44 @@ Do not use repeated fixed-trajectory tuning to hide placement failures. Generate
 conditioned demonstrations and train the v2 range/direction/speed policy when a
 single teacher cannot cover the declared ball-pose envelope.
 
+Generate a multi-condition teacher dataset, train the supervised initializer,
+collect closed-loop DAgger labels, and evaluate the exported ONNX in exact CPU
+MuJoCo with:
+
+```bash
+PYTHONPATH=training python training/tools/generate_kick_teacher_dataset.py \
+  --distances 2 --angles -15 0 15 --ball-x 0 \
+  --ball-y -0.04 0 0.04 --requested-speed 1.43 \
+  --output-prefix /home/win98/rl_runs/kick-teacher/kick-v2-grid
+PYTHONPATH=training python training/tools/train_kick_bc.py \
+  /home/win98/rl_runs/kick-teacher/kick-v2-grid.npz \
+  --output-prefix /home/win98/rl_runs/kick-bc/kick-v2-grid
+PYTHONPATH=training python training/tools/collect_kick_dagger.py \
+  /home/win98/rl_runs/kick-bc/kick-v2-grid.onnx \
+  /home/win98/rl_runs/kick-teacher/kick-v2-grid.json \
+  /home/win98/rl_runs/kick-teacher/kick-v2-grid.npz
+PYTHONPATH=training python training/tools/evaluate_kick_onnx.py \
+  /home/win98/rl_runs/kick-bc/kick-v2-grid.onnx --trials 20
+```
+
+For a complete accepted teacher grid, export a provenance-carrying runtime
+table only after held-out evaluation. The exporter preserves a false
+promotion flag when the evidence is below the release gate:
+
+```bash
+PYTHONPATH=training python training/tools/evaluate_kick_teacher_table.py \
+  /home/win98/rl_runs/kick-teacher/kick-v2-grid.json --trials 300 \
+  --output /home/win98/rl_runs/kick-teacher/kick-v2-grid-eval.json
+PYTHONPATH=training python training/tools/export_kick_residual_table.py \
+  /home/win98/rl_runs/kick-teacher/kick-v2-grid.json \
+  --evaluation /home/win98/rl_runs/kick-teacher/kick-v2-grid-eval.json \
+  --output runtime/apollo/assets/keyframes/kick_residual_table.yaml
+```
+
+The checked-in 15-node table is experimental and defaults off. It may be
+exercised with `--enable-parameterized-kick`; the C++ runner accepts only its
+measured 2 m forward-pass envelope and otherwise uses the stable fallback.
+
 Exercise one real PPO training/checkpoint path (integration test only):
 
 ```bash

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate a serialized kick teacher under held-out ball placement noise."""
+"""Closed-loop exact-MuJoCo evaluation for a kick_policy_v2 ONNX model."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import onnxruntime as ort
 
 from my3d_rl.kick_teacher import (
     KickTeacherEvaluator,
@@ -18,9 +19,14 @@ from my3d_rl.kick_teacher import (
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("manifest", type=Path)
+    parser.add_argument("model", type=Path)
+    parser.add_argument("--target-distance", type=float, default=2.0)
+    parser.add_argument("--target-angle", type=float, default=0.0)
+    parser.add_argument("--requested-speed", type=float, default=1.43)
+    parser.add_argument("--arrival-speed", type=float, default=0.8)
+    parser.add_argument("--mode", choices=("pass", "shot", "clear"), default="pass")
     parser.add_argument("--trials", type=int, default=20)
-    parser.add_argument("--seed", type=int, default=2201)
+    parser.add_argument("--seed", type=int, default=2501)
     parser.add_argument("--ball-x-min", type=float, default=-0.01)
     parser.add_argument("--ball-x-max", type=float, default=0.08)
     parser.add_argument("--ball-y-min", type=float, default=-0.08)
@@ -29,31 +35,23 @@ def main() -> None:
     args = parser.parse_args()
     if args.trials < 1:
         raise ValueError("--trials must be positive")
-    if args.ball_x_min > args.ball_x_max or args.ball_y_min > args.ball_y_max:
-        raise ValueError("ball offset minimum must not exceed maximum")
 
-    source = json.loads(args.manifest.read_text(encoding="utf-8"))
-    raw_spec = source["spec"]
     spec = KickTeacherSpec(
-        target_distance_m=float(raw_spec["target_distance_m"]),
-        target_angle_deg=float(raw_spec["target_angle_deg"]),
-        requested_ball_speed_mps=float(raw_spec["requested_ball_speed_mps"]),
-        desired_arrival_speed_mps=float(raw_spec.get("desired_arrival_speed_mps", 1.0)),
-        action_mode=str(raw_spec.get("action_mode", "pass")),
-        duration_s=float(raw_spec["duration_s"]),
-        evaluation_duration_s=float(raw_spec.get("evaluation_duration_s", 3.0)),
-        control_dt_s=float(raw_spec["control_dt_s"]),
-        simulation_dt_s=float(raw_spec["simulation_dt_s"]),
+        target_distance_m=args.target_distance,
+        target_angle_deg=args.target_angle,
+        requested_ball_speed_mps=args.requested_speed,
+        desired_arrival_speed_mps=args.arrival_speed,
+        action_mode=args.mode,
     )
-    parameters = np.asarray(source["parameters"], dtype=np.float64)
     evaluator = KickTeacherEvaluator(spec)
+    session = ort.InferenceSession(str(args.model), providers=["CPUExecutionProvider"])
     rng = np.random.default_rng(args.seed)
-    trials: list[dict[str, object]] = []
+    trials = []
     for trial_index in range(args.trials):
         ball_x = float(rng.uniform(args.ball_x_min, args.ball_x_max))
         ball_y = float(rng.uniform(args.ball_y_min, args.ball_y_max))
-        metrics = evaluator.rollout(
-            parameters,
+        metrics = evaluator.rollout_policy(
+            session,
             ball_x_offset_m=ball_x,
             ball_y_offset_m=ball_y,
         )
@@ -68,19 +66,28 @@ def main() -> None:
         )
 
     successful = sum(bool(trial["success"]) for trial in trials)
+    required = int(np.ceil(0.9 * args.trials))
     report = {
-        "purpose": "r1_kick_teacher_held_out_evaluation",
-        "source_manifest": str(args.manifest),
+        "purpose": "kick_policy_v2_closed_loop_onnx_evaluation",
+        "promotable": False,
+        "model": str(args.model),
         "seed": args.seed,
         "trial_count": args.trials,
         "successful_trials": successful,
         "success_rate": successful / args.trials,
         "gate": {
-            "required_successes": int(np.ceil(0.9 * args.trials)),
-            "passed": successful >= int(np.ceil(0.9 * args.trials)),
+            "required_successes": required,
+            "passed": successful >= required,
             "range_tolerance_m": 0.5,
             "corridor_half_width_m": 0.5,
             "launch_speed_tolerance_mps": 1.0,
+        },
+        "spec": {
+            "target_distance_m": spec.target_distance_m,
+            "target_angle_deg": spec.target_angle_deg,
+            "requested_ball_speed_mps": spec.requested_ball_speed_mps,
+            "desired_arrival_speed_mps": spec.desired_arrival_speed_mps,
+            "action_mode": spec.action_mode,
         },
         "ball_offset_ranges_m": {
             "x": [args.ball_x_min, args.ball_x_max],

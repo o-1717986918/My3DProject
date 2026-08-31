@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate a serialized kick teacher under held-out ball placement noise."""
+"""Evaluate nearest-condition kick teachers on held-out ball placements."""
 
 from __future__ import annotations
 
@@ -19,73 +19,87 @@ from my3d_rl.kick_teacher import (
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest", type=Path)
+    parser.add_argument("--target-distance", type=float, default=2.0)
+    parser.add_argument("--target-angle", type=float, default=0.0)
+    parser.add_argument("--requested-speed", type=float, default=1.43)
+    parser.add_argument("--arrival-speed", type=float, default=0.8)
+    parser.add_argument("--mode", choices=("pass", "shot", "clear"), default="pass")
     parser.add_argument("--trials", type=int, default=20)
-    parser.add_argument("--seed", type=int, default=2201)
+    parser.add_argument("--seed", type=int, default=3901)
     parser.add_argument("--ball-x-min", type=float, default=-0.01)
     parser.add_argument("--ball-x-max", type=float, default=0.08)
     parser.add_argument("--ball-y-min", type=float, default=-0.08)
     parser.add_argument("--ball-y-max", type=float, default=0.08)
+    parser.add_argument("--phase-alignment-s-per-m", type=float, default=0.0)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.trials < 1:
         raise ValueError("--trials must be positive")
-    if args.ball_x_min > args.ball_x_max or args.ball_y_min > args.ball_y_max:
-        raise ValueError("ball offset minimum must not exceed maximum")
 
     source = json.loads(args.manifest.read_text(encoding="utf-8"))
-    raw_spec = source["spec"]
+    records = [
+        record
+        for record in source["records"]
+        if record["accepted"] and record["mode"] == args.mode
+    ]
+    if not records:
+        raise ValueError("manifest contains no accepted records for the requested mode")
+
     spec = KickTeacherSpec(
-        target_distance_m=float(raw_spec["target_distance_m"]),
-        target_angle_deg=float(raw_spec["target_angle_deg"]),
-        requested_ball_speed_mps=float(raw_spec["requested_ball_speed_mps"]),
-        desired_arrival_speed_mps=float(raw_spec.get("desired_arrival_speed_mps", 1.0)),
-        action_mode=str(raw_spec.get("action_mode", "pass")),
-        duration_s=float(raw_spec["duration_s"]),
-        evaluation_duration_s=float(raw_spec.get("evaluation_duration_s", 3.0)),
-        control_dt_s=float(raw_spec["control_dt_s"]),
-        simulation_dt_s=float(raw_spec["simulation_dt_s"]),
+        target_distance_m=args.target_distance,
+        target_angle_deg=args.target_angle,
+        requested_ball_speed_mps=args.requested_speed,
+        desired_arrival_speed_mps=args.arrival_speed,
+        action_mode=args.mode,
     )
-    parameters = np.asarray(source["parameters"], dtype=np.float64)
     evaluator = KickTeacherEvaluator(spec)
     rng = np.random.default_rng(args.seed)
     trials: list[dict[str, object]] = []
     for trial_index in range(args.trials):
         ball_x = float(rng.uniform(args.ball_x_min, args.ball_x_max))
         ball_y = float(rng.uniform(args.ball_y_min, args.ball_y_max))
+
+        def distance(record: dict[str, object]) -> float:
+            return float(
+                4.0 * ((float(record["distance_m"]) - args.target_distance) / 3.0) ** 2
+                + ((float(record["angle_deg"]) - args.target_angle) / 15.0) ** 2
+                + ((float(record["ball_x_offset_m"]) - ball_x) / 0.09) ** 2
+                + ((float(record["ball_y_offset_m"]) - ball_y) / 0.08) ** 2
+                + ((float(record["requested_speed_mps"]) - args.requested_speed) / 2.2)
+                ** 2
+            )
+
+        selected = min(records, key=distance)
         metrics = evaluator.rollout(
-            parameters,
+            np.asarray(selected["parameters"], dtype=np.float64),
             ball_x_offset_m=ball_x,
             ball_y_offset_m=ball_y,
+            phase_reference_ball_x_offset_m=float(selected["ball_x_offset_m"]),
+            phase_alignment_s_per_m=args.phase_alignment_s_per_m,
         )
         trials.append(
             {
                 "trial": trial_index,
                 "ball_x_offset_m": ball_x,
                 "ball_y_offset_m": ball_y,
+                "selected_condition_index": selected["condition_index"],
                 "success": kick_trial_success(metrics),
                 "metrics": metrics,
             }
         )
 
     successful = sum(bool(trial["success"]) for trial in trials)
+    required = int(np.ceil(0.9 * args.trials))
     report = {
-        "purpose": "r1_kick_teacher_held_out_evaluation",
+        "purpose": "kick_teacher_table_held_out_evaluation",
         "source_manifest": str(args.manifest),
         "seed": args.seed,
         "trial_count": args.trials,
         "successful_trials": successful,
         "success_rate": successful / args.trials,
-        "gate": {
-            "required_successes": int(np.ceil(0.9 * args.trials)),
-            "passed": successful >= int(np.ceil(0.9 * args.trials)),
-            "range_tolerance_m": 0.5,
-            "corridor_half_width_m": 0.5,
-            "launch_speed_tolerance_mps": 1.0,
-        },
-        "ball_offset_ranges_m": {
-            "x": [args.ball_x_min, args.ball_x_max],
-            "y": [args.ball_y_min, args.ball_y_max],
-        },
+        "promotable": successful >= required,
+        "phase_alignment_s_per_m": args.phase_alignment_s_per_m,
+        "gate": {"required_successes": required, "passed": successful >= required},
         "trials": trials,
     }
     serialized = json.dumps(report, indent=2, sort_keys=True) + "\n"

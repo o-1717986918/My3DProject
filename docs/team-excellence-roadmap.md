@@ -263,6 +263,16 @@ If the full conditional kick fails, release a smaller empirically valid
 envelope and keep the optimized trajectory. Honest reliable capability is
 better than an unstable nominal 10 m skill.
 
+R1 checkpoint (2026-09-01): the exact-physics teacher, residual action
+contract, multi-condition dataset, BC/DAgger loop, robust parameter-table
+export, and guarded Apollo C++ executor are implemented. The locked 2 m
+forward-pass table made contact in 300/300 held-out trials with zero falls, but
+passed the full range/direction/speed gate in only 224/300 (`74.67%`). It is an
+experimental default-off integration, not a promoted team skill. Fixed-phase
+CEM and the current MLP are closed at this checkpoint; the remaining R1 route
+starts with adaptive ball setup/contact timing, then adds 2/3.5/5 m pass,
+direction, shot/clear, moving-ball, server and three-seed gates.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

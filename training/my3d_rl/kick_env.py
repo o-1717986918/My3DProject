@@ -14,11 +14,22 @@ import numpy as np
 
 from mujoco_playground._src import mjx_env
 
+from .apollo_walk_jax import load_apollo_walk_jax
 from .contract import PolicyContract, load_policy_contract
 from .rcss_scene import DEFAULT_RESOURCE_ROOT, build_single_t1_soccer_model
+from .t1_control import APOLLO_DEFAULT_POSE, KICK_ACTION_SCALE, apollo_joint_gains
 
 
 DEFAULT_CONTRACT = Path(__file__).parents[1] / "contracts" / "kick_policy_v2.yaml"
+DEFAULT_WALK_POLICY = (
+    Path(__file__).parents[2]
+    / "runtime"
+    / "apollo"
+    / "assets"
+    / "networks"
+    / "walk"
+    / "policy.onnx"
+)
 
 
 def default_config() -> config_dict.ConfigDict:
@@ -32,33 +43,7 @@ def default_config() -> config_dict.ConfigDict:
         # are never silently dropped by the training backend.
         naconmax=1024,
         njmax=256,
-        kp=20.0,
-        kd=0.5,
-        action_scale=[
-            0.10,
-            0.10,
-            0.20,
-            0.20,
-            0.20,
-            0.20,
-            0.20,
-            0.20,
-            0.20,
-            0.20,
-            0.15,
-            0.35,
-            0.25,
-            0.25,
-            0.45,
-            0.25,
-            0.20,
-            0.35,
-            0.25,
-            0.25,
-            0.45,
-            0.25,
-            0.20,
-        ],
+        action_scale=KICK_ACTION_SCALE.tolist(),
         ball_x_range=[-0.01, 0.08],
         ball_y_range=[-0.08, 0.08],
         target_angle_range=[-0.261799, 0.261799],
@@ -119,7 +104,7 @@ class DirectionalKick(mjx_env.MjxEnv):
         gyro = self._mj_model.sensor(prefix + "torso_gyro")
         self._gyro_slice = slice(gyro.adr[0], gyro.adr[0] + gyro.dim[0])
 
-        self._default_pose = jp.asarray(self._mj_model.qpos0[self._joint_qpos])
+        self._default_pose = jp.asarray(APOLLO_DEFAULT_POSE)
         self._lowers = jp.asarray(
             [
                 self._mj_model.joint(prefix + name).range[0]
@@ -133,15 +118,19 @@ class DirectionalKick(mjx_env.MjxEnv):
             ]
         )
         self._action_scale = jp.asarray(self._config.action_scale)
+        self._walk_policy = load_apollo_walk_jax(DEFAULT_WALK_POLICY)
 
     def _configure_pd_actuators(self) -> None:
-        for effector in self.contract.effector_order:
+        for joint_name, effector in zip(
+            self.contract.joint_order, self.contract.effector_order, strict=True
+        ):
             pos_id = self._mj_model.actuator(self.prefix + effector + "_pos").id
             vel_id = self._mj_model.actuator(self.prefix + effector + "_vel").id
-            self._mj_model.actuator_gainprm[pos_id, 0] = self._config.kp
-            self._mj_model.actuator_biasprm[pos_id, 1] = -self._config.kp
-            self._mj_model.actuator_gainprm[vel_id, 0] = self._config.kd
-            self._mj_model.actuator_biasprm[vel_id, 2] = -self._config.kd
+            kp, kd = apollo_joint_gains(joint_name)
+            self._mj_model.actuator_gainprm[pos_id, 0] = kp
+            self._mj_model.actuator_biasprm[pos_id, 1] = -kp
+            self._mj_model.actuator_gainprm[vel_id, 0] = kd
+            self._mj_model.actuator_biasprm[vel_id, 2] = -kd
 
     @property
     def xml_path(self) -> str:
@@ -223,6 +212,7 @@ class DirectionalKick(mjx_env.MjxEnv):
             "rng": rng,
             "step": jp.array(0, dtype=jp.int32),
             "last_action": jp.zeros(self.action_size),
+            "walk_last_action": jp.zeros(self.action_size),
             "target_world": target_world,
             "target_distance": target_distance,
             "requested_ball_speed": requested_ball_speed,
@@ -254,8 +244,27 @@ class DirectionalKick(mjx_env.MjxEnv):
 
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
         action = jp.clip(action, -1.0, 1.0)
+        elapsed_s = state.info["step"] * self.dt
+        velocity_command = jp.where(
+            elapsed_s < 0.65,
+            jp.array([0.50, -0.04, 0.0]),
+            jp.zeros(3),
+        )
+        torso_xmat = state.data.site_xmat[self._torso_site]
+        gravity = torso_xmat.T @ jp.array([0.0, 0.0, -1.0])
+        walk_observation = jp.concatenate(
+            [
+                state.data.sensordata[self._gyro_slice],
+                gravity,
+                velocity_command,
+                state.data.qpos[self._joint_qpos] - self._default_pose,
+                state.data.qvel[self._joint_dof],
+                state.info["walk_last_action"],
+            ]
+        )
+        walk_action = self._walk_policy(walk_observation)
         targets = jp.clip(
-            self._default_pose + action * self._action_scale,
+            self._default_pose + 0.25 * walk_action + action * self._action_scale,
             self._lowers,
             self._uppers,
         )
@@ -300,6 +309,7 @@ class DirectionalKick(mjx_env.MjxEnv):
 
         state.info["step"] += 1
         state.info["last_action"] = action
+        state.info["walk_last_action"] = walk_action
         state.info["last_progress"] = progress
         done = fall | invalid | (state.info["step"] >= self._config.episode_length)
         obs = self._get_obs(data, state.info)
@@ -337,7 +347,10 @@ class DirectionalKick(mjx_env.MjxEnv):
         ball_local_vel_xy = world_to_yaw @ (ball_world_vel[:2] - torso_world_vel[:2])
         target_local = world_to_yaw @ info["target_world"]
         gravity = torso_xmat.T @ jp.array([0.0, 0.0, -1.0])
-        phase = 2.0 * jp.pi * 1.5 * info["step"] * self.dt
+        # kick_policy_v2 is a finite one-shot skill.  Its half-circle phase is
+        # injective over the action and remains at the terminal value.
+        progress = jp.clip(info["step"] * self.dt / 1.2, 0.0, 1.0)
+        phase = jp.pi * progress
 
         actor = jp.concatenate(
             [
