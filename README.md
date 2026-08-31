@@ -11,6 +11,13 @@ the `my3d-team` Conda environment. See `docs/competition-runbook.md` for the
 full operating and troubleshooting procedure, and `docs/validation.md` for the
 latest evidence-backed validation status.
 
+Formal running-policy development is tracked in
+`docs/run-policy-training.md`. Training uses the separate `my3d-rl` Conda
+environment and writes large runs only below `/home/win98/rl_runs`. The current
+measured result is stable high-speed walking, not accepted running; source
+research, licensing boundaries and the motion-prior next stage are recorded in
+`docs/robot-soccer-action-research.md` and `docs/rl-experiment-log.md`.
+
 ## WSL quick start
 
 From the repository directory inside WSL:

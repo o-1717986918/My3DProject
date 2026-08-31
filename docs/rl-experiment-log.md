@@ -128,3 +128,52 @@ Not passed yet:
 - high-speed MuJoCo/MJX versus RCSSServerMJ trajectory bounds;
 - ONNX export and source-versus-ONNX parity;
 - competition client feature-flag integration and full match regression.
+
+## Fast-locomotion experiments — 2026-08-30/31
+
+The running work uses the exact RCSSServerMJ soccer/T1 assets, a 0.005 s
+physics step, 50 Hz control, the deployed joint order/sign table, and an ONNX
+teacher whose SHA-256 is
+`ece316886c2a4cde17402f0332f0f955a83db786490cf6d50cfc680e5e30434b`.
+Generated checkpoints and reports remain under `/home/win98/rl_runs`.
+
+### Findings that changed the implementation
+
+- Randomly initialized tanh and normal PPO policies failed before learning a
+  reliable stand. The current T1 soccer repositories instead start from a
+  locomotion/motion prior, so all subsequent runs use verified teacher
+  warm-start and low-noise PPO.
+- The training sign for `Left_Ankle_Pitch` was opposite to the competition
+  runtime. It is now `+1`; a regression test also checks the YAML table.
+- The former 5 cm foot-site threshold was not a valid contact test. It was
+  replaced by the oriented foot-box lowest-point test with 1 cm tolerance,
+  following current Booster/T1 implementations. CPU calibration found zero
+  cases where a true foot contact was labelled airborne.
+- A global flight reward of 5 destabilized the teacher and still produced no
+  real aerial phase. That result is retained as a negative experiment, not
+  promoted.
+
+### Reproducible result table
+
+| Run/checkpoint | Purpose | Held-out result at `vx=1.5` | Decision |
+|---|---|---|---|
+| `run-teacher-flight-s53.../000011010048` | v1 teacher fine-tune, 11.01M steps | 64/64 upright, 1.635 m/s, 10.47 m drift; CPU flight 0% | reject as run; fast-walk baseline only |
+| `run-yaw-flight-s59.../000009437184` | high yaw/flight reward, paused at 9.44M | 64/64 upright, 1.617 m/s, 9.86 m drift; CPU flight 0% | reject |
+| `run-yaw-flight-s59-resume.../000001572864` | resumed final epoch | variable-command stability fell to 78%; 10.14 m drift | reject |
+| `run-phase-v2-smoke-s67.../000000196608` | 80-value phase interface smoke | 100% upright; ONNX parity `1.14e-5` | pipeline pass only |
+| `run-phase-v2-formal-s71.../000003538944` | phase-aware v2, selected middle checkpoint | 64/64 upright, 1.494 m/s, 0.092 m/s RMSE, 5.66 m MJX drift | best phase checkpoint; not releasable |
+| same checkpoint, CPU ONNX | exact contacts and export | 32/32 upright, 1.499 m/s, 5.45 m drift, flight 0%; parity `1.43e-5` | reject as run |
+| `run-phase-v2-straight-s73.../000002359296` | strong fixed-command yaw/lateral recovery | 64/64 upright, 1.504 m/s, 4.77 m drift | improvement, still reject |
+
+The phase-aware model reduced median ten-second drift by about 52% relative to
+the v1 paused candidate while preserving speed, but it remains roughly 19
+times above the 0.25 m release gate and never sustains a 10 ms aerial phase.
+The honest label is **stable high-speed walking research candidate**.
+
+### Next experiment boundary
+
+Do not raise the flight reward again. The next run must start from a retargeted
+T1 running reference or a demonstrably airborne T1 motion prior, train a
+tracking policy first, and only then add velocity/football task rewards with a
+small exploration standard deviation. Holosoma is the preferred Apache-2.0
+T1/MJWarp retargeting path; RoboNaldo supplies the staged curriculum pattern.

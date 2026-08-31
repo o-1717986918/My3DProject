@@ -7,3 +7,5 @@ dependencies:
   - pip:
       - pytest>=9,<10
       - pyyaml>=6.0,<7
+      - onnx>=1.19,<2
+      - onnxruntime>=1.23,<2

@@ -1,0 +1,133 @@
+"""Versioned PPO network and optimizer profiles for reproducible checkpoints."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import functools
+from typing import Any, Callable
+
+from brax.training.agents.ppo import networks as ppo_networks
+
+from .legacy_policy import make_legacy_ppo_networks
+
+
+@dataclass(frozen=True)
+class PpoProfile:
+    name: str
+    policy_hidden_layer_sizes: tuple[int, ...]
+    value_hidden_layer_sizes: tuple[int, ...]
+    distribution_type: str
+    unroll_length: int
+    batch_size: int
+    num_minibatches: int
+    num_updates_per_batch: int
+    discounting: float
+    entropy_cost: float
+    learning_rate: float = 3.0e-4
+    normalize_observations: bool = True
+    adaptive_kl: bool = False
+    factory_kind: str = "standard"
+
+    def network_factory(self) -> Callable[..., Any]:
+        if self.factory_kind == "legacy_teacher":
+            return make_legacy_ppo_networks
+        return functools.partial(
+            ppo_networks.make_ppo_networks,
+            policy_hidden_layer_sizes=self.policy_hidden_layer_sizes,
+            value_hidden_layer_sizes=self.value_hidden_layer_sizes,
+            policy_obs_key="state",
+            value_obs_key="privileged_state",
+            distribution_type=self.distribution_type,
+        )
+
+
+PROFILES = {
+    # Kept solely so the first integration checkpoints remain reproducible.
+    "smoke_20260830": PpoProfile(
+        name="smoke_20260830",
+        policy_hidden_layer_sizes=(256, 128, 128),
+        value_hidden_layer_sizes=(256, 256, 128),
+        distribution_type="tanh_normal",
+        unroll_length=16,
+        batch_size=64,
+        num_minibatches=4,
+        num_updates_per_batch=2,
+        discounting=0.995,
+        entropy_cost=5.0e-3,
+    ),
+    # Matches the legacy runtime's unbounded-before-clip action convention and
+    # the current Playground T1 hidden-layer sizes/training scale.
+    "t1_legacy_normal_v1": PpoProfile(
+        name="t1_legacy_normal_v1",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=20,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=4,
+        discounting=0.97,
+        entropy_cost=5.0e-3,
+    ),
+    # Formal bounded-action profile.  MuJoCo Playground's current T1 PPO path
+    # uses the tanh-normal default; keeping the decoder at 0.5 rad preserves
+    # the competition runtime while preventing unbounded exploratory targets.
+    "t1_tanh_v1": PpoProfile(
+        name="t1_tanh_v1",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="tanh_normal",
+        unroll_length=20,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=4,
+        discounting=0.97,
+        entropy_cost=5.0e-3,
+    ),
+    # Current T1 soccer work converges from a low-noise motion/locomotion prior,
+    # not random actions.  This profile imports the verified competition actor,
+    # uses the ICRA 2026 T1 walking learning rate and initial exploration scale,
+    # and adapts it with PPO while keeping a separately initialized critic.
+    "legacy_warmstart_v1": PpoProfile(
+        name="legacy_warmstart_v1",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=4,
+        discounting=0.995,
+        entropy_cost=1.0e-3,
+        learning_rate=1.0e-5,
+        normalize_observations=False,
+        adaptive_kl=True,
+        factory_kind="legacy_teacher",
+    ),
+    # Phase-aware extension of the exact legacy teacher.  The two new first
+    # layer rows are initialized to zero, so bootstrap actions remain exactly
+    # equal to the 78-value ONNX teacher before optimization.
+    "legacy_phase_warmstart_v2": PpoProfile(
+        name="legacy_phase_warmstart_v2",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=4,
+        discounting=0.995,
+        entropy_cost=1.0e-3,
+        learning_rate=5.0e-6,
+        normalize_observations=False,
+        adaptive_kl=True,
+        factory_kind="legacy_teacher",
+    ),
+}
+
+
+def get_ppo_profile(name: str) -> PpoProfile:
+    try:
+        return PROFILES[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown PPO profile {name!r}") from exc

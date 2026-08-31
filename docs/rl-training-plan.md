@@ -4,6 +4,11 @@ Status: implementation started 2026-08-30
 Target platform: WSL2 Ubuntu 22.04, Booster T1, RCSSServerMJ 0.2.1
 Primary task: a stronger upright kick that fits the existing competition FSM
 
+Update 2026-08-30: the user promoted fast locomotion to the active development
+milestone. The versioned running-policy plan, current-source audit, and explicit
+running acceptance gates are maintained in `docs/run-policy-training.md`. The
+kick environment remains supported and is not overwritten by this work.
+
 ## 1. Decision
 
 Train low-level skills separately and keep the deterministic team controller.
@@ -15,7 +20,7 @@ training initialization.
 Priority:
 
 1. ball-aware kick;
-2. robust turning and perturbation-resistant walking;
+2. robust turning and perturbation-resistant running (active milestone);
 3. dribble/push control;
 4. independently trained get-up only if the project needs to remove its GPL
    runtime dependency.

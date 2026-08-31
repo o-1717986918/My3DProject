@@ -8,6 +8,11 @@ policy for Booster T1. It is intentionally separate from the deterministic team
 decision maker. See [`../docs/rl-training-plan.md`](../docs/rl-training-plan.md)
 for the acceptance gates.
 
+Fast locomotion has two immutable contracts: `run_policy_v1` preserves the
+deployed 78-value actor; `run_policy_v2` appends cosine/sine gait phase for an
+80-value actor while keeping the same 23 actions. Neither experimental model
+is the competition default until every release gate passes.
+
 ## Environments
 
 - `my3d-team`: competition runtime; never install training packages here.
@@ -39,6 +44,41 @@ Compile and step the exact-physics kick environment on either MJX backend:
 
 ```bash
 PYTHONPATH=training python training/tools/smoke_kick_env.py --impl warp
+```
+
+Compile the phase-aware running environment:
+
+```bash
+PYTHONPATH=training python training/tools/smoke_run_env.py \
+  --impl warp --contract-version v2 --num-envs 8 --steps 4
+```
+
+Bootstrap a phase-aware locomotion experiment from the verified walk teacher:
+
+```bash
+PYTHONPATH=training python training/tools/train_run.py \
+  --stage phase_run --impl warp --num-envs 128 --num-timesteps 5000000 \
+  --seed 71 --num-evals 6 --num-eval-envs 64 \
+  --network-profile legacy_phase_warmstart_v2 \
+  --bootstrap-onnx mujococodebase/skills/walk/walk.onnx \
+  --run-dir /home/win98/rl_runs/run-phase-v2-<name>
+```
+
+Export and verify a v2 checkpoint:
+
+```bash
+PYTHONPATH=training python training/tools/export_run_onnx.py <checkpoint> \
+  --network-profile legacy_phase_warmstart_v2 --output /tmp/run-v2.onnx
+PYTHONPATH=training python training/tools/evaluate_onnx_run.py \
+  --model /tmp/run-v2.onnx --episodes 64 --vx 1.5 --action-scale 0.5
+```
+
+Before a retargeted running clip can enter motion-prior training, validate its
+50 Hz T1 arrays, provenance and aerial phase:
+
+```bash
+PYTHONPATH=training python training/tools/validate_motion_reference.py \
+  /path/to/t1-run-reference.npz --output /tmp/t1-run-reference-report.json
 ```
 
 Exercise one real PPO training/checkpoint path (integration test only):

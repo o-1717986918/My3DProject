@@ -1,0 +1,26 @@
+schema_version: 1
+name: t1_motion_reference_v1
+robot: Booster T1
+frequency_hz: 50
+format: npz
+arrays:
+  root_position: {shape: [T, 3], dtype: float32, units: m}
+  root_quaternion_xyzw: {shape: [T, 4], dtype: float32, units: normalized}
+  root_linear_velocity: {shape: [T, 3], dtype: float32, units: m_s}
+  root_angular_velocity: {shape: [T, 3], dtype: float32, units: rad_s}
+  joint_position: {shape: [T, 23], dtype: float32, units: rad}
+  joint_velocity: {shape: [T, 23], dtype: float32, units: rad_s}
+  foot_contact: {shape: [T, 2], dtype: bool, order: [left, right]}
+joint_order_contract: run_policy_v2.yaml
+minimum_frames: 25
+running_gate:
+  minimum_consecutive_airborne_frames: 1
+  minimum_airborne_duration_seconds: 0.02
+provenance_required:
+  - source_url
+  - source_version
+  - source_license
+  - conversion_command
+  - source_sha256
+validator_report:
+  - output_sha256

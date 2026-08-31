@@ -1,5 +1,5 @@
 schema_version: 1
-recorded_at: 2026-08-30
+recorded_at: 2026-08-31
 
 training_framework:
   name: MuJoCo Playground
@@ -40,3 +40,28 @@ reference_only:
     commit: 378a12ac7446cd175f973c04e32912eb9acbee10
     license: Apache-2.0
     reuse_policy: method/config reference; independently reimplement audited concepts
+  - name: Booster Gym
+    repository: https://github.com/BoosterRobotics/booster_gym
+    commit: da396a06d6eed99e2de72d7749c48ee8748950f9
+    license: Apache-2.0
+    reuse_policy: T1 contact geometry and locomotion reward reference
+  - name: Holosoma
+    repository: https://github.com/amazon-far/holosoma
+    commit: fb835ec8cb6ee48f483ce567586625e5fae1ae1f
+    license: Apache-2.0
+    reuse_policy: next-stage T1 motion retargeting and tracking reference
+  - name: RoboNaldo training
+    repository: https://github.com/lu-yidan/RoboNaldo-YD
+    commit: dd924110393be512986953b195e3f352300f6c08
+    license: MIT
+    reuse_policy: staged motion-prior-to-task curriculum reference
+  - name: RoboNaldo deployment
+    repository: https://github.com/OpenDriveLab/RoboNaldo_Deploy
+    commit: f60f24459aaabc3aea9187a2b13f8923049b629c
+    license: no top-level license identified during audit
+    reuse_policy: architecture reference only; no source copying
+  - name: PAiD HumanoidSoccer
+    repository: https://github.com/TeleHuman/HumanoidSoccer
+    commit: e72e470230047dedaf66df0983f1d0ab746faeb5
+    license: non-commercial restrictions reported by upstream
+    reuse_policy: paper/method reference only; no source or asset copying
