@@ -138,17 +138,13 @@ def main() -> None:
                     )
                 )
                 nodes.append(
-                    helper.make_node(
-                        "Elu", ["fc1_norm"], ["fc1_elu"], name="fc1_elu"
-                    )
+                    helper.make_node("Elu", ["fc1_norm"], ["fc1_elu"], name="fc1_elu")
                 )
                 previous = "fc1_elu"
             elif layer != "fc4":
                 activated = f"{layer}_elu"
                 nodes.append(
-                    helper.make_node(
-                        "Elu", [output_name], [activated], name=activated
-                    )
+                    helper.make_node("Elu", [output_name], [activated], name=activated)
                 )
                 previous = activated
     else:
@@ -292,9 +288,7 @@ def main() -> None:
             policy_params,
             {
                 "state": jp.asarray(observations),
-                "privileged_state": jp.zeros(
-                    (256, actor_size + 6), dtype=jp.float32
-                ),
+                "privileged_state": jp.zeros((256, actor_size + 6), dtype=jp.float32),
             },
         )[0]
     expected = np.clip(

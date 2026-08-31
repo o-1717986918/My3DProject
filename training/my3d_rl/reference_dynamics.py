@@ -83,8 +83,7 @@ def failure_phase_sampling_weights(
     kernel = kernel_decay ** np.arange(kernel_size, dtype=np.float64)
     kernel /= np.sum(kernel)
     focused = sum(
-        weight * np.roll(counts, -offset)
-        for offset, weight in enumerate(kernel)
+        weight * np.roll(counts, -offset) for offset, weight in enumerate(kernel)
     )
     focused /= np.sum(focused)
     weights = (1.0 - uniform_ratio) * focused + uniform_ratio / bin_count

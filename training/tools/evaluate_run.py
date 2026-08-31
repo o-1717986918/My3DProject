@@ -127,9 +127,7 @@ def main() -> None:
             length=env._config.episode_length,
         )
 
-    (_, _), diagnostics = rollout(
-        initial_state, jax.random.PRNGKey(args.seed + 1)
-    )
+    (_, _), diagnostics = rollout(initial_state, jax.random.PRNGKey(args.seed + 1))
     diagnostics = np.asarray(diagnostics)
     initial_xy_np = np.asarray(initial_xy)
     warmup = round(2.0 / env.dt)

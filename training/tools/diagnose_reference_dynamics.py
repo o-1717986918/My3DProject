@@ -170,9 +170,7 @@ def _evaluate_targets(
             joint_error.append(
                 float(np.sqrt(np.mean(np.square(data.qpos[joint_qpos] - expected))))
             )
-            contacts = _actual_foot_contacts(
-                model, data, pitch_geom, foot_geoms
-            )
+            contacts = _actual_foot_contacts(model, data, pitch_geom, foot_geoms)
             had_flight |= not any(contacts)
             upright = float(rotation[2, 2])
             if data.xpos[torso_body, 2] < 0.35 or upright < 0.20:
@@ -218,8 +216,12 @@ def main() -> None:
     parser.add_argument("--kd", type=float, default=0.6)
     parser.add_argument("--smoothing-passes", type=int, default=2)
     parser.add_argument("--maximum-residual", type=float, default=0.15)
-    parser.add_argument("--phase-leads", type=_parse_floats, default=[-2, -1, 0, 1, 2, 3])
-    parser.add_argument("--inverse-blends", type=_parse_floats, default=[0.25, 0.5, 0.75, 1.0])
+    parser.add_argument(
+        "--phase-leads", type=_parse_floats, default=[-2, -1, 0, 1, 2, 3]
+    )
+    parser.add_argument(
+        "--inverse-blends", type=_parse_floats, default=[0.25, 0.5, 0.75, 1.0]
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--output-target", type=Path)
     parser.add_argument("--output-phase-weights", type=Path)
@@ -329,9 +331,7 @@ def main() -> None:
             "smoothing_passes": args.smoothing_passes,
             "maximum_residual_rad": args.maximum_residual,
             "joint_torque_nm": _percentiles(inverse.joint_torque),
-            "joint_target_residual_rad": _percentiles(
-                inverse.joint_target_residual
-            ),
+            "joint_target_residual_rad": _percentiles(inverse.joint_target_residual),
             "residual_saturation_rate": float(
                 np.mean(
                     np.isclose(
@@ -341,12 +341,8 @@ def main() -> None:
                     )
                 )
             ),
-            "floating_base_force": _percentiles(
-                inverse.root_generalized_force[:, :3]
-            ),
-            "floating_base_torque": _percentiles(
-                inverse.root_generalized_force[:, 3:]
-            ),
+            "floating_base_force": _percentiles(inverse.root_generalized_force[:, :3]),
+            "floating_base_torque": _percentiles(inverse.root_generalized_force[:, 3:]),
         },
         "experiments": experiments,
         "failure_phase_sampling": {
@@ -378,9 +374,9 @@ def main() -> None:
             joint_target_residual=(
                 inverse.joint_target_residual * TRAIN_TO_SERVER_SIGN
             ).astype(np.float32),
-            joint_inverse_torque=(
-                inverse.joint_torque * TRAIN_TO_SERVER_SIGN
-            ).astype(np.float32),
+            joint_inverse_torque=(inverse.joint_torque * TRAIN_TO_SERVER_SIGN).astype(
+                np.float32
+            ),
             root_generalized_force=inverse.root_generalized_force.astype(np.float32),
             reference_sha256=np.array(reference_sha),
             metadata_json=np.array(

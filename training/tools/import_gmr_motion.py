@@ -115,10 +115,16 @@ def main() -> None:
     )
     limit_model = build_single_t1_soccer_model(prefix="gmr_limit_", robot_x=0.0)
     joint_lower = np.array(
-        [limit_model.joint("gmr_limit_" + name).range[0] for name in contract.joint_order]
+        [
+            limit_model.joint("gmr_limit_" + name).range[0]
+            for name in contract.joint_order
+        ]
     )
     joint_upper = np.array(
-        [limit_model.joint("gmr_limit_" + name).range[1] for name in contract.joint_order]
+        [
+            limit_model.joint("gmr_limit_" + name).range[1]
+            for name in contract.joint_order
+        ]
     )
     mapped_qpos, limit_clipping = clip_contract_joint_limits(
         mapped_qpos, joint_lower, joint_upper

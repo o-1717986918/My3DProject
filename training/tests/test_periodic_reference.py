@@ -65,9 +65,7 @@ def test_root_yaw_deviation_scaling_preserves_centre_and_pitch_roll():
     euler = np.array([[0.2, 0.1, -0.05], [0.4, -0.1, 0.08]])
     source = Rotation.from_euler("zyx", euler).as_quat()
 
-    scaled = Rotation.from_quat(scale_root_yaw_deviation(source, 0.25)).as_euler(
-        "zyx"
-    )
+    scaled = Rotation.from_quat(scale_root_yaw_deviation(source, 0.25)).as_euler("zyx")
 
     np.testing.assert_allclose(scaled[:, 0], [0.275, 0.325], atol=1.0e-12)
     np.testing.assert_allclose(scaled[:, 1:], euler[:, 1:], atol=1.0e-12)

@@ -354,7 +354,9 @@ class DirectionalRun(mjx_env.MjxEnv):
                 or np.any(phase_weights < 0.0)
                 or not np.sum(phase_weights) > 0.0
             ):
-                raise ValueError("reference phase weights must be finite and non-negative")
+                raise ValueError(
+                    "reference phase weights must be finite and non-negative"
+                )
             phase_weights = phase_weights / np.sum(phase_weights)
             self._reference_phase_logits = jp.log(
                 jp.asarray(np.maximum(phase_weights, 1.0e-30), dtype=jp.float32)

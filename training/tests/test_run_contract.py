@@ -18,9 +18,7 @@ from my3d_rl.run_env import (
 CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v1.yaml"
 PHASE_CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v2.yaml"
 REFERENCE_CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v3.yaml"
-GMR_REFERENCE_CONTRACT = (
-    Path(__file__).parents[1] / "contracts" / "run_policy_v4.yaml"
-)
+GMR_REFERENCE_CONTRACT = Path(__file__).parents[1] / "contracts" / "run_policy_v4.yaml"
 
 
 def _write_reference_residual_fixture(path: Path) -> None:
@@ -223,9 +221,7 @@ def test_reference_residual_reset_accepts_fixed_phase_weights(tmp_path):
         motion_reference=path,
     )
 
-    states = jax.jit(jax.vmap(env.reset))(
-        jax.random.split(jax.random.PRNGKey(73), 16)
-    )
+    states = jax.jit(jax.vmap(env.reset))(jax.random.split(jax.random.PRNGKey(73), 16))
     phases = np.asarray(states.info["gait_phase"])
     assert np.all(phases >= 0.5)
     assert np.all(phases < 0.75)

@@ -90,9 +90,7 @@ def scale_root_yaw_deviation(quaternions: np.ndarray, scale: float) -> np.ndarra
     center = float(
         np.arctan2(np.mean(np.sin(euler[:, 0])), np.mean(np.cos(euler[:, 0])))
     )
-    deviation = np.arctan2(
-        np.sin(euler[:, 0] - center), np.cos(euler[:, 0] - center)
-    )
+    deviation = np.arctan2(np.sin(euler[:, 0] - center), np.cos(euler[:, 0] - center))
     euler[:, 0] = center + scale * deviation
     return _continuous_quaternions(Rotation.from_euler("zyx", euler).as_quat())
 

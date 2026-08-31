@@ -384,9 +384,7 @@ def main() -> None:
     if args.fixed_vx is not None:
         stage_overrides["fixed_command"] = [args.fixed_vx, 0.0, 0.0]
     if phase_sampling is not None:
-        stage_overrides["reference_phase_sampling_weights"] = phase_sampling[
-            "weights"
-        ]
+        stage_overrides["reference_phase_sampling_weights"] = phase_sampling["weights"]
     env = DirectionalRun(
         config_overrides=stage_overrides,
         contract=contract,

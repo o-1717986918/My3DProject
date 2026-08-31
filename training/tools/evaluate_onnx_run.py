@@ -53,10 +53,9 @@ def _reference_quaternion(
     upper_value = reference_quaternion_wxyz[upper]
     if np.dot(reference_quaternion_wxyz[lower], upper_value) < 0.0:
         upper_value = -upper_value
-    result = (
-        (1.0 - fraction) * reference_quaternion_wxyz[lower]
-        + fraction * upper_value
-    )
+    result = (1.0 - fraction) * reference_quaternion_wxyz[
+        lower
+    ] + fraction * upper_value
     return result / max(float(np.linalg.norm(result)), 1.0e-8)
 
 
@@ -326,9 +325,7 @@ def main() -> None:
             root_angular_velocity = reference_velocity_scale * circular_interpolate(
                 reference["root_angular_velocity"], gait_phase
             )
-            data.qvel[root_dof : root_dof + 3] = _yaw_rotate(
-                root_linear_velocity, yaw
-            )
+            data.qvel[root_dof : root_dof + 3] = _yaw_rotate(root_linear_velocity, yaw)
             data.qvel[root_dof + 3 : root_dof + 6] = _yaw_rotate(
                 root_angular_velocity, yaw
             )
@@ -342,9 +339,7 @@ def main() -> None:
                 np.sin(0.5 * yaw),
             ]
             initial_physical = nominal_physical
-        data.qpos[joint_qpos] = np.clip(
-            initial_physical + joint_noise, lowers, uppers
-        )
+        data.qpos[joint_qpos] = np.clip(initial_physical + joint_noise, lowers, uppers)
         data.qvel[root_dof : root_dof + 6] += rng.uniform(
             -root_velocity_noise_limit, root_velocity_noise_limit, 6
         )
@@ -368,9 +363,9 @@ def main() -> None:
             joint_velocity_training = data.qvel[joint_dof] * sign
             if reference_centered:
                 assert reference is not None
-                reference_position_training = circular_interpolate(
-                    reference["joint_position"], gait_phase
-                ) * sign
+                reference_position_training = (
+                    circular_interpolate(reference["joint_position"], gait_phase) * sign
+                )
                 reference_velocity_training = (
                     reference_velocity_scale
                     * circular_interpolate(reference["joint_velocity"], gait_phase)
@@ -556,15 +551,9 @@ def main() -> None:
         "flight_phase_episode_rate": flight_rate,
         "flight_phase_anytime_episode_rate": float(np.mean(flight_phase_anytime)),
         "survival": {
-            "median_control_steps": _percentile(
-                np.asarray(survived_control_steps), 50
-            ),
-            "p10_control_steps": _percentile(
-                np.asarray(survived_control_steps), 10
-            ),
-            "p90_control_steps": _percentile(
-                np.asarray(survived_control_steps), 90
-            ),
+            "median_control_steps": _percentile(np.asarray(survived_control_steps), 50),
+            "p10_control_steps": _percentile(np.asarray(survived_control_steps), 10),
+            "p90_control_steps": _percentile(np.asarray(survived_control_steps), 90),
             "maximum_control_steps": int(max(survived_control_steps)),
             "median_seconds": 0.02
             * _percentile(np.asarray(survived_control_steps), 50),
