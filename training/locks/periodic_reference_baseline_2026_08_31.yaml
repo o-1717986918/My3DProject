@@ -1,0 +1,81 @@
+schema_version: 1
+recorded_at: 2026-08-31
+tool: training/tools/project_periodic_reference.py
+purpose: periodic_symmetric_contact_aware_t1_run_reference
+
+data_boundary:
+  path_policy: local_only_not_committed
+  output_path: /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v1.npz
+  output_sha256: 7f08758850e5b71bd0f80040982bd600cd6e77cd6d8ef90ccc66a09ba495b0de
+  parent_sha256: 2ad294330d7d7fc19e236169bdc862079c8228fd38a544703c38f698fee09820
+  source_license: CC-BY-NC-ND-4.0
+  redistribution: prohibited
+
+projection:
+  algorithm: bilateral_half_cycle_contact_aware_v1
+  contract: training/contracts/run_policy_v2.yaml
+  frame_count: 34
+  frequency_hz: 50.0
+  cycle_duration_seconds: 0.68
+  source_half_weight: 0.8
+  smoothing_passes: 4
+  stance_correction_iterations: 1
+  stable_contact_minimum_run_frames: 4
+  cycle_displacement_m: [2.1778288888931274, 0.0, 0.0]
+  commanded_average_forward_speed_m_s: 3.2026895424898933
+  validated_average_horizontal_speed_m_s: 3.1924355030059814
+
+exact_cpu_replay:
+  contact_frames: [10, 10]
+  stable_contact_frames: [7, 7]
+  longest_flight_frames: 7
+  longest_flight_seconds: 0.14
+  minimum_contact_distance_m: -0.0010000000000000356
+  non_foot_pitch_contact_frames: 0
+  joint_limit_max_violation_rad: 0.0
+
+symmetry:
+  joint_position_max_abs_rad: 0.0
+  root_position_max_abs_m: 4.440892098500626e-16
+  root_orientation_max_angle_rad: 0.0
+  contact_mismatch_values: 0
+
+continuity:
+  wrap_joint_step_max_rad: 0.31679145209491255
+  internal_joint_step_p95_rad: 0.2605790364556015
+  wrap_to_internal_p95_ratio: 1.2157211739052876
+  joint_velocity_wrap_max_rad_s: 1.941427059518902
+  root_velocity_wrap_max_m_s: 0.14708900665233582
+  root_velocity_cyclic_step_max_m_s: 0.8497245973958317
+
+stance_slip:
+  metric_scope: exact_contact_runs_of_at_least_4_frames
+  mean_m_s: 0.10706414861757228
+  p90_m_s: 0.22212858541063532
+  max_m_s: 0.2295535487632013
+
+heading:
+  circular_yaw_center_rad: -3.141592653589793
+  yaw_deviation_max_rad: 0.09407083278957831
+  lateral_excursion_max_m: 0.021604132567439916
+
+cpu_mjwarp_initial_state_parity:
+  steps: 10
+  action_pattern: zero
+  contact_proxy_mismatch_frames: 0
+  max_errors:
+    target_max_abs_rad: 0.0
+    joint_position_max_abs_rad: 6.760726124488414e-7
+    root_position_norm_m: 1.2919512756754176e-6
+    root_yaw_abs_rad: 1.2229954204912016e-7
+    torso_orientation_rad: 1.1920928955078128e-7
+    foot_height_max_abs_m: 4.1080141782723345e-7
+  parity_gate_passed: true
+
+interpretation:
+  projection_gate_passed: true
+  schema_and_provenance_gate_passed: true
+  exact_cpu_replay_gate_passed: true
+  short_horizon_backend_parity_gate_passed: true
+  release_policy_available: false
+  next_stage: reference_centered_residual_tracking

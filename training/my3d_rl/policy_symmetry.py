@@ -38,19 +38,26 @@ def training_mirror_map(
     joint_order: Sequence[str], training_to_server_sign: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return source indices and signs for reflection in the training frame."""
+    source, physical_factor = physical_mirror_map(joint_order)
     names = tuple(joint_order)
     signs = np.asarray(training_to_server_sign, dtype=np.float32)
     if signs.shape != (len(names),):
         raise ValueError("training_to_server_sign has incompatible shape")
+    training_factor = physical_factor * signs / signs[source]
+    return source, training_factor
+
+
+def physical_mirror_map(
+    joint_order: Sequence[str],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return source indices and signs for physical T1 joint reflection."""
+    names = tuple(joint_order)
     if set(names) != set(MIRROR_JOINT):
         raise ValueError("joint order does not match the T1 reflection registry")
     lookup = {name: index for index, name in enumerate(names)}
     source = np.array([lookup[MIRROR_JOINT[name][0]] for name in names])
-    physical_factor = np.array(
-        [MIRROR_JOINT[name][1] for name in names], dtype=np.float32
-    )
-    training_factor = physical_factor * signs / signs[source]
-    return source, training_factor
+    factor = np.array([MIRROR_JOINT[name][1] for name in names], dtype=np.float32)
+    return source, factor
 
 
 def mirror_run_action(

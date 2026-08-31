@@ -108,6 +108,26 @@ PYTHONPATH=training python training/tools/validate_motion_reference.py \
   /path/to/t1-run-reference.npz --output /tmp/t1-run-reference-report.json
 ```
 
+Project an accepted even-length clip onto the versioned half-cycle-symmetric,
+periodic and contact-aware R1 reference before residual-policy training:
+
+```bash
+PYTHONPATH=training python training/tools/project_periodic_reference.py \
+  /home/win98/rl_datasets/motion_refs/t1_run2_subject4_straight76_109_v1.npz \
+  /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v1.npz \
+  --source-half-weight 0.8 --smoothing-passes 4 \
+  --stance-correction-iterations 1 \
+  --report /tmp/t1-periodic-reference.json
+```
+
+The output must stay outside the repository. The projector recomputes cyclic
+velocities, replays exact RCSS contacts, and rejects endpoint, bilateral,
+joint-limit, collision, flight, yaw, lateral or stance-slip gate failures.
+Exact contact runs shorter than four frames remain in the replay/contact
+counts but are excluded from support-foot anchoring and slip statistics. The
+accepted local artifact SHA-256 and metrics are pinned in
+`locks/periodic_reference_baseline_2026_08_31.yaml`.
+
 Holosoma is pinned at `fb835ec8...` and requires the audited patch in
 `patches/holosoma-t1-retargeting.patch`. Verify a patched external checkout
 with:
@@ -154,6 +174,6 @@ asset hashes, three-seed held-out evaluation, ONNX parity report, and
 RCSSServerMJ acceptance result are present. Runtime inference must retain the
 existing kick as a safe fallback.
 
-As of 2026-08-31 the motion pipeline and true-flight evaluator work, but no
-running checkpoint passes the CPU gate. The competition runtime therefore
-continues to use the original stable `walk.onnx`.
+As of 2026-08-31 the motion pipeline, true-flight evaluator and periodic R1
+reference work, but no running checkpoint passes the CPU gate. The competition
+runtime therefore continues to use the original stable `walk.onnx`.

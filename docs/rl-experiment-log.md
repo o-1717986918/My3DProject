@@ -270,3 +270,43 @@ machine-readable summary is
 `/tmp`. This closes the immediate decoder/initialisation/basic-integrator
 mismatch hypothesis. It does not replace long-horizon exact-CPU acceptance for
 a trained, contact-rich policy.
+
+## Periodic contact-aware T1 reference — 2026-08-31
+
+R1 projects the accepted 34-frame straight LAFAN/Holosoma slice onto an exact
+bilateral half-cycle. A blind 50/50 average produced excessive stance slip,
+while independent frame grounding broke contact symmetry and the cyclic root
+velocity seam. The accepted deterministic setting retains 80% of the selected
+source half, applies four circular joint-smoothing passes, reprojects the root
+after exact grounding, and performs one bilateral least-squares stance
+correction. This is a recorded correction to the initial branch, not a hidden
+manual edit.
+
+The generated NPZ remains local-only under the source dataset's
+CC-BY-NC-ND-4.0 boundary. Its SHA-256 is
+`7f08758850e5b71bd0f80040982bd600cd6e77cd6d8ef90ccc66a09ba495b0de`;
+the parent SHA-256 is `2ad294330d7d7fc19e236169bdc862079c8228fd38a544703c38f698fee09820`.
+
+| R1 measurement | Result |
+|---|---:|
+| cycle | 34 frames / 0.68 s / 2.178 m |
+| exact foot-contact frames | left 10, right 10 |
+| longest exact aerial interval | 7 frames / 0.14 s |
+| half-cycle joint/root/orientation/contact error | 0 / `4.44e-16 m` / 0 / 0 |
+| joint seam / internal p95 step | 0.317 / 0.261 rad |
+| root-velocity seam / largest cyclic step | 0.147 / 0.850 m/s |
+| stable-stance slip mean / p90 / max | 0.107 / 0.222 / 0.230 m/s |
+| yaw deviation / lateral excursion | 0.094 rad / 0.0216 m |
+| non-foot pitch-contact frames / joint-limit violation | 0 / 0 rad |
+
+Stable-stance metrics use exact contact runs of at least four frames. Shorter
+collisions remain visible in exact replay and contact counts, but do not become
+support-foot anchors. A ten-step CPU/MJWarp replay initialised from this
+reference also passed: target error 0, contact-proxy mismatch 0, root error
+`1.29e-6 m`, joint error `6.76e-7 rad`. The machine-readable record is
+`training/locks/periodic_reference_baseline_2026_08_31.yaml`.
+
+This closes R1, not R2. The parity trace still decodes the fixed-nominal v2
+action target, so the next test must prove that the new reference-centred
+contract maps zero residual to the periodic reference at every phase before
+formal PPO training starts.

@@ -5,7 +5,7 @@ import numpy as np
 from my3d_rl.motion_reference import validate_motion_reference
 
 
-def _write_reference(path, *, persistent_flight=False):
+def _write_reference(path, *, persistent_flight=False, failed_projection=False):
     frames = 50
     time = np.arange(frames, dtype=np.float32) / 50.0
     metadata = {
@@ -20,6 +20,8 @@ def _write_reference(path, *, persistent_flight=False):
             "minimum_contact_distance_m": -0.001,
         },
     }
+    if failed_projection:
+        metadata["periodic_projection"] = {"passed": False}
     contact = np.zeros((frames, 2), dtype=bool)
     if not persistent_flight:
         contact[0:10, 0] = True
@@ -70,3 +72,13 @@ def test_motion_reference_rejects_persistent_flight(tmp_path):
     assert not result["passed"]
     assert any("aerial interval" in error for error in result["errors"])
     assert any("left contact count" in error for error in result["errors"])
+
+
+def test_motion_reference_rejects_failed_periodic_projection(tmp_path):
+    path = tmp_path / "failed-periodic-reference.npz"
+    _write_reference(path, failed_projection=True)
+
+    result = validate_motion_reference(path)
+
+    assert not result["passed"]
+    assert "periodic projection metadata does not pass its gates" in result["errors"]

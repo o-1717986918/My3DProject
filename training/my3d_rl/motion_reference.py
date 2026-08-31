@@ -155,6 +155,9 @@ def validate_motion_reference(path: Path) -> dict[str, Any]:
                     errors.append(f"missing provenance field {field}")
             if metadata.get("output_frequency_hz") not in (None, 50, 50.0):
                 errors.append("metadata output_frequency_hz is not 50")
+            periodic_projection = metadata.get("periodic_projection")
+            if periodic_projection and not periodic_projection.get("passed", False):
+                errors.append("periodic projection metadata does not pass its gates")
             replay = metadata.get("rcss_replay", {})
             if replay:
                 if replay.get("non_foot_pitch_contact_frames", 0) != 0:

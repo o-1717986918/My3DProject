@@ -255,7 +255,7 @@ silently changed.
 - [x] left/right policy-reflection diagnostic and involution tests;
 - [x] open reliable-strategy refresh, evidence matrix and staged decision lock;
 - [x] identical-action CPU/MJWarp parity trace and regression test;
-- [ ] periodic exact-T1 reference projection;
+- [x] periodic exact-T1 reference projection and CPU/MJWarp initial-state parity;
 - [ ] reference-centred residual tracking contract and environment;
 - [ ] feature-flagged runtime integration with fallback;
 - [ ] single-player RCSS gate, headless 7v7 gate, and visual 7v7 gate;
@@ -281,7 +281,8 @@ episodes. A mathematically reflection-equivariant two-pass diagnostic reached
 64/64 upright and reduced drift to 1.15 m, but erased the qualifying aerial
 phase and still exceeded the 0.25 m drift gate. It is not a deployable model.
 
-The next implementation milestone is a CPU-versus-Warp trajectory parity
-suite followed by a periodic robot-native reference with endpoint, bilateral,
-stance-foot and exact-contact constraints. More reward-only continuation is
+The CPU-versus-Warp trajectory suite and periodic robot-native R1 reference
+now pass. The next implementation milestone is the versioned moving-reference
+decoder where zero action reproduces the reference target exactly, followed by
+a short optimizer/checkpoint integration run. More reward-only continuation is
 not supported by the evidence from this stage.
