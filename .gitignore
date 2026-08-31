@@ -5,6 +5,7 @@ poetry.lock
 poetry.toml
 **/*.log
 **/*.txt
+!**/CMakeLists.txt
 !training/locks/*.txt
 **/build/
 **/install/

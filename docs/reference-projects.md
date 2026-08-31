@@ -1,8 +1,8 @@
 # Reference projects
 
-This project keeps external code separate from the Python team runtime.  A
-reference may influence interfaces, tests, or design decisions, but code is not
-copied unless its licence is compatible and attribution is preserved.
+This project evaluates external work with pinned source and license records.
+A reference may influence interfaces, tests, or design decisions; copied or
+modified code is integrated only when its license and attribution are retained.
 
 ## BahiaRT MuJoCo base
 
@@ -18,10 +18,11 @@ several state-estimation and action-lifecycle contracts implicit.
 
 ## ApolloCodebase
 
-ApolloCodebase is included as the Git submodule `external/ApolloCodebase` at a
-pinned revision (`71018c968969d6e55130b0e1987cd5b4f5c3b4df`). It is licensed
-under GPL-3.0-or-later and remains a separate source tree. Apollo3D's 2026 world
-title is corroborated by the [HKUST(GZ) Humanoid Computing Lab](https://hclab-gz.github.io/)
+ApolloCodebase was imported from a fresh online clone at revision
+`71018c968969d6e55130b0e1987cd5b4f5c3b4df` and is now the authoritative C++
+runtime under `runtime/apollo/`. It is licensed under GPL-3.0-or-later; the
+combined repository carries that license and preserves upstream provenance.
+Apollo3D's 2026 world title is corroborated by the [HKUST(GZ) Humanoid Computing Lab](https://hclab-gz.github.io/)
 and [Offenburg University's competition report](https://www.hs-offenburg.de/en/hochschule/news/article/deutsche-teams-praegen-den-robocup-2026).
 
 Its highest-value reference points are:
@@ -33,21 +34,18 @@ Its highest-value reference points are:
 - obstacle-aware walk planning and legal set-play target generation;
 - isolated ONNX walk/get-up runners and deployable runtime assets.
 
-The public release does **not** expose a standalone kick command or kick policy
-asset.  Its public high-level motion variants are beam, walk, get-up, and
-neutral, so it cannot by itself provide this team's scoring action.
+The upstream release did **not** expose a standalone kick command or kick
+policy asset. My3D therefore ports its validated kick gates and lifecycle into
+Apollo's typed command and motion layers while reusing Apollo's walk network.
 
 Reference value: **very high for architecture, world modelling, navigation,
 team coordination, and get-up recovery; medium for general low-level motion;
 low for a directly reusable kick implementation**.
 
-The Python runtime now has a narrow adapter that can load Apollo's get-up ONNX
-asset directly from the submodule. The 75-value observation and 23-value
-relative joint-action contract were validated against Apollo's C++ runner and
-then tested in the real simulator from four fall directions. No Apollo source
-file or model is copied into the Python package or the default PyInstaller
-archive. See `apollo-integration.md` for the exact runtime and licensing
-boundary; distributing a combined package requires explicit GPL compliance.
+The earlier Python adapter remains useful as cross-implementation evidence,
+but competition execution now uses Apollo's native 75-to-23 get-up runner.
+Deployment archives include the license, notices, and corresponding modified
+source. See `apollo-integration.md` for the exact provenance and reuse boundary.
 
 ## OtherTasks/cs61a
 

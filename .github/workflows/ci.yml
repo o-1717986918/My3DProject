@@ -30,10 +30,31 @@ jobs:
           python -m compileall -q mujococodebase run_player.py scripts
           black --check mujococodebase run_player.py scripts tests training
           flake8 mujococodebase run_player.py scripts tests training
-          bash -n scripts/*.sh start7v7.sh
+          bash -n start.sh start7v7.sh kill.sh build_binary.sh scripts/*.sh runtime/apollo/*.sh
 
       - name: Runtime unit tests
         run: python -m pytest tests
+
+  apollo-cpp:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libyaml-cpp-dev curl
+
+      - name: Bootstrap, build, and test Apollo runtime
+        run: |
+          scripts/bootstrap_apollo_runtime.sh
+          scripts/build_apollo_runtime.sh
+          ctest --test-dir runtime/apollo/build --output-on-failure
+
+      - name: Validate deployment archive
+        run: |
+          ./build_binary.sh My3DTeam-CI
+          tar -tzf build/My3DTeam-CI.tar.gz | grep -q '^My3DTeam-CI/ApolloCodeBase$'
+          tar -tzf build/My3DTeam-CI.tar.gz | grep -q '^My3DTeam-CI/source/src/'
+          tar -tzf build/My3DTeam-CI.tar.gz | grep -q '^My3DTeam-CI/LICENSE.md$'
 
   training-contract:
     runs-on: ubuntu-24.04

@@ -6,7 +6,8 @@ duration=${2:-9}
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 python_bin=${MY3D_PYTHON:-python3}
 server_bin=${RCSSSERVERMJ_BIN:-rcssservermj}
-apollo_bin=${APOLLO_BIN:-$repo_dir/external/ApolloCodebase/build/ApolloCodeBase}
+apollo_runtime="$repo_dir/runtime/apollo"
+apollo_bin=${APOLLO_BIN:-$apollo_runtime/build/ApolloCodeBase}
 agent_port=${APOLLO_PROBE_AGENT_PORT:-$((62000 + $$ % 1000))}
 monitor_port=${APOLLO_PROBE_MONITOR_PORT:-$((agent_port + 1))}
 run_dir=$(mktemp -d -t apollo-recovery.XXXXXX)
@@ -35,6 +36,10 @@ case "$pose" in
         ;;
 esac
 
+if [[ ! -x "$apollo_bin" ]]; then
+    "$repo_dir/scripts/build_apollo_runtime.sh"
+fi
+
 (
     cd "$run_dir"
     exec "$server_bin" \
@@ -58,7 +63,7 @@ sleep 2
         --player-number 7 \
         --host 127.0.0.1 \
         --port "$agent_port" \
-        --asset-root "$repo_dir/external/ApolloCodebase/assets"
+        --asset-root "$apollo_runtime/assets"
 ) >"$run_dir/agent.log" 2>&1 &
 agent_pid=$!
 

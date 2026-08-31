@@ -1,212 +1,127 @@
-# My3DProject competition client
+# My3DProject RoboCup 3D team
 
-This repository is a Python 3.13 team client for the RCSSServerMJ RoboCup 3D
-Soccer Simulation League. It started from the BahiaRT MuJoCo base and now adds
-a seven-player match controller, canonical team coordinates, safe motor output,
-ball tracking, role formations, set-play handling, and a repeatable
-approach-align-kick-recover loop.
+My3DProject is a Linux C++17 client for the RCSSServerMJ RoboCup Soccer
+Simulation 3D 7v7 league. The competition runtime is based on a fresh online
+import of [ApolloCodebase](https://github.com/XiangruiJiang/ApolloCodebase) at
+commit `71018c968969d6e55130b0e1987cd5b4f5c3b4df`, extended with this project's
+validated match and action work.
 
-Development and competition execution are supported in WSL2 Ubuntu 22.04 with
-the `my3d-team` Conda environment. See `docs/competition-runbook.md` for the
-full operating and troubleshooting procedure, and `docs/validation.md` for the
-latest evidence-backed validation status.
+The default path now reuses Apollo's behavior tree, dynamic role assignment,
+team communication, obstacle-aware walk planner, learned 78-to-23 walking
+policy, and learned get-up policy. My3D additions currently include bounded
+test operation, machine-readable match telemetry, a migrated stable
+approach/kick/recover action, legal defensive-kickoff placement, strict 7v7
+acceptance, and source-complete deployment packaging.
 
-Formal running-policy development is tracked in
-`docs/run-policy-training.md`. Training uses the separate `my3d-rl` Conda
-environment and writes large runs only below `/home/win98/rl_runs`. The current
-measured result is stable high-speed walking plus a rejected motion-prior
-running candidate, not accepted running; source research, licensing boundaries
-and the next dynamically feasible reference stage are recorded in
-`docs/open-strategy-search-2026-08-31.md`,
-`docs/robot-soccer-action-research.md`, and `docs/rl-experiment-log.md`.
+The former Python client and the reinforcement-learning tools under
+`training/` remain in the repository as reference implementations and the
+motion-development workbench. They are not the default competition runtime.
 
-The current GMR/v4 posture capability is integrated into the competition
-`Walk` path as an opt-in, hash-locked posture hint. Stable `walk.onnx` remains
-the dominant controller and default backend; the experimental target is capped
-at 10%, runs only in short straight-line `PLAY_ON` windows, and falls back in
-the same cycle on any asset, inference, or posture fault. No restricted motion
-artifact or rejected run model is committed to this repository.
+## Validated platform
 
-## WSL quick start
+- Windows WSL2, Ubuntu 22.04, Linux x86-64
+- GCC with C++17 and CMake 3.20+
+- RCSSServerMJ 0.2.1, `fifa7vs7`, `ssim26`
+- ONNX Runtime 1.22.0 (downloaded and SHA-256 verified by the bootstrap script)
+- `libyaml-cpp-dev`
+
+Install native build requirements once:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake libyaml-cpp-dev curl
+```
+
+The existing `my3d-team` Conda environment remains useful for the server and
+diagnostic scripts; `my3d-rl` remains the isolated training environment.
+
+## Build and test
 
 From the repository directory inside WSL:
 
 ```bash
-conda env create -f environment.yml
-conda activate my3d-team
-git submodule update --init --recursive
-pytest -q
+scripts/bootstrap_apollo_runtime.sh
+scripts/build_apollo_runtime.sh
+ctest --test-dir runtime/apollo/build --output-on-failure
 ```
 
-If the environment already exists, update it instead:
+The bootstrap script downloads only the official ONNX Runtime 1.22.0 Linux x64
+archive and verifies the pinned digest before extraction. Upstream source
+provenance is recorded in `runtime/apollo/UPSTREAM.md`.
 
-```bash
-conda env update -n my3d-team -f environment.yml --prune
-conda activate my3d-team
-```
+## Run
 
-Start the official server in terminal A:
+Start the server in terminal A:
 
 ```bash
 export RCSSSERVERMJ_BIN="$HOME/.local/bin/rcssservermj"
 scripts/run_server.sh realtime
 ```
 
-Start one seven-player team in terminal B:
+Start the seven-player team in terminal B:
 
 ```bash
-export MY3D_PYTHON="$CONDA_PREFIX/bin/python"
-scripts/run_team.sh My3DTeam 127.0.0.1 60000
+MY3D_TEAM_NAME=My3DTeam ./start.sh 127.0.0.1 60000
 ```
 
-For deterministic local 7v7 self-play, start the server first and then run:
+Stop the team with `./kill.sh`. For a strict, bounded two-team acceptance
+match, including a required real kick:
 
 ```bash
-export MY3D_PYTHON="$CONDA_PREFIX/bin/python"
-scripts/run_selfplay.sh 127.0.0.1 60000 60001
+MATCH_REQUIRE_KICK=1 APOLLO_STATUS_INTERVAL=10 \
+  scripts/run_apollo_acceptance_match.sh 1200
 ```
 
-`run_selfplay.sh` starts two seven-player teams, sends kickoff after all clients
-have had time to join, and then drops the ball to enter deterministic `PLAY_ON`.
-The deterministic kickoff is assigned to the left team so the active/passive
-beam formations match the referee placement checks.
+The gate requires all 14 clients to connect, join, reach `PlayOn`, exit
+cleanly, produce no client/server fatal errors, and commit no illegal-defense
+foul. Set `KEEP_MATCH_LOGS=1` to preserve evidence under `/tmp`.
 
-Run the complete competition acceptance gate, including a real
-`APPROACH -> ALIGN -> KICK -> RECOVER` transition:
-
-```bash
-export MY3D_PYTHON="$CONDA_PREFIX/bin/python"
-export RCSSSERVERMJ_BIN="$HOME/.local/bin/rcssservermj"
-scripts/run_acceptance_match.sh 600
-```
-
-Launch a real-time WSLg viewer and a bounded 7v7 demonstration:
+Launch the same Apollo runtime with WSLg visualization:
 
 ```bash
 scripts/run_visual_match.sh 3000
 ```
 
-The Apollo3D learned get-up network is enabled automatically when its pinned
-submodule asset is present. Set `MY3D_GETUP_BACKEND=keyframe` to force the
-built-in fallback. See `docs/apollo-integration.md` before distributing a team
-package that contains the GPL-3.0-or-later Apollo asset.
+Logs are written below `artifacts/apollo-visual-match-<timestamp>/` and are
+ignored by Git.
 
-## Installation
+## Package
 
-### Make sure the following are installed on your system:
-
-- Python ≥ 3.13
- > ⚠️ The project has been tested only with Python 3.13, but it will likely work with other versions as well.
-
-
-- Any Python dependency manager can be used, but **either Hatch or Poetry are recommended**.
-
-- **Poetry ≥ 2.0.0** ([Installation Guide](https://python-poetry.org/docs/#installing-with-pipx))  
-  **or**  
-- **Hatch ≥ 1.9.0** ([Installation Guide](https://hatch.pypa.io/latest/install/))
-
-### Install Dependencies
-The project dependencies are listed inside pyproject.toml
-
-Using **Hatch**:
-```bash
-hatch build
-```
-
-Using **Poetry**:
-```bash
-poetry install
-```
-
-## Instructions
-
-### Run an agent
-After installing the dependencies and setting up the environment, you can launch a player instance:
+Build a self-contained competition archive:
 
 ```bash
-python3 run_player.py -n <player-number> -t <team-name>
+./build_binary.sh My3DTeam
 ```
 
-Using **Hatch**:
-```bash
-hatch run python run_player.py -n <player-number> -t <team-name>
-```
+The result is `build/My3DTeam.tar.gz`. It contains the executable, ONNX assets,
+required non-system libraries, launch/kill scripts, GPL license, provenance,
+and corresponding C++ source/build definitions. The packaged default team name
+can still be overridden with `TEAM_NAME=...` at launch.
 
-Using **Poetry**:
-```bash
-poetry run python run_player.py -n <player-number> -t <team-name>
-```
+## Development boundaries
 
-CLI parameter (a usage help is also available):
+- `runtime/apollo/` is the authoritative competition runtime.
+- `mujococodebase/` is the retained Python reference, useful for comparing
+  behavior and for rapid experiments.
+- `training/` owns RL environments, policy contracts, research locks, and
+  export/evaluation tools. Large or license-restricted artifacts stay outside
+  Git.
+- A policy reaches the C++ runtime only after interface, finite-output,
+  uprightness, simulator, and multi-seed 7v7 gates pass.
 
-- `--host <ip>` to specify the host IP (default: 'localhost')
-- `--port <port>` to specify the agent port (default: 60000)
-- `-n <number>` Player number (1–11) (default: 1)
-- `-t <team_name>` Team name (default: 'Default')
+The existing experimental v4 running candidate is an 80-to-23 residual policy
+that also needs a local-only motion-reference artifact. It is not wire-compatible
+with Apollo's self-contained 78-to-23 walk policy and remains rejected for
+release. The migration contract and efficient next training route are in
+`docs/apollo-policy-migration.md`.
 
+Operational details and the current evidence are in
+`docs/competition-runbook.md` and `docs/validation.md`. Research and reference
+comparisons remain under `docs/`.
 
-### Run a team
-You can also use a shell script to start the entire team, optionally specifying host and port:
+## License and attribution
 
-```bash
-scripts/run_team.sh [team-name] [host] [agent-port]
-```
-
-Using **Hatch**:
-```bash
-hatch run scripts/run_team.sh [team-name] [host] [agent-port]
-```
-
-Using **Poetry**:
-```bash
-poetry run scripts/run_team.sh [team-name] [host] [agent-port]
-```
-
-CLI parameter:
-
-- `[team-name]` Team name (default: `My3DTeam`)
-- `[host]` Server IP address (default: `127.0.0.1`)
-- `[agent-port]` Server port for agents (default: `60000`)
-
-An optional fourth argument limits cycles for smoke tests, for example:
-
-```bash
-scripts/run_team.sh My3DTeam 127.0.0.1 60000 800
-```
-
-### Binary building
-To compete, a binary is needed. It provides a compact, portable version and protects the source code. To create a binary, just run the script ```build_binary.sh```
-
-```bash
-./build_binary.sh <team-name>
-```
-
-Using **Hatch**:
-```bash
-hatch run ./build_binary.sh <team-name>
-```
-
-Using **Poetry**:
-```bash
-poetry run ./build_binary.sh <team-name>
-```
-
-Once binary generation is finished, the result will be inside the build folder, as ```<team-name>.tar.gz```
-
-### Brazil Open Mujoco Demo
-In the Brazil Open Mujoco Demo, the adult humanoid field will be used, with 3 players in each team. The ```start3v3.sh``` script can be used for that purpose.
-
-### Authors and acknowledgment
-
-The match client remains influenced by the early MagmaOffenburg
-RCSSServerMJ demonstrations and the FCPortugal SimSpark base. Architecture
-comparisons with ApolloCodebase are documented in `docs/reference-projects.md`;
-Apollo remains an isolated GPL-3.0-or-later Git submodule.
-
-This project was developed and contributed by:
-- **Alan Nascimento**
-- **Luís Magalhães**
-- **Pedro Rabelo**
-- **Melissa Damasceno**
-
-Contributions, bug reports, and feature requests are welcome via pull requests.
+The combined project is distributed under GPL-3.0-or-later; see `LICENSE`.
+Apollo upstream notices are retained in `runtime/apollo/LICENSE.md` and
+`runtime/apollo/UPSTREAM.md`. The project also retains the history and
+acknowledgments of the earlier BahiaRT/Magma/FCPortugal-derived Python work.

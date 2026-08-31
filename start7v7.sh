@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec scripts/run_selfplay.sh \
-    "${1:-127.0.0.1}" \
-    "${2:-60000}" \
-    "${3:-60001}" \
-    "${4:-}"
+repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+exec "$repo_dir/scripts/run_apollo_acceptance_match.sh" "${1:-1200}"

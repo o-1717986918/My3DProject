@@ -236,9 +236,9 @@ are in `training/locks/sources.yaml`.
   arXiv:2512.01996;
 - Radosavovic et al. (2024), *Real-World Humanoid Locomotion with
   Reinforcement Learning*, Science Robotics, DOI:10.1126/scirobotics.adi9579;
-- ApolloCodebase, pinned submodule commit
-  `71018c968969d6e55130b0e1987cd5b4f5c3b4df`, used only to compare the 78->23
-  inference boundary and not copied into the permissive trainer.
+- ApolloCodebase, online-import commit
+  `71018c968969d6e55130b0e1987cd5b4f5c3b4df`, now used as the GPL competition
+  runtime while the training package retains its independent contracts.
 
 The strongest counterargument is that the 78-value single-frame actor may be
 insufficient for high-speed state estimation. That is tested rather than

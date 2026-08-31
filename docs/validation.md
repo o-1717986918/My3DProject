@@ -5,6 +5,30 @@ Platform: WSL2 Ubuntu 22.04
 Client environment: `my3d-team`, Python 3.13.15
 Server: RCSSServerMJ 0.2.1, `fifa7vs7`, `ssim26`, synchronous mode
 
+## Apollo C++ release-path validation
+
+The authoritative competition path was migrated to a fresh online import of
+ApolloCodebase commit `71018c968969d6e55130b0e1987cd5b4f5c3b4df`.
+The upstream branch/release/LFS/submodule audit and both ONNX asset digests are
+recorded in `runtime/apollo/UPSTREAM.md`.
+
+- CMake `RelWithDebInfo` build with GCC/C++17: passed.
+- `runtime_config_test`: passed.
+- `field_geometry_test`: passed.
+- Strict 1200-cycle Apollo 7v7 acceptance: passed.
+- Connections/joins/`PlayOn`/clean exits: 14/14/14/14.
+- Fatal client failures/server errors/illegal defense: 0/0/0.
+- Observed kick-state telemetry samples: 27.
+- Observed visible kick: ball forward velocity increased from approximately
+  0.04 m/s to 1.43 m/s during `KickForward`.
+- RCSSServerMJ activation warnings: 14, isolated to the known add-player model
+  recompilation event and reported separately.
+
+The former 4.0 m defensive-kickoff baseline lay exactly on the server's
+inclusive goalkeeper-area boundary and caused one illegal-defense penalty. It
+is now 5.3 m from the goal line (1.3 m outside the area), protected by the
+geometry regression test.
+
 ## Automated checks
 
 - `pytest -q`: 40 passed (29 existing runtime checks plus 11 guarded
