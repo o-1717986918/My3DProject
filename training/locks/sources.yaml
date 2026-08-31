@@ -30,6 +30,59 @@ competition_physics:
   soccer_world_xml_sha256: b4aad4d084c85714b51f09a3f401541cd0a2ae833ad25000dd2356cef04e407e
 
 reference_only:
+  - name: MuJoCo Playground current T1 joystick candidate
+    repository: https://github.com/google-deepmind/mujoco_playground
+    commit: 8a4b4642d8eba8a80ac99ed125cb62c16e1457ad
+    dependency_mujoco_menagerie_commit: 1b86ece576591213e2b666ebf59508454200ca97
+    license: Apache-2.0
+    t1_onnx_sha256: 3f25f2b9c3dd49bab915577f7d5caba4e753a6cb29df2d7488ef7da14d1966b4
+    reuse_policy: observation/reward/regression reference; official policy is a walk baseline, not a run teacher
+    local_audit: CPU MuJoCo flat-terrain replay survived 0.4-1.0 m/s commands but showed no >=10 ms flight
+  - name: FC Portugal FCPCodebase
+    repository: https://github.com/m-abr/FCPCodebase
+    commit: 22d9e2ff9f12a271ff882868c39cc672e56cc625
+    license: GPL-3.0
+    reuse_policy: independently reimplement analytic-reference plus residual-action pattern; no source copying
+  - name: BeyondMimic whole body tracking
+    repository: https://github.com/HybridRobotics/whole_body_tracking
+    commit: cd65172032893724b445448818c34165846d847d
+    license: MIT
+    reuse_policy: adaptive failure-phase sampling and whole-body tracking method reference
+  - name: MJLab whole body tracking
+    repository: https://github.com/mujocolab/mjlab
+    commit: b517e0c489139e7fcee95702cfb2b01931264985
+    license: Apache-2.0
+    reuse_policy: MJWarp tracking implementation reference; independently port selected algorithms
+  - name: RSL-RL symmetry extension
+    repository: https://github.com/leggedrobotics/rsl_rl
+    commit: fe28cb03439d8e5ec335ecb9b0c945294db6001b
+    license: BSD-3-Clause
+    reuse_policy: train-time mirror loss and data-augmentation reference
+  - name: Chasing Autonomy robot_rl
+    repository: https://github.com/Zolkin1/robot_rl
+    commit: 3c280e185e801060e6a73e77fa4ab2b650372ebb
+    license: inconsistent-missing-top-level-license
+    upstream_metadata_note: pyproject references absent LICENSE and MIT classifier while multiple source files state all rights reserved
+    artifact_repository: https://huggingface.co/zolkin/robot_rl
+    artifact_repository_revision: 2f18d9cdc3995cf1d2e05c7f1a0add198237cd95
+    artifact_license: not declared in repository metadata during audit
+    implementation_gap: paper whole-body multiple-shooting trajectory generator not found; included CasADi trajectory optimiser is navigation MPC
+    reuse_policy: paper/method/configuration reference only; no source or trajectory copying
+  - name: DribbleMaster
+    repository: https://github.com/Zhuoheng0910/DribbleMaster
+    commit: b8e292cc5f0d95ac10cd1a398563647ac84bd3aa
+    license: MIT-root-with-inherited-all-rights-reserved-notices
+    reuse_policy: T1 ball-curriculum and configuration reference only; no released checkpoint was found
+  - name: SoccerDiffusion
+    repository: https://github.com/bit-bots/SoccerDiffusion
+    commit: 8898484bf251d314c23f2a7540e7583e80007ae3
+    license: MIT
+    reuse_policy: future team-motion data pipeline reference; not a T1 locomotion asset
+  - name: HTWK Gym
+    repository: https://github.com/NaoHTWK/htwk-gym
+    commit: cbb4f51942d3e2b1f0be0127ebf1030146b5455d
+    license: no top-level license identified during audit
+    reuse_policy: rejected for copying or redistribution; local black-box comparison only
   - name: ApolloCodebase
     repository: https://github.com/XiangruiJiang/ApolloCodebase
     commit: 71018c968969d6e55130b0e1987cd5b4f5c3b4df
@@ -75,3 +128,23 @@ motion_datasets:
     archive_sha256: ea918082b500a5d158e9d3aa39039df04cd42e25f5c02fe8f7e88e8e9365a977
     license: CC-BY-NC-ND-4.0
     reuse_policy: local non-commercial research only; never commit or distribute adapted motion
+
+paper_only:
+  - name: Chasing Autonomy
+    identifier: arXiv:2603.25902
+    reuse_policy: dynamically optimized periodic gait and CLF-guided tracking method reference
+  - name: RuN
+    identifier: arXiv:2509.20696
+    reuse_policy: frozen conditional motion generator plus residual policy method reference; generator deferred
+  - name: Unified Walking Running and Recovery
+    identifier: arXiv:2605.18611
+    reuse_policy: state-dependent adversarial-prior gating reference; implementation deferred
+  - name: Multi-Gait Learning
+    identifier: arXiv:2604.19102
+    reuse_policy: selective adversarial motion-prior reference; implementation deferred
+  - name: STOFT
+    identifier: arXiv:2510.01843
+    reuse_policy: later foot-trajectory optimization reference; no reusable implementation located
+  - name: Vision-Based Humanoid Robot Soccer Dribbling
+    identifier: arXiv:2607.12702
+    reuse_policy: later privileged-to-vision T1 dribbling reference; no official code located

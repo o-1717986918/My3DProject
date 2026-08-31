@@ -17,7 +17,8 @@ environment and writes large runs only below `/home/win98/rl_runs`. The current
 measured result is stable high-speed walking plus a rejected motion-prior
 running candidate, not accepted running; source research, licensing boundaries
 and the next periodic-reference stage are recorded in
-`docs/robot-soccer-action-research.md` and `docs/rl-experiment-log.md`.
+`docs/open-strategy-search-2026-08-31.md`,
+`docs/robot-soccer-action-research.md`, and `docs/rl-experiment-log.md`.
 
 ## WSL quick start
 

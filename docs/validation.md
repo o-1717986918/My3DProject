@@ -1,6 +1,6 @@
 # Validation record
 
-Validation date: 2026-08-30
+Validation date: 2026-08-31
 Platform: WSL2 Ubuntu 22.04
 Client environment: `my3d-team`, Python 3.13.15
 Server: RCSSServerMJ 0.2.1, `fifa7vs7`, `ssim26`, synchronous mode
@@ -32,6 +32,21 @@ head tracking, and player role assignment.
   1.92 s, 2.66 s, and 1.94 s respectively.
 
 ## Seven-versus-seven smoke test
+
+The 2026-08-31 WSLg visual acceptance ran for 3000 bounded synchronous cycles
+with the current stable competition policy. The window was closed after the
+bounded run completed and the launcher cleaned up the server. Its final result
+was:
+
+```text
+status=0 connected=14 play_on=14 failures=0 server_errors=0
+```
+
+During the visual run the attacker repeatedly traversed
+`APPROACH -> ALIGN -> KICK -> RECOVER`, and both teams exercised the Apollo
+get-up path. Host-local logs are under
+`artifacts/visual-match-20260831-110630/`; generated match logs remain ignored
+and are not part of the repository.
 
 Two local seven-player teams completed an 800-cycle baseline run. After the
 zone-owner and deterministic `PLAY_ON` changes, the final tree completed an

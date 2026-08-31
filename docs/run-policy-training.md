@@ -1,6 +1,8 @@
 # RCSSServerMJ running-policy development plan
 
-Status: v1/v2 plus motion-prior pipeline complete; no running policy has passed release gates as of 2026-08-31
+Status: v1/v2 plus motion-prior pipeline complete; open-strategy refresh has
+selected periodic reference-centred residual tracking; no running policy has
+passed release gates as of 2026-08-31
 
 Owner environment: WSL2 Ubuntu 22.04, Conda `my3d-rl`
 
@@ -18,6 +20,19 @@ passes all simulator, export, server, and 7v7 gates. A short PPO smoke run prove
 only that the optimizer works; it does not prove that the robot can run.
 
 ## 2. Evidence-backed decision
+
+The 2026-08-31 open search supersedes reward-only continuation of the baseline
+described below. The selected next controller is
+`q_target = q_reference(phase, speed) + residual_scale * action_residual`, after
+an identical-action CPU/MJWarp parity test and periodic T1 reference
+projection. Whole-body tracking, adaptive failure-phase sampling and
+train-time symmetry follow in that order. The evidence matrix, licensing
+boundaries and exact stages are in
+[`open-strategy-search-2026-08-31.md`](open-strategy-search-2026-08-31.md) and
+`training/locks/open_strategy_2026_08_31.yaml`.
+
+The fixed-nominal policy remains a measured historical baseline and the stable
+walk remains the runtime fallback; neither is treated as a running teacher.
 
 Use the already pinned MuJoCo Playground/Brax PPO stack for the first formal
 baseline, with MJX-Warp as the measured fast backend and MJX-JAX as a diagnostic
@@ -47,7 +62,10 @@ measurement.
 
 ## 3. Versioned policy contract
 
-`run_policy_v1` preserves the current Python runtime boundary:
+`run_policy_v1` preserves the legacy Python runtime boundary, while
+`run_policy_v2` adds gait phase. Both current contracts centre actions on a
+fixed nominal pose; the next motion-tracking contract will version the moving
+reference and residual scale explicitly rather than changing v2 silently:
 
 - input: `float32[1, 78]`;
 - output: `float32[1, 23]`;
@@ -165,8 +183,9 @@ is labelled `candidate`, never `release`.
 - median forward tracking RMSE at most 0.35 m/s;
 - median lateral drift at most 0.25 m over the 10-second rollout;
 - no NaN, invalid action, joint-limit violation, or unsafe motor packet;
-- report whether an aerial phase occurs. If no episode shows both feet clear of
-  the ground, call the behavior `fast locomotion`, not biomechanical running.
+- at least 80% of exact-CPU episodes contain a two-foot flight interval lasting
+  at least two consecutive 5 ms physics frames. A candidate missing this gate
+  is `fast locomotion`, not running.
 
 The command suite also includes `vx=0.0, 0.5, 1.0, 1.5`, lateral commands, yaw
 commands, and abrupt command changes. A policy that only sprints straight is
@@ -193,10 +212,12 @@ not competition-ready.
 
 ## 7. Search and source provenance
 
-Search performed on 2026-08-30 against current primary sources and local pinned
-source trees. Design claims are accepted only from original papers, official
-framework/vendor repositories, official RCSSServerMJ documentation, or direct
-local measurements.
+Search performed on 2026-08-30 and refreshed on 2026-08-31 against current
+primary sources and local pinned source trees. Design claims are accepted only
+from original papers, official framework/vendor repositories, official
+RCSSServerMJ documentation, or direct local measurements. The complete refresh
+is in `docs/open-strategy-search-2026-08-31.md`; exact commits and reuse rules
+are in `training/locks/sources.yaml`.
 
 - MuJoCo Playground official repository, pinned local tag `v0.2.0`, commit
   `124a73fa3303f75a62f8fe04d329b829ed0ebdfb`;
@@ -232,6 +253,10 @@ silently changed.
 - [x] pinned Holosoma/LAFAN import, exact RCSS replay and motion-reference gate;
 - [x] bounded-KL motion curriculum and CPU true-flight/contact evaluation;
 - [x] left/right policy-reflection diagnostic and involution tests;
+- [x] open reliable-strategy refresh, evidence matrix and staged decision lock;
+- [ ] identical-action CPU/MJWarp parity trace and regression test;
+- [ ] periodic exact-T1 reference projection;
+- [ ] reference-centred residual tracking contract and environment;
 - [ ] feature-flagged runtime integration with fallback;
 - [ ] single-player RCSS gate, headless 7v7 gate, and visual 7v7 gate;
 - [ ] three-seed release evaluation after the first candidate succeeds.

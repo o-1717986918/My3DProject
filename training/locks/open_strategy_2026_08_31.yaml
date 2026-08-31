@@ -1,0 +1,110 @@
+schema_version: 1
+recorded_at: 2026-08-31
+decision: periodic_reference_centered_residual_tracking
+
+constraints:
+  robot: Booster T1
+  acceptance_physics: RCSSServerMJ exact CPU MuJoCo
+  training_backend: MJWarp
+  gpu: NVIDIA GeForce RTX 5060 Laptop GPU 8GB
+  runtime_fallback: existing stable walk policy
+
+stages:
+  - id: R0
+    name: cpu_mjwarp_identical_action_parity
+    deliverables:
+      - per_step_action_target_pose_contact_trace
+      - first_divergence_report
+      - regression_test
+    promotion:
+      - decoded_joint_targets_match
+      - no_unexplained_immediate_contact_identity_mismatch
+      - torso_root_and_foot_errors_reported
+  - id: R1
+    name: periodic_t1_run_reference
+    depends_on: [R0]
+    design:
+      - endpoint_pose_velocity_periodicity
+      - bilateral_half_cycle_symmetry
+      - stance_foot_slip_minimization
+      - exact_contact_and_flight_replay
+      - bounded_yaw_lateral_motion_and_joint_limits
+    promotion:
+      - schema_and_provenance_valid
+      - no_non_foot_pitch_collision
+      - two_foot_flight_at_least_0_010_seconds_per_cycle
+      - exact_cpu_metrics_recorded
+  - id: R2
+    name: fixed_speed_reference_residual_tracking
+    depends_on: [R1]
+    controller: q_target=q_reference+residual_scale*action_residual
+    training_speed_m_s: [1.6, 2.0]
+    promotion:
+      seeds: 3
+      episode_seconds: 10
+      upright_completion_rate_gte: 0.95
+      median_forward_speed_m_s_gte: 1.2
+      median_forward_rmse_m_s_lte: 0.35
+      median_lateral_drift_m_lte: 0.25
+      flight_phase_episode_rate_gte: 0.80
+      minimum_flight_seconds: 0.010
+      all_values_finite: true
+  - id: R3
+    name: adaptive_phase_and_train_time_symmetry
+    depends_on: [R2]
+    order:
+      - whole_body_reference_rewards
+      - adaptive_failure_phase_sampling
+      - mirror_consistency_loss
+      - mirrored_transition_augmentation_after_equivariance_test
+    retention_rule: improve_exact_cpu_gate_margin_without_reducing_flight_reliability
+  - id: R4
+    name: command_robustness_and_onnx
+    depends_on: [R3]
+    order:
+      - speed_range
+      - lateral_and_yaw_commands
+      - stand_walk_run_transitions
+      - pushes_and_domain_randomization
+      - observation_noise_and_action_delay
+      - native_onnx_parity
+  - id: R5
+    name: football_and_7v7_closure
+    depends_on: [R4]
+    order:
+      - ball_approach_and_kick_regression
+      - privileged_t1_ball_policy
+      - vision_student_if_needed
+      - deterministic_single_player_rcss
+      - headless_7v7
+      - visual_7v7
+
+source_boundaries:
+  robot_rl:
+    use: paper_method_and_configuration_reference_only
+    prohibit:
+      - source_copying
+      - trajectory_redistribution
+    reason: missing_top_level_license_mixed_file_notices_and_unlicensed_hf_assets
+  fcp_codebase:
+    use: independently_reimplement_residual_control_pattern
+    prohibit: source_copying_into_permissive_trainer
+    reason: GPL-3.0
+  lafan1:
+    use: local_non_commercial_research_only
+    prohibit:
+      - commit_derived_motion
+      - redistribute_adapted_motion
+    reason: CC-BY-NC-ND-4.0
+
+closed_or_deferred:
+  closed:
+    - reward_only_continuation_from_fixed_nominal_pose
+    - inference_time_mirror_averaging_for_deployment
+    - released_t1_walk_policy_as_run_teacher
+  deferred:
+    - conditional_motion_generator
+    - amp_or_selective_amp
+    - diffusion_soccer_control
+    - clf_trajectory_library
+    - isaac_lab_framework_migration
