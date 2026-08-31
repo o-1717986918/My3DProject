@@ -64,6 +64,22 @@ PYTHONPATH=training python training/tools/smoke_run_env.py \
   --impl warp --contract-version v2 --num-envs 8 --steps 4
 ```
 
+Before long training, replay an identical short action trace in CPU MuJoCo and
+MJX-Warp. The JSON includes every decoded target, reference phase, root/torso
+state, foot height, contact proxy, first threshold crossing and maximum error:
+
+```bash
+XLA_PYTHON_CLIENT_PREALLOCATE=false PYTHONPATH=training \
+  python training/tools/compare_cpu_mjwarp.py \
+  --steps 20 --action-pattern sine --action-amplitude 0.15 --strict \
+  --output /tmp/my3d-cpu-mjwarp-parity.json
+```
+
+Pass `--motion-reference /path/to/reference.npz` to initialise both backends
+from the same full motion state. The pinned 2026-08-31 baseline is in
+`locks/sim_parity_baseline_2026_08_31.yaml`; full traces remain generated
+artifacts rather than source files.
+
 Bootstrap a phase-aware locomotion experiment from the verified walk teacher:
 
 ```bash

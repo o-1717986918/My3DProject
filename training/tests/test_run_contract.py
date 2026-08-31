@@ -88,6 +88,9 @@ def test_run_environment_uses_exact_control_period_and_safe_targets():
     np.testing.assert_allclose(env._right_foot_half_size, [0.1115, 0.05, 0.015])
     assert np.isclose(env._config.foot_contact_tolerance, 0.01)
 
+    decoded = np.asarray(env.decode_action_targets(jax.numpy.zeros(23)))
+    np.testing.assert_allclose(decoded, np.asarray(env._nominal_physical))
+
 
 def test_phase_policy_contract_extends_actor_without_changing_actions():
     contract = load_policy_contract(PHASE_CONTRACT)

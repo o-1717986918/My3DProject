@@ -336,6 +336,25 @@ class DirectionalRun(mjx_env.MjxEnv):
     def mjx_model(self) -> mjx.Model:
         return self._mjx_model
 
+    def decode_action_targets(
+        self, action: jax.Array, gait_phase: jax.Array | None = None
+    ) -> jax.Array:
+        """Decode one policy action into clamped physical joint targets.
+
+        ``gait_phase`` is part of the public decoder surface so the parity
+        harness remains valid when the next contract centres residual actions
+        on a moving reference.  The current v1/v2 contracts use a fixed
+        nominal pose, so the argument is intentionally unused for now.
+        """
+        del gait_phase
+        clipped_action = jp.clip(
+            action, -self._config.action_clip, self._config.action_clip
+        )
+        targets_training = (
+            self._nominal_training + self._config.action_scale * clipped_action
+        )
+        return jp.clip(targets_training * self._sign, self._lowers, self._uppers)
+
     def reset(self, rng: jax.Array) -> mjx_env.State:
         (
             rng,
@@ -541,11 +560,8 @@ class DirectionalRun(mjx_env.MjxEnv):
         qvel = state.data.qvel.at[self._root_dof : self._root_dof + 2].add(push_xy)
         data = state.data.replace(qvel=qvel)
 
-        targets_training = (
-            self._nominal_training + self._config.action_scale * applied_action
-        )
-        targets_physical = jp.clip(
-            targets_training * self._sign, self._lowers, self._uppers
+        targets_physical = self.decode_action_targets(
+            applied_action, state.info["gait_phase"]
         )
         ctrl = data.ctrl.at[self._pos_actuator].set(targets_physical)
         data = mjx_env.step(self._mjx_model, data, ctrl, self.n_substeps)

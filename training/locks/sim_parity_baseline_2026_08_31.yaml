@@ -1,0 +1,74 @@
+schema_version: 1
+recorded_at: 2026-08-31
+tool: training/tools/compare_cpu_mjwarp.py
+purpose: short_horizon_identical_state_action_backend_parity
+
+environment:
+  cpu_engine: MuJoCo 3.12.0
+  accelerated_engine: MJX-Warp
+  warp: 1.16.0
+  gpu: NVIDIA GeForce RTX 5060 Laptop GPU 8GB
+  contract: training/contracts/run_policy_v2.yaml
+  control_dt_seconds: 0.02
+  physics_dt_seconds: 0.005
+  physics_substeps: 4
+  seed: 4501
+
+thresholds:
+  target_max_abs_rad: 1.0e-6
+  joint_position_max_abs_rad: 0.05
+  root_position_norm_m: 0.03
+  root_yaw_abs_rad: 0.05
+  torso_orientation_rad: 0.08
+  foot_height_max_abs_m: 0.025
+  contact_proxy_mismatch_frames: 2
+
+runs:
+  - name: neutral_zero_action
+    steps: 5
+    action_pattern: zero
+    motion_reference: null
+    max_errors:
+      target_max_abs_rad: 0.0
+      joint_position_max_abs_rad: 2.0313001357630256e-6
+      root_position_norm_m: 6.542699259330928e-7
+      root_yaw_abs_rad: 1.0013860973980946e-8
+      torso_orientation_rad: 0.0
+      foot_height_max_abs_m: 2.7848745419271903e-7
+    contact_proxy_mismatch_frames: 0
+    parity_gate_passed: true
+  - name: sine_action_stress
+    steps: 20
+    action_pattern: sine
+    action_amplitude: 0.15
+    motion_reference: null
+    max_errors:
+      target_max_abs_rad: 0.0
+      joint_position_max_abs_rad: 5.881473783553304e-7
+      root_position_norm_m: 3.068016180685809e-6
+      root_yaw_abs_rad: 1.0769753722161823e-7
+      torso_orientation_rad: 2.632069845893339e-7
+      foot_height_max_abs_m: 1.3572959080276892e-7
+    contact_proxy_mismatch_frames: 0
+    parity_gate_passed: true
+  - name: complete_motion_reference_initial_state
+    steps: 10
+    action_pattern: zero
+    motion_reference:
+      path_policy: local_only_not_committed
+      sha256: 2ad294330d7d7fc19e236169bdc862079c8228fd38a544703c38f698fee09820
+    max_errors:
+      target_max_abs_rad: 0.0
+      joint_position_max_abs_rad: 7.309150417134092e-7
+      root_position_norm_m: 1.6029684661101383e-6
+      root_yaw_abs_rad: 9.6264955029568e-7
+      torso_orientation_rad: 9.32484140823016e-7
+      foot_height_max_abs_m: 4.3255658394025787e-7
+    contact_proxy_mismatch_frames: 0
+    parity_gate_passed: true
+
+interpretation:
+  passed: true
+  scope: short_horizon_only
+  conclusion: no immediate action-decoding, initialization, contact-proxy, or basic-integration mismatch
+  limitation: long-horizon contact-rich policy rollouts still require exact CPU acceptance

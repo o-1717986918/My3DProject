@@ -245,3 +245,28 @@ tracking curriculum, ONNX export, symmetry diagnostic and exact-contact CPU
 acceptance loop. It does **not** have a release running policy. No experimental
 ONNX was copied into `mujococodebase/skills/walk/`; the existing stable walk
 remains the competition default.
+
+## CPU MuJoCo versus MJX-Warp parity baseline — 2026-08-31
+
+The new `training/tools/compare_cpu_mjwarp.py` harness copies one complete MJX
+initial state into CPU MuJoCo, replays the same bounded action sequence through
+the environment's single action decoder, and records per-control-step targets,
+reference phase, joint/root/torso state, foot lowest point and contact proxy.
+It reports each metric's first threshold crossing rather than expecting the
+solvers to be bitwise identical over a full episode.
+
+Three RTX 5060 Laptop GPU checks passed:
+
+| Trace | Largest root-position error | Largest joint-position error | Contact-proxy mismatch | Gate |
+|---|---:|---:|---:|:---:|
+| five neutral steps | `6.54e-7 m` | `2.03e-6 rad` | 0 frames | pass |
+| twenty 0.15-amplitude sine-action steps | `3.07e-6 m` | `5.88e-7 rad` | 0 frames | pass |
+| ten steps from the complete local run-reference state | `1.60e-6 m` | `7.31e-7 rad` | 0 frames | pass |
+
+All decoded-target errors were exactly zero, every tracked value was finite,
+and no orientation, yaw or foot-height threshold was crossed. The locked
+machine-readable summary is
+`training/locks/sim_parity_baseline_2026_08_31.yaml`; full JSON traces remain in
+`/tmp`. This closes the immediate decoder/initialisation/basic-integrator
+mismatch hypothesis. It does not replace long-horizon exact-CPU acceptance for
+a trained, contact-rich policy.

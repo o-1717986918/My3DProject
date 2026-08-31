@@ -254,7 +254,7 @@ silently changed.
 - [x] bounded-KL motion curriculum and CPU true-flight/contact evaluation;
 - [x] left/right policy-reflection diagnostic and involution tests;
 - [x] open reliable-strategy refresh, evidence matrix and staged decision lock;
-- [ ] identical-action CPU/MJWarp parity trace and regression test;
+- [x] identical-action CPU/MJWarp parity trace and regression test;
 - [ ] periodic exact-T1 reference projection;
 - [ ] reference-centred residual tracking contract and environment;
 - [ ] feature-flagged runtime integration with fallback;
