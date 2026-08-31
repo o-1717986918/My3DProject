@@ -340,3 +340,14 @@ replacement `reference_residual_v2` uses an exactly zero mean head, 0.1 initial
 standard deviation, one PPO pass, `1e-5` learning rate with bounded adaptive
 KL, no observation renormalisation, and reference-state evaluation. A
 regression test asserts the initial mean and standard deviation directly.
+
+The corrected seed-109 smoke kept its distribution controlled (KL
+`3.80e-4`, mean location within `6.77e-4`, standard deviation 0.100) and wrote
+a valid checkpoint, but mean episode length only changed from 20.0 to 20.4
+steps. A new zero-residual diagnostic then separated reference trackability
+from optimisation. Across 32 random phases, the 1.8 m/s scaled cycle survived
+20.3 steps on average; the original 3.195 m/s cadence survived 19.7. Neither
+completed an episode. Time scaling is therefore not the primary failure;
+the kinematic reference needs learned feedback/inverse-dynamics correction.
+The locked results are in
+`training/locks/reference_residual_baseline_2026_08_31.yaml`.

@@ -1,0 +1,66 @@
+schema_version: 1
+recorded_at: 2026-08-31
+purpose: reference_centered_residual_training_baseline
+
+contract:
+  path: training/contracts/run_policy_v3.yaml
+  action_scale_rad: 0.15
+  action_clip: [-1.0, 1.0]
+  reference_sha256: ab81912570d746965162f1d84cfd6d215a1265bd28dfc2d371c72f095aa40f9a
+  runtime_release_status: training_only
+
+optimizer_runs:
+  - name: random_head_rejected
+    local_run: /home/win98/rl_runs/run-reference-residual-v3-smoke-s107-20260831-1215
+    git_revision: 48d396e1c3ca856494df088ec5eb35a7315b6542
+    profile: reference_residual_v1
+    seed: 107
+    environment_steps: 196608
+    initial_mean_episode_length_steps: 56.375
+    final_mean_episode_length_steps: 43.75
+    final_kl: 8.613268852233887
+    checkpoint_written: true
+    decision: reject_initialization
+  - name: zero_head_optimizer_smoke
+    local_run: /home/win98/rl_runs/run-reference-residual-v3-zerohead-s109-20260831-1222
+    git_revision: e57fa9a9e98921167066133180589e37d1fbf76a
+    profile: reference_residual_v2
+    seed: 109
+    environment_steps: 196608
+    initial_mean_episode_length_steps: 20.0
+    final_mean_episode_length_steps: 20.375
+    final_kl: 3.7961005000397563e-4
+    final_policy_mean_abs_bound: 6.769027095288038e-4
+    final_policy_mean_std: 0.09998781234025955
+    all_reported_values_finite: true
+    checkpoint_written: true
+    decision: optimizer_path_pass_trackability_gate_fail
+
+zero_residual_open_loop:
+  implementation: warp
+  episodes: 32
+  maximum_steps: 500
+  speed_scaled_1_8_m_s:
+    gait_frequency_hz: 0.8285620212554932
+    mean_episode_length_steps: 20.3125
+    median_episode_length_steps: 19.0
+    maximum_episode_length_steps: 45
+    full_episode_rate: 0.0
+    alive_weighted_forward_speed_m_s: 1.3725938063401442
+    proxy_flight_episode_rate: 0.40625
+  source_speed_3_194762_m_s:
+    gait_frequency_hz: 1.4705883264541626
+    mean_episode_length_steps: 19.71875
+    median_episode_length_steps: 18.0
+    maximum_episode_length_steps: 38
+    full_episode_rate: 0.0
+    alive_weighted_forward_speed_m_s: 2.6419913749876187
+    proxy_flight_episode_rate: 0.9375
+
+interpretation:
+  zero_action_decoder_invariant_passed: true
+  optimizer_checkpoint_integration_passed: true
+  reference_open_loop_trackability_passed: false
+  speed_scaling_is_primary_failure_cause: false
+  release_candidate_available: false
+  next_stage: multi_epoch_residual_learning_then_exact_cpu_gate

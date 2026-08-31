@@ -159,6 +159,17 @@ optimizer/checkpoint integration test. The manifest records both requested
 and effective step counts. It is not a running result and cannot be selected
 for deployment.
 
+Measure the zero-residual reference before attributing a failure to PPO:
+
+```bash
+PYTHONPATH=training python training/tools/evaluate_reference_open_loop.py \
+  /home/win98/rl_datasets/motion_refs/t1_run2_subject4_periodic_v3.npz \
+  --impl warp --episodes 32 --steps 500 --vx 1.8 \
+  --output /tmp/t1-reference-open-loop.json
+```
+
+This is an MJWarp trackability diagnostic, not the exact-CPU flight gate.
+
 Holosoma is pinned at `fb835ec8...` and requires the audited patch in
 `patches/holosoma-t1-retargeting.patch`. Verify a patched external checkout
 with:
