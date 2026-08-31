@@ -49,7 +49,9 @@ reference_only:
     repository: https://github.com/amazon-far/holosoma
     commit: fb835ec8cb6ee48f483ce567586625e5fae1ae1f
     license: Apache-2.0
-    reuse_policy: next-stage T1 motion retargeting and tracking reference
+    reuse_policy: pinned T1 retargeting source; use only with the audited local patch
+    required_patch: training/patches/holosoma-t1-retargeting.patch
+    patch_reason: fix LAFAN joint order, robot-only qpos overwrite, and MuJoCo 3.12 hinge Jacobians
   - name: RoboNaldo training
     repository: https://github.com/lu-yidan/RoboNaldo-YD
     commit: dd924110393be512986953b195e3f352300f6c08
@@ -65,3 +67,11 @@ reference_only:
     commit: e72e470230047dedaf66df0983f1d0ab746faeb5
     license: non-commercial restrictions reported by upstream
     reuse_policy: paper/method reference only; no source or asset copying
+
+motion_datasets:
+  - name: Ubisoft La Forge Animation Dataset LAFAN1
+    repository: https://github.com/ubisoft/ubisoft-laforge-animation-dataset
+    commit: 94084601bacdf9cc3764b5c73daaeccae6035fac
+    archive_sha256: ea918082b500a5d158e9d3aa39039df04cd42e25f5c02fe8f7e88e8e9365a977
+    license: CC-BY-NC-ND-4.0
+    reuse_policy: local non-commercial research only; never commit or distribute adapted motion

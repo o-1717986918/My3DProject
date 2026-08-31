@@ -1,0 +1,68 @@
+diff --git a/src/holosoma_retargeting/holosoma_retargeting/data_utils/extract_global_positions.py b/src/holosoma_retargeting/holosoma_retargeting/data_utils/extract_global_positions.py
+index ac477f8..1980079 100644
+--- a/src/holosoma_retargeting/holosoma_retargeting/data_utils/extract_global_positions.py
++++ b/src/holosoma_retargeting/holosoma_retargeting/data_utils/extract_global_positions.py
+@@ -13,0 +14,27 @@ from lafan1 import extract, utils  # type: ignore[import-not-found]
++EXPECTED_JOINTS = [
++    "Hips",
++    "RightUpLeg",
++    "RightLeg",
++    "RightFoot",
++    "RightToeBase",
++    "LeftUpLeg",
++    "LeftLeg",
++    "LeftFoot",
++    "LeftToeBase",
++    "Spine",
++    "Spine1",
++    "Spine2",
++    "Neck",
++    "Head",
++    "RightShoulder",
++    "RightArm",
++    "RightForeArm",
++    "RightHand",
++    "LeftShoulder",
++    "LeftArm",
++    "LeftForeArm",
++    "LeftHand",
++]
++BVH_ALIASES = {"LeftToeBase": "LeftToe", "RightToeBase": "RightToe"}
++
++
+@@ -33,0 +61,8 @@ def extract_global_positions(bvh_file_path):
++    # LAFAN BVH stores the left limb before the right limb while the
++    # retargeter registry expects the opposite order.  Persisting unnamed raw
++    # positions silently swaps both sides, so normalize aliases and reorder
++    # explicitly before saving the compact NPY representation.
++    bvh_indices = {name: index for index, name in enumerate(anim.bones)}
++    ordered_indices = [
++        bvh_indices[BVH_ALIASES.get(name, name)] for name in EXPECTED_JOINTS
++    ]
+@@ -35,2 +70,2 @@ def extract_global_positions(bvh_file_path):
+-        "positions": global_positions / 100,
+-        "joint_names": anim.bones,
++        "positions": global_positions[:, ordered_indices] / 100,
++        "joint_names": EXPECTED_JOINTS,
+diff --git a/src/holosoma_retargeting/holosoma_retargeting/src/interaction_mesh_retargeter.py b/src/holosoma_retargeting/holosoma_retargeting/src/interaction_mesh_retargeter.py
+index 4de725d..5077ae8 100644
+--- a/src/holosoma_retargeting/holosoma_retargeting/src/interaction_mesh_retargeter.py
++++ b/src/holosoma_retargeting/holosoma_retargeting/src/interaction_mesh_retargeter.py
+@@ -420 +420,5 @@ class InteractionMeshRetargeter:
+-        q_locked_list[:, -7:] = object_poses_augmented
++        # Robot-only models have no trailing free joint for an object.  Writing
++        # the dummy ground pose into qpos[-7:] would overwrite the final seven
++        # robot joints (right hip through ankle on T1).
++        if self.has_dynamic_object:
++            q_locked_list[:, -7:] = object_poses_augmented
+@@ -1248,2 +1252,5 @@ class InteractionMeshRetargeter:
+-            jt = self.robot_model.jnt_type[j]
+-            if jt in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
++            jt = int(self.robot_model.jnt_type[j])
++            if jt in (
++                int(mujoco.mjtJoint.mjJNT_HINGE),
++                int(mujoco.mjtJoint.mjJNT_SLIDE),
++            ):
+@@ -1253 +1260 @@ class InteractionMeshRetargeter:
+-            elif jt == mujoco.mjtJoint.mjJNT_BALL:
++            elif jt == int(mujoco.mjtJoint.mjJNT_BALL):

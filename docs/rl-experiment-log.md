@@ -117,7 +117,7 @@ Passed now:
 - checkpoint reload with finite actor/critic/normalizer parameters;
 - no contact-buffer overflow in the final smoke run.
 
-Final automated checks: four training-side tests and 29 competition-runtime
+Final automated checks: 17 training-side tests and 29 competition-runtime
 tests pass.  The custom environment also resets and steps with finite rewards
 on both JAX and Warp under the final dependency lock.
 
@@ -177,3 +177,71 @@ T1 running reference or a demonstrably airborne T1 motion prior, train a
 tracking policy first, and only then add velocity/football task rewards with a
 small exploration standard deviation. Holosoma is the preferred Apache-2.0
 T1/MJWarp retargeting path; RoboNaldo supplies the staged curriculum pattern.
+
+## Holosoma motion-prior implementation — 2026-08-31
+
+### Source and licence boundary
+
+Holosoma was cloned outside the repository at
+`fb835ec8cb6ee48f483ce567586625e5fae1ae1f` into the isolated Python 3.11
+`my3d-motion` environment. The official LAFAN1 archive is also external; its
+SHA-256 is
+`ea918082b500a5d158e9d3aa39039df04cd42e25f5c02fe8f7e88e8e9365a977`.
+LAFAN1 is CC-BY-NC-ND-4.0, so neither source nor derived T1 NPZ data is
+committed or redistributed.
+
+Three upstream defects were reproduced and fixed by the pinned project patch:
+
+- the robot-only path wrote a dummy seven-value object pose over T1's final
+  seven joints;
+- LAFAN extraction persisted BVH left-first joint order while the retargeting
+  registry consumed right-first order, including a `LeftToe`/`LeftToeBase`
+  alias mismatch;
+- MuJoCo 3.12 returns an integer joint-type value for which enum tuple
+  membership failed, producing zero hinge columns in the qdot-to-qvel
+  Jacobian.
+
+`git apply --unidiff-zero --check --reverse` passes against the patched pinned checkout. The
+fixed hinge transform norm is `sqrt(23)=4.7958315`, and optimization cost fell
+from roughly 8 to 1–2 with non-zero limb motion.
+
+### Imported references
+
+| Local-only reference | Frames/duration | Exact RCSS replay | Decision |
+|---|---:|---|---|
+| `t1_run2_subject4_f1940_2030_v1.npz` | 151 / 3.0 s | both feet contact; longest flight 0.20 s; no non-foot pitch contact | validated parent, SHA `4a3beb70...` |
+| `t1_run2_subject4_cycle71_87_v1.npz` | 28 / 0.54 s | flight 0.06 s; speed 1.93 m/s | rejected for straight training: mean root yaw about 0.50 rad/s |
+| `t1_run2_subject4_straight76_109_v1.npz` | 34 / 0.66 s | contacts `[10,10]`; flight 0.16 s; speed 3.20 m/s; no bad collision | accepted reference input, SHA `2ad29433...`; not itself a learned policy |
+
+The importer uses quaternion slerp, canonical forward orientation, exact T1
+foot-box grounding and CPU MuJoCo contact replay. The validator requires exact
+dtypes/shapes, 50 Hz, per-foot stance, a bounded aerial interval, lower-body
+excursion, safe height/vertical speed, no non-foot pitch contact and at most
+15 mm penetration.
+
+### Training results
+
+| Run | Key change | Result | Decision |
+|---|---|---|---|
+| `run-motion-track-formal-s83...` | first joint/action/contact prior | survival 365→268/500; final falls 84.4%; KL peak 0.059 | reject; Brax default adaptive-KL minimum silently raised LR to `1e-5` |
+| `run-motion-track-v3-smoke-s89...` | explicit `2.5e-7..2e-6` LR bounds; every reset from full reference | survival 111→77; final falls 93.8% | reject; curriculum start too hard |
+| `run-motion-track-v3-curriculum-s97.../000000786432` | normal-state initialization, bounded KL, fall -100 | MJX survival 444→490/500, falls 28.1%→4.7% | useful prior-reward improvement; manifest confirms reference-init probability was 0.0; CPU gate still rejects |
+| same exported ONNX, exact CPU, contract scale 0.5 | 64 episodes at 1.8 m/s | upright 87.5%, speed 1.865 m/s, RMSE 0.129, drift 7.18 m, flight 12.5% | reject |
+| `run-motion-straight-v3-s101...` | low-yaw reference, zero-tolerance contact proxy, stronger straight constraints | five CPU checkpoints: drift 7.41–7.87 m, flight 0–15.6% | reject; reward tuning did not remove turning mode |
+| checkpoint `000000786432` with reflection ensemble | exact left/right equivariance at inference | CPU 64/64 upright, 1.851 m/s, drift 1.15 m, flight 0% | diagnostic improvement only; reject |
+| reflection ensemble with scale 0.45 | decoder stress test | 64/64 upright, about 1.92 m/s, drift 1.43–1.50 m, flight 0% | reject; scale override not adopted |
+
+The ONNX export parity maximum error for the curriculum checkpoint is
+`1.10e-5`. The CPU evaluator now defaults to the contract action scale instead
+of a stale hard-coded 0.45 and labels any CLI override. With zero contact-proxy
+tolerance, its proxy confusion report showed zero false positive/negative
+frames for the symmetry test, yet no episode sustained the required 10 ms
+two-foot aerial interval.
+
+### Current gate status
+
+The project now has a fully reproducible and licence-aware motion ingestion,
+tracking curriculum, ONNX export, symmetry diagnostic and exact-contact CPU
+acceptance loop. It does **not** have a release running policy. No experimental
+ONNX was copied into `mujococodebase/skills/walk/`; the existing stable walk
+remains the competition default.

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import jax
 import numpy as np
 import yaml
 
@@ -25,6 +26,10 @@ def test_run_policy_contract_preserves_runtime_boundary():
     assert contract.action_size == 23
     assert contract.input_shape == (1, 78)
     assert contract.output_shape == (1, 23)
+    assert contract.action_clip == (-10.0, 10.0)
+    assert contract.action_scale == 0.5
+    assert contract.kp == 25.0
+    assert contract.kd == 0.6
     assert sum(size for _, size in contract.observation_fields) == 78
 
 
@@ -103,3 +108,65 @@ def test_formal_profile_uses_bounded_action_and_official_t1_widths():
     assert profile.policy_hidden_layer_sizes == (512, 256, 128)
     assert profile.unroll_length == 20
     assert profile.num_updates_per_batch == 4
+
+
+def test_motion_transfer_profile_has_explicit_conservative_kl_bounds():
+    profile = get_ppo_profile("legacy_motion_track_v3")
+
+    assert profile.policy_contract == "run_policy_v2"
+    assert profile.num_updates_per_batch == 1
+    assert profile.learning_rate_min <= profile.learning_rate
+    assert profile.learning_rate <= profile.learning_rate_max
+    assert profile.learning_rate_max < 1.0e-5
+    assert profile.desired_kl == 0.002
+
+
+def test_motion_reset_initializes_complete_reference_state(tmp_path):
+    frames = 4
+    root_position = np.zeros((frames, 3), dtype=np.float32)
+    root_position[:, 2] = 0.61
+    root_linear_velocity = np.tile(
+        np.array([1.7, 0.0, 0.1], dtype=np.float32), (frames, 1)
+    )
+    root_angular_velocity = np.tile(
+        np.array([0.0, 0.2, 0.0], dtype=np.float32), (frames, 1)
+    )
+    path = tmp_path / "reference.npz"
+    np.savez(
+        path,
+        root_position=root_position,
+        root_quaternion_xyzw=np.tile(
+            np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32), (frames, 1)
+        ),
+        root_linear_velocity=root_linear_velocity,
+        root_angular_velocity=root_angular_velocity,
+        joint_position=np.zeros((frames, 23), dtype=np.float32),
+        joint_velocity=np.zeros((frames, 23), dtype=np.float32),
+        foot_contact=np.ones((frames, 2), dtype=bool),
+    )
+    env = DirectionalRun(
+        config_overrides={
+            "reset_joint_noise": 0.0,
+            "reset_root_velocity_noise": 0.0,
+            "reset_yaw_range": 0.0,
+            "reference_init_probability": 1.0,
+        },
+        contract=load_policy_contract(PHASE_CONTRACT),
+        motion_reference=path,
+    )
+
+    # Eager MJX executes hundreds of tiny XLA operations and is unsuitable for
+    # CI; compile the reset as production training does.
+    state = jax.jit(env.reset)(jax.random.PRNGKey(42))
+
+    assert np.isclose(np.asarray(state.data.qpos)[env._root_qpos + 2], 0.61)
+    np.testing.assert_allclose(
+        np.asarray(state.data.qpos)[env._root_qpos + 3 : env._root_qpos + 7],
+        [1.0, 0.0, 0.0, 0.0],
+        atol=1.0e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(state.data.qvel)[env._root_dof : env._root_dof + 6],
+        [1.7, 0.0, 0.1, 0.0, 0.2, 0.0],
+        atol=1.0e-6,
+    )

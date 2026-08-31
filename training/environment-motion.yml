@@ -1,0 +1,8 @@
+name: my3d-motion
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip=26.2.1
+  - pip:
+      - -r training/locks/my3d-motion-pip.txt

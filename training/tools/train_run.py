@@ -23,6 +23,7 @@ import onnxruntime as ort
 
 from my3d_rl.legacy_policy import load_onnx_teacher_params
 from my3d_rl.contract import load_policy_contract
+from my3d_rl.motion_reference import validate_motion_reference
 from my3d_rl.ppo_profile import PROFILES, get_ppo_profile
 from my3d_rl.run_env import DirectionalRun
 
@@ -112,6 +113,61 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.phase_swing": 2.0,
         "reward.lateral_tracking": -20.0,
         "reward.yaw_rate_error": -20.0,
+    },
+    "motion_track": {
+        "use_fixed_command": True,
+        "fixed_command": [1.8, 0.0, 0.0],
+        "gait_frequency": [1.85, 1.85],
+        "swing_period": 0.20,
+        "stand_probability": 0.0,
+        "reset_joint_noise": 0.015,
+        "reset_root_velocity_noise": 0.03,
+        "reset_yaw_range": 0.05,
+        "reference_init_probability": 0.20,
+        "push_enable": False,
+        "action_delay_max_steps": 0,
+        "reward.tracking_linear": 1.0,
+        "reward.tracking_yaw": 2.0,
+        "reward.flight": 0.0,
+        "reward.single_support": 0.25,
+        "reward.phase_swing": 0.5,
+        "reward.motion_joint": 8.0,
+        "reward.motion_joint_velocity": 1.0,
+        "reward.motion_contact": 2.0,
+        "reward.motion_action": 4.0,
+        "reward.alive": 0.5,
+        "reward.fall": -100.0,
+        "reward.lateral_tracking": -4.0,
+        "reward.yaw_rate_error": -4.0,
+        "reward.pose": 0.0,
+    },
+    "motion_straight": {
+        "use_fixed_command": True,
+        "fixed_command": [1.8, 0.0, 0.0],
+        "gait_frequency": [1.515, 1.515],
+        "swing_period": 0.24,
+        "stand_probability": 0.0,
+        "reset_joint_noise": 0.015,
+        "reset_root_velocity_noise": 0.03,
+        "reset_yaw_range": 0.05,
+        "reference_init_probability": 0.10,
+        "foot_contact_tolerance": 0.0,
+        "push_enable": False,
+        "action_delay_max_steps": 0,
+        "reward.tracking_linear": 2.0,
+        "reward.tracking_yaw": 10.0,
+        "reward.flight": 0.5,
+        "reward.single_support": 0.5,
+        "reward.phase_swing": 1.0,
+        "reward.motion_joint": 8.0,
+        "reward.motion_joint_velocity": 1.0,
+        "reward.motion_contact": 3.0,
+        "reward.motion_action": 4.0,
+        "reward.lateral_tracking": -40.0,
+        "reward.yaw_rate_error": -40.0,
+        "reward.alive": 0.5,
+        "reward.fall": -100.0,
+        "reward.pose": 0.0,
     },
     "omni": {
         "lin_vel_x": [0.0, 1.8],
@@ -210,6 +266,7 @@ def main() -> None:
     )
     parser.add_argument("--restore-checkpoint", type=Path)
     parser.add_argument("--bootstrap-onnx", type=Path)
+    parser.add_argument("--motion-reference", type=Path)
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
 
@@ -220,6 +277,21 @@ def main() -> None:
         raise ValueError("restore-checkpoint and bootstrap-onnx are mutually exclusive")
     if args.bootstrap_onnx and profile.factory_kind != "legacy_teacher":
         raise ValueError("bootstrap-onnx requires the legacy_warmstart_v1 profile")
+    if (
+        args.stage in {"motion_track", "motion_straight"}
+        and args.motion_reference is None
+    ):
+        raise ValueError(f"{args.stage} requires --motion-reference")
+    if args.motion_reference and not args.motion_reference.is_file():
+        raise FileNotFoundError(args.motion_reference)
+    motion_reference_validation = None
+    if args.motion_reference:
+        motion_reference_validation = validate_motion_reference(args.motion_reference)
+        if not motion_reference_validation["passed"]:
+            raise ValueError(
+                "motion reference failed validation: "
+                + "; ".join(motion_reference_validation["errors"])
+            )
     if (profile.batch_size * profile.num_minibatches) % args.num_envs:
         raise ValueError(
             "num_envs must divide batch_size * num_minibatches "
@@ -236,12 +308,24 @@ def main() -> None:
         **STAGES[args.stage],
     }
     contract_path = (
-        Path(__file__).parents[1] / "contracts" / "run_policy_v2.yaml"
-        if profile.name == "legacy_phase_warmstart_v2"
-        else Path(__file__).parents[1] / "contracts" / "run_policy_v1.yaml"
+        Path(__file__).parents[1] / "contracts" / f"{profile.policy_contract}.yaml"
     )
     contract = load_policy_contract(contract_path)
-    env = DirectionalRun(config_overrides=stage_overrides, contract=contract)
+    env = DirectionalRun(
+        config_overrides=stage_overrides,
+        contract=contract,
+        motion_reference=args.motion_reference,
+    )
+    eval_env = None
+    if args.motion_reference:
+        eval_env = DirectionalRun(
+            config_overrides={
+                **stage_overrides,
+                "reference_init_probability": 0.0,
+            },
+            contract=contract,
+            motion_reference=args.motion_reference,
+        )
     network_factory = profile.network_factory()
     restore_params = None
     teacher_parity_max_abs_error = None
@@ -268,6 +352,9 @@ def main() -> None:
         "requested_timesteps": args.num_timesteps,
         "seed": args.seed,
         "environment_config": env._config.to_dict(),
+        "evaluation_environment_config": (
+            eval_env._config.to_dict() if eval_env is not None else None
+        ),
         "action_size": env.action_size,
         "observation_size": env.observation_size,
         "restore_checkpoint": (
@@ -280,6 +367,13 @@ def main() -> None:
             _sha256(args.bootstrap_onnx) if args.bootstrap_onnx else None
         ),
         "teacher_parity_max_abs_error": teacher_parity_max_abs_error,
+        "motion_reference": (
+            str(args.motion_reference.resolve()) if args.motion_reference else None
+        ),
+        "motion_reference_sha256": (
+            _sha256(args.motion_reference) if args.motion_reference else None
+        ),
+        "motion_reference_validation": motion_reference_validation,
     }
     manifest_path = args.run_dir / "run-manifest.json"
     manifest_path.write_text(
@@ -300,6 +394,7 @@ def main() -> None:
     try:
         _, _, final_metrics = ppo.train(
             environment=env,
+            eval_env=eval_env,
             num_timesteps=args.num_timesteps,
             num_envs=args.num_envs,
             episode_length=env._config.episode_length,
@@ -317,8 +412,10 @@ def main() -> None:
             clipping_epsilon=0.2,
             gae_lambda=0.95,
             max_grad_norm=1.0,
-            desired_kl=0.01,
+            desired_kl=profile.desired_kl,
             learning_rate_schedule=("ADAPTIVE_KL" if profile.adaptive_kl else None),
+            learning_rate_schedule_min_lr=profile.learning_rate_min,
+            learning_rate_schedule_max_lr=profile.learning_rate_max,
             bootstrap_on_timeout=False,
             network_factory=network_factory,
             seed=args.seed,

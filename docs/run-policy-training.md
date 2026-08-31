@@ -1,6 +1,6 @@
 # RCSSServerMJ running-policy development plan
 
-Status: v1/v2 pipeline complete; no running policy has passed release gates as of 2026-08-31
+Status: v1/v2 plus motion-prior pipeline complete; no running policy has passed release gates as of 2026-08-31
 
 Owner environment: WSL2 Ubuntu 22.04, Conda `my3d-rl`
 
@@ -229,6 +229,9 @@ silently changed.
 - [x] formal/resumable PPO entry point and manifests;
 - [x] deterministic MJX/CPU evaluators and machine-readable reports;
 - [x] v1/v2 ONNX export and parity test;
+- [x] pinned Holosoma/LAFAN import, exact RCSS replay and motion-reference gate;
+- [x] bounded-KL motion curriculum and CPU true-flight/contact evaluation;
+- [x] left/right policy-reflection diagnostic and involution tests;
 - [ ] feature-flagged runtime integration with fallback;
 - [ ] single-player RCSS gate, headless 7v7 gate, and visual 7v7 gate;
 - [ ] three-seed release evaluation after the first candidate succeeds.
@@ -245,3 +248,15 @@ No candidate has been copied into the runtime and the original `walk.onnx`
 remains the competition default. Detailed commands, rejected runs and source
 choices are recorded in `rl-experiment-log.md` and
 `robot-soccer-action-research.md`.
+
+The motion-prior stage improved normal-start MJX survival to 490/500 at a
+1.8 m/s command, but exact CPU evaluation rejected the exported policy for
+87.5% completion, 7.18 m median drift and only 12.5% qualifying-flight
+episodes. A mathematically reflection-equivariant two-pass diagnostic reached
+64/64 upright and reduced drift to 1.15 m, but erased the qualifying aerial
+phase and still exceeded the 0.25 m drift gate. It is not a deployable model.
+
+The next implementation milestone is a CPU-versus-Warp trajectory parity
+suite followed by a periodic robot-native reference with endpoint, bilateral,
+stance-foot and exact-contact constraints. More reward-only continuation is
+not supported by the evidence from this stage.

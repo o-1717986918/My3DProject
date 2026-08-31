@@ -27,6 +27,10 @@ class PpoProfile:
     normalize_observations: bool = True
     adaptive_kl: bool = False
     factory_kind: str = "standard"
+    policy_contract: str = "run_policy_v1"
+    desired_kl: float = 0.01
+    learning_rate_min: float = 1.0e-5
+    learning_rate_max: float = 1.0e-2
 
     def network_factory(self) -> Callable[..., Any]:
         if self.factory_kind == "legacy_teacher":
@@ -122,6 +126,32 @@ PROFILES = {
         normalize_observations=False,
         adaptive_kl=True,
         factory_kind="legacy_teacher",
+        policy_contract="run_policy_v2",
+    ),
+    # Conservative reference-motion transfer profile.  Brax defaults the
+    # adaptive-KL lower bound to 1e-5, which silently doubles the v2 profile's
+    # nominal learning rate.  This version makes the bounds explicit, reduces
+    # each rollout to one PPO pass and tightens the KL trust region so the
+    # stable phase policy is not forgotten while learning the motion prior.
+    "legacy_motion_track_v3": PpoProfile(
+        name="legacy_motion_track_v3",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=1,
+        discounting=0.995,
+        entropy_cost=1.0e-4,
+        learning_rate=1.0e-6,
+        normalize_observations=False,
+        adaptive_kl=True,
+        factory_kind="legacy_teacher",
+        policy_contract="run_policy_v2",
+        desired_kl=0.002,
+        learning_rate_min=2.5e-7,
+        learning_rate_max=2.0e-6,
     ),
 }
 

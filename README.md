@@ -14,8 +14,9 @@ latest evidence-backed validation status.
 Formal running-policy development is tracked in
 `docs/run-policy-training.md`. Training uses the separate `my3d-rl` Conda
 environment and writes large runs only below `/home/win98/rl_runs`. The current
-measured result is stable high-speed walking, not accepted running; source
-research, licensing boundaries and the motion-prior next stage are recorded in
+measured result is stable high-speed walking plus a rejected motion-prior
+running candidate, not accepted running; source research, licensing boundaries
+and the next periodic-reference stage are recorded in
 `docs/robot-soccer-action-research.md` and `docs/rl-experiment-log.md`.
 
 ## WSL quick start

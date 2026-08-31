@@ -17,12 +17,23 @@ is the competition default until every release gate passes.
 
 - `my3d-team`: competition runtime; never install training packages here.
 - `my3d-rl`: Python 3.12 training and evaluation environment.
+- `my3d-motion`: Python 3.11, CPU-only isolated Holosoma retargeting tools.
 
 Create the base environment with:
 
 ```bash
 conda env create -f training/environment.yml
 ```
+
+Create the isolated CPU retargeting environment with:
+
+```bash
+conda env create -f training/environment-motion.yml
+```
+
+Clone Holosoma at the source-lock commit, apply the project patch, then install
+`src/holosoma_retargeting` editable into `my3d-motion`; the environment file
+deliberately does not install an unpatched Holosoma wheel.
 
 The MuJoCo Playground source revision and Python packages are recorded in
 `locks/` after the local CUDA smoke test. Until that pin exists, a run is an
@@ -81,6 +92,34 @@ PYTHONPATH=training python training/tools/validate_motion_reference.py \
   /path/to/t1-run-reference.npz --output /tmp/t1-run-reference-report.json
 ```
 
+Holosoma is pinned at `fb835ec8...` and requires the audited patch in
+`patches/holosoma-t1-retargeting.patch`. Verify a patched external checkout
+with:
+
+```bash
+cd /home/win98/rl_sources/holosoma
+git apply --unidiff-zero --check --reverse \
+  /path/to/My3DProject/training/patches/holosoma-t1-retargeting.patch
+```
+
+The LAFAN1 source archive and every derived NPZ stay outside Git because the
+dataset is CC-BY-NC-ND-4.0. Import and slice only into a local dataset path:
+
+```bash
+PYTHONPATH=training python training/tools/import_holosoma_motion.py \
+  /path/to/holosoma-output.npz /home/win98/rl_datasets/motion_refs/run.npz \
+  --source-url https://github.com/ubisoft/ubisoft-laforge-animation-dataset \
+  --source-version 94084601bacdf9cc3764b5c73daaeccae6035fac \
+  --source-license CC-BY-NC-ND-4.0 --source-sha256 <archive-sha256>
+PYTHONPATH=training python training/tools/slice_motion_reference.py \
+  /home/win98/rl_datasets/motion_refs/run.npz --start 76 --end 109 \
+  --output /home/win98/rl_datasets/motion_refs/straight-cycle.npz
+```
+
+Conservative motion transfer uses the versioned `legacy_motion_track_v3`
+profile. Its adaptive-KL range is explicitly bounded to `2.5e-7..2e-6`; the
+Brax default lower bound (`1e-5`) must not be used for this profile.
+
 Exercise one real PPO training/checkpoint path (integration test only):
 
 ```bash
@@ -98,3 +137,7 @@ A checkpoint cannot be integrated until its model manifest, source revisions,
 asset hashes, three-seed held-out evaluation, ONNX parity report, and
 RCSSServerMJ acceptance result are present. Runtime inference must retain the
 existing kick as a safe fallback.
+
+As of 2026-08-31 the motion pipeline and true-flight evaluator work, but no
+running checkpoint passes the CPU gate. The competition runtime therefore
+continues to use the original stable `walk.onnx`.

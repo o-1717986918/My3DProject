@@ -44,9 +44,7 @@ def main() -> None:
 
     profile = get_ppo_profile(args.network_profile)
     contract_path = (
-        Path(__file__).parents[1] / "contracts" / "run_policy_v2.yaml"
-        if profile.name == "legacy_phase_warmstart_v2"
-        else Path(__file__).parents[1] / "contracts" / "run_policy_v1.yaml"
+        Path(__file__).parents[1] / "contracts" / f"{profile.policy_contract}.yaml"
     )
     env = DirectionalRun(
         config_overrides={

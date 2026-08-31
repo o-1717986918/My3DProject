@@ -19,6 +19,15 @@ ARRAY_SHAPES = {
     "joint_velocity": 23,
     "foot_contact": 2,
 }
+ARRAY_DTYPES = {
+    "root_position": np.float32,
+    "root_quaternion_xyzw": np.float32,
+    "root_linear_velocity": np.float32,
+    "root_angular_velocity": np.float32,
+    "joint_position": np.float32,
+    "joint_velocity": np.float32,
+    "foot_contact": np.bool_,
+}
 PROVENANCE_FIELDS = (
     "source_url",
     "source_version",
@@ -65,6 +74,10 @@ def validate_motion_reference(path: Path) -> dict[str, Any]:
                 errors.append(f"{name} shape {value.shape} != ({frame_count}, {width})")
             if name != "foot_contact" and not np.isfinite(value).all():
                 errors.append(f"{name} contains non-finite values")
+            if value.dtype != ARRAY_DTYPES[name]:
+                errors.append(
+                    f"{name} dtype {value.dtype} != {np.dtype(ARRAY_DTYPES[name])}"
+                )
 
         if frame_count < 25:
             errors.append(f"frame count {frame_count} is below 25")
@@ -75,11 +88,59 @@ def validate_motion_reference(path: Path) -> dict[str, Any]:
                 errors.append("root quaternions are not normalized within 1e-3")
 
         longest_airborne = 0
+        contact_counts = [0, 0]
         if "foot_contact" in arrays:
             contact = arrays["foot_contact"].astype(bool)
+            contact_counts = contact.sum(axis=0).astype(int).tolist()
             longest_airborne = _max_consecutive(~contact.any(axis=1))
             if longest_airborne < 1:
                 errors.append("reference contains no 50 Hz two-foot aerial frame")
+            if longest_airborne > 15:
+                errors.append(
+                    f"longest aerial interval {longest_airborne} exceeds 15 frames"
+                )
+            minimum_contact_frames = max(2, int(np.ceil(0.05 * frame_count)))
+            for side, count in zip(("left", "right"), contact_counts):
+                if count < minimum_contact_frames:
+                    errors.append(
+                        f"{side} contact count {count} is below "
+                        f"{minimum_contact_frames}"
+                    )
+
+        average_horizontal_speed = 0.0
+        if "root_position" in arrays and frame_count >= 2:
+            duration = (frame_count - 1) / 50.0
+            displacement = (
+                arrays["root_position"][-1, :2] - arrays["root_position"][0, :2]
+            )
+            average_horizontal_speed = float(np.linalg.norm(displacement) / duration)
+            if not 1.0 <= average_horizontal_speed <= 4.5:
+                errors.append(
+                    "average horizontal speed "
+                    f"{average_horizontal_speed:.3f} m/s is outside [1.0, 4.5]"
+                )
+            if float(np.min(arrays["root_position"][:, 2])) < 0.30:
+                errors.append("root height falls below 0.30 m")
+
+        if "joint_position" in arrays:
+            lower_body_excursion = float(
+                np.max(np.ptp(arrays["joint_position"][:, 11:], axis=0))
+            )
+            if lower_body_excursion < 0.20:
+                errors.append(
+                    f"lower-body joint excursion {lower_body_excursion:.3f} rad "
+                    "is below 0.20"
+                )
+
+        if "root_linear_velocity" in arrays:
+            maximum_vertical_speed = float(
+                np.max(np.abs(arrays["root_linear_velocity"][:, 2]))
+            )
+            if maximum_vertical_speed > 4.0:
+                errors.append(
+                    f"root vertical speed {maximum_vertical_speed:.3f} m/s "
+                    "exceeds 4.0"
+                )
 
         metadata: dict[str, Any] = {}
         if "metadata_json" not in archive.files:
@@ -92,6 +153,14 @@ def validate_motion_reference(path: Path) -> dict[str, Any]:
             for field in PROVENANCE_FIELDS:
                 if not metadata.get(field):
                     errors.append(f"missing provenance field {field}")
+            if metadata.get("output_frequency_hz") not in (None, 50, 50.0):
+                errors.append("metadata output_frequency_hz is not 50")
+            replay = metadata.get("rcss_replay", {})
+            if replay:
+                if replay.get("non_foot_pitch_contact_frames", 0) != 0:
+                    errors.append("RCSS replay contains non-foot pitch contact")
+                if replay.get("minimum_contact_distance_m", 0.0) < -0.015:
+                    errors.append("RCSS replay penetration exceeds 15 mm")
 
     actual_sha = sha256(path)
     return {
@@ -100,7 +169,9 @@ def validate_motion_reference(path: Path) -> dict[str, Any]:
         "sha256": actual_sha,
         "frame_count": frame_count,
         "frequency_hz": 50,
-        "duration_seconds": frame_count / 50.0,
+        "duration_seconds": max(0, frame_count - 1) / 50.0,
+        "average_horizontal_speed_m_s": average_horizontal_speed,
+        "foot_contact_frames": contact_counts,
         "longest_airborne_frames": longest_airborne,
         "longest_airborne_seconds": longest_airborne / 50.0,
         "provenance": metadata,

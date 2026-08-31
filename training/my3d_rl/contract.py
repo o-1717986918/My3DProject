@@ -28,6 +28,10 @@ class PolicyContract:
     observation_fields: tuple[tuple[str, int], ...]
     input_shape: tuple[int, ...]
     output_shape: tuple[int, ...]
+    action_clip: tuple[float, float]
+    action_scale: float | None
+    kp: float | None
+    kd: float | None
 
 
 def _require(mapping: dict[str, Any], key: str, context: str) -> Any:
@@ -53,6 +57,10 @@ def load_policy_contract(path: str | Path) -> PolicyContract:
     observation_size = int(_require(actor, "size", "actor_observation"))
     input_shape = tuple(int(value) for value in deployment["input_shape"])
     output_shape = tuple(int(value) for value in deployment["output_shape"])
+    action_clip = tuple(float(value) for value in control["action_clip"])
+    action_scale = float(control["action_scale"]) if "action_scale" in control else None
+    kp = float(control["kp"]) if "kp" in control else None
+    kd = float(control["kd"]) if "kd" in control else None
 
     if len(joints) != action_size:
         raise ContractError(
@@ -70,6 +78,14 @@ def load_policy_contract(path: str | Path) -> PolicyContract:
         raise ContractError("ONNX output shape does not match action size")
     if int(control["frequency_hz"]) != 50:
         raise ContractError("competition motion policies must run at 50 Hz")
+    if len(action_clip) != 2 or action_clip[0] >= action_clip[1]:
+        raise ContractError("control.action_clip must be an increasing pair")
+    if action_scale is not None and not 0.0 < action_scale <= 1.0:
+        raise ContractError("control.action_scale must be in (0, 1]")
+    if (kp is None) != (kd is None):
+        raise ContractError("control.kp and control.kd must be declared together")
+    if kp is not None and kd is not None and (kp <= 0.0 or kd < 0.0):
+        raise ContractError("control gains must satisfy kp > 0 and kd >= 0")
 
     return PolicyContract(
         policy_name=str(_require(raw, "policy_name", "root")),
@@ -81,4 +97,8 @@ def load_policy_contract(path: str | Path) -> PolicyContract:
         observation_fields=fields,
         input_shape=input_shape,
         output_shape=output_shape,
+        action_clip=action_clip,
+        action_scale=action_scale,
+        kp=kp,
+        kd=kd,
     )

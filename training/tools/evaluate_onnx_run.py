@@ -13,6 +13,11 @@ import numpy as np
 import onnxruntime as ort
 
 from my3d_rl.contract import load_policy_contract
+from my3d_rl.policy_symmetry import (
+    mirror_run_action,
+    mirror_run_observation,
+    training_mirror_map,
+)
 from my3d_rl.rcss_scene import build_single_t1_soccer_model
 from my3d_rl.run_env import NOMINAL_TRAINING_POSE, TRAIN_TO_SERVER_SIGN
 
@@ -78,15 +83,28 @@ def main() -> None:
     parser.add_argument("--vx", type=float, default=1.5)
     parser.add_argument("--vy", type=float, default=0.0)
     parser.add_argument("--yaw-rate", type=float, default=0.0)
-    parser.add_argument("--action-scale", type=float, default=0.45)
+    parser.add_argument(
+        "--action-scale",
+        type=float,
+        help="explicit stress-test override; defaults to the policy contract",
+    )
     parser.add_argument("--gait-frequency", type=float, default=1.75)
+    parser.add_argument(
+        "--contact-proxy-tolerance",
+        type=float,
+        default=0.01,
+        help="training contact-proxy tolerance used only for parity diagnostics",
+    )
+    parser.add_argument("--symmetry-ensemble", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     if args.episodes < 1:
         raise ValueError("episodes must be positive")
-    if not 0.0 < args.action_scale <= 1.0:
+    if args.action_scale is not None and not 0.0 < args.action_scale <= 1.0:
         raise ValueError("action-scale must be in (0, 1]")
+    if args.contact_proxy_tolerance < 0.0:
+        raise ValueError("contact-proxy-tolerance must be non-negative")
 
     model = build_single_t1_soccer_model(prefix="accept_", robot_x=-10.0)
     model.opt.timestep = 0.005
@@ -105,6 +123,14 @@ def main() -> None:
         PHASE_CONTRACT if actor_size == 80 else DEFAULT_CONTRACT
     )
     contract = load_policy_contract(contract_path)
+    mirror_source, mirror_factor = training_mirror_map(
+        contract.joint_order, TRAIN_TO_SERVER_SIGN
+    )
+    if contract.action_scale is None and args.action_scale is None:
+        raise ValueError("run policy contract must declare action_scale")
+    action_scale = (
+        contract.action_scale if args.action_scale is None else args.action_scale
+    )
     if contract.observation_size != actor_size:
         raise ValueError(
             f"contract observation size {contract.observation_size} does not match "
@@ -232,14 +258,23 @@ def main() -> None:
             observation = np.nan_to_num(observation, nan=0.0, posinf=10.0, neginf=-10.0)
             observation = np.clip(observation, -10.0, 10.0)
             action = session.run(None, {input_meta.name: observation[None]})[0][0]
+            if args.symmetry_ensemble:
+                mirrored_observation = mirror_run_observation(
+                    observation, mirror_source, mirror_factor
+                )
+                mirrored_action = session.run(
+                    None, {input_meta.name: mirrored_observation[None]}
+                )[0][0]
+                action = 0.5 * (
+                    action
+                    + mirror_run_action(mirrored_action, mirror_source, mirror_factor)
+                )
             action = np.clip(
                 np.nan_to_num(action, nan=0.0, posinf=10.0, neginf=-10.0),
                 -10.0,
                 10.0,
             )
-            targets = np.clip(
-                (nominal + args.action_scale * action) * sign, lowers, uppers
-            )
+            targets = np.clip((nominal + action_scale * action) * sign, lowers, uppers)
             data.ctrl[pos_actuator] = targets
             previous_action = action.astype(np.float32)
             gait_phase = (gait_phase + 0.02 * args.gait_frequency) % 1.0
@@ -254,12 +289,14 @@ def main() -> None:
                     model,
                     left_foot_geom,
                     pitch_height=pitch_height,
+                    tolerance=args.contact_proxy_tolerance,
                 )
                 proxy_right = _box_geometric_contact(
                     data,
                     model,
                     right_foot_geom,
                     pitch_height=pitch_height,
+                    tolerance=args.contact_proxy_tolerance,
                 )
                 for actual, proxy in (
                     (left_contact, proxy_left),
@@ -323,8 +360,12 @@ def main() -> None:
         "episodes": args.episodes,
         "seed": args.seed,
         "command": command.tolist(),
-        "action_scale": args.action_scale,
+        "action_scale": action_scale,
+        "action_scale_source": (
+            "policy_contract" if args.action_scale is None else "cli_override"
+        ),
         "gait_frequency_hz": (args.gait_frequency if actor_size == 80 else None),
+        "symmetry_ensemble": args.symmetry_ensemble,
         "duration_seconds": 10.0,
         "warmup_seconds": 2.0,
         "upright_completion_rate": completion_rate,
@@ -348,7 +389,8 @@ def main() -> None:
             "p90_seconds": _percentile(np.asarray(max_flight_steps) * 0.005, 90),
         },
         "training_contact_proxy": {
-            "method": "oriented_box_lowest_point_lte_pitch_plus_0.01m",
+            "method": "oriented_box_lowest_point_lte_pitch_plus_tolerance",
+            "tolerance_m": args.contact_proxy_tolerance,
             "true_positive_frames": proxy_true_positive,
             "true_negative_frames": proxy_true_negative,
             "false_positive_frames": proxy_false_positive,

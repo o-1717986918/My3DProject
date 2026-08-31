@@ -109,6 +109,7 @@ def default_config() -> config_dict.ConfigDict:
         reset_joint_noise=0.03,
         reset_root_velocity_noise=0.10,
         reset_yaw_range=0.20,
+        reference_init_probability=0.0,
         push_enable=False,
         push_interval_steps=150,
         push_magnitude=[0.05, 0.25],
@@ -123,6 +124,10 @@ def default_config() -> config_dict.ConfigDict:
             flight=0.0,
             single_support=0.0,
             phase_swing=0.0,
+            motion_joint=0.0,
+            motion_joint_velocity=0.0,
+            motion_contact=0.0,
+            motion_action=0.0,
             lateral_tracking=0.0,
             yaw_rate_error=0.0,
             vertical_velocity=-0.25,
@@ -152,12 +157,23 @@ class DirectionalRun(mjx_env.MjxEnv):
         contract: PolicyContract | None = None,
         resource_root: Path = DEFAULT_RESOURCE_ROOT,
         prefix: str = "train_",
+        motion_reference: Path | None = None,
     ) -> None:
         config = default_config() if config is None else config
         super().__init__(config, config_overrides)
         self.contract = contract or load_policy_contract(DEFAULT_CONTRACT)
         self.prefix = prefix
         self._resource_root = resource_root
+        if self.contract.action_scale is None:
+            raise ValueError("run policy contract must declare action_scale")
+        if not np.isclose(self._config.action_scale, self.contract.action_scale):
+            raise ValueError("environment action_scale differs from policy contract")
+        if self.contract.kp is None or self.contract.kd is None:
+            raise ValueError("run policy contract must declare PD gains")
+        if not np.isclose(self._config.kp, self.contract.kp) or not np.isclose(
+            self._config.kd, self.contract.kd
+        ):
+            raise ValueError("environment PD gains differ from policy contract")
 
         # Start far enough from the ball for a ten-second straight rollout.
         self._mj_model = build_single_t1_soccer_model(
@@ -233,6 +249,67 @@ class DirectionalRun(mjx_env.MjxEnv):
                 "legacy or 80-value phase-aware actor boundary"
             )
         self._phase_observation = self.contract.observation_size == 80
+        self._motion_reference_path = motion_reference
+        self._motion_tracking = motion_reference is not None
+        if self._motion_tracking:
+            with np.load(motion_reference, allow_pickle=False) as archive:
+                reference_root_position = np.asarray(
+                    archive["root_position"], dtype=np.float32
+                )
+                reference_root_quaternion = np.asarray(
+                    archive["root_quaternion_xyzw"], dtype=np.float32
+                )[:, [3, 0, 1, 2]]
+                reference_root_linear_velocity = np.asarray(
+                    archive["root_linear_velocity"], dtype=np.float32
+                )
+                reference_root_angular_velocity = np.asarray(
+                    archive["root_angular_velocity"], dtype=np.float32
+                )
+                reference_position = np.asarray(
+                    archive["joint_position"], dtype=np.float32
+                )
+                reference_velocity = np.asarray(
+                    archive["joint_velocity"], dtype=np.float32
+                )
+                reference_contact = np.asarray(archive["foot_contact"], dtype=bool)
+            if (
+                reference_position.ndim != 2
+                or reference_position.shape[1] != self.action_size
+                or reference_position.shape != reference_velocity.shape
+                or reference_contact.shape != (reference_position.shape[0], 2)
+                or reference_root_position.shape != (reference_position.shape[0], 3)
+                or reference_root_quaternion.shape != (reference_position.shape[0], 4)
+                or reference_root_linear_velocity.shape
+                != (reference_position.shape[0], 3)
+                or reference_root_angular_velocity.shape
+                != (reference_position.shape[0], 3)
+            ):
+                raise ValueError("motion reference has incompatible array shapes")
+            if reference_position.shape[0] < 2:
+                raise ValueError("motion reference requires at least two frames")
+            self._reference_joint_position = jp.asarray(reference_position) * self._sign
+            self._reference_joint_velocity = jp.asarray(reference_velocity) * self._sign
+            self._reference_contact = jp.asarray(reference_contact)
+            self._reference_root_position = jp.asarray(reference_root_position)
+            self._reference_root_quaternion = jp.asarray(reference_root_quaternion)
+            self._reference_root_linear_velocity = jp.asarray(
+                reference_root_linear_velocity
+            )
+            self._reference_root_angular_velocity = jp.asarray(
+                reference_root_angular_velocity
+            )
+            self._reference_frame_count = reference_position.shape[0]
+        else:
+            self._reference_joint_position = jp.zeros((2, self.action_size))
+            self._reference_joint_velocity = jp.zeros((2, self.action_size))
+            self._reference_contact = jp.zeros((2, 2), dtype=bool)
+            self._reference_root_position = jp.zeros((2, 3))
+            self._reference_root_quaternion = jp.tile(
+                jp.array([[1.0, 0.0, 0.0, 0.0]]), (2, 1)
+            )
+            self._reference_root_linear_velocity = jp.zeros((2, 3))
+            self._reference_root_angular_velocity = jp.zeros((2, 3))
+            self._reference_frame_count = 2
 
     def _configure_pd_actuators(self) -> None:
         for effector in self.contract.effector_order:
@@ -260,20 +337,45 @@ class DirectionalRun(mjx_env.MjxEnv):
         return self._mjx_model
 
     def reset(self, rng: jax.Array) -> mjx_env.State:
-        rng, joint_rng, vel_rng, yaw_rng, delay_rng, phase_rng, gait_rng = (
-            jax.random.split(rng, 7)
-        )
+        (
+            rng,
+            joint_rng,
+            vel_rng,
+            yaw_rng,
+            delay_rng,
+            phase_rng,
+            gait_rng,
+            reference_rng,
+        ) = jax.random.split(rng, 8)
         qpos = jp.asarray(self._mj_model.qpos0)
         qvel = jp.zeros(self._mj_model.nv)
 
+        gait_phase = jax.random.uniform(phase_rng)
+        (
+            reference_position,
+            reference_velocity,
+            _,
+            reference_root_position,
+            reference_root_quaternion,
+            reference_root_linear_velocity,
+            reference_root_angular_velocity,
+        ) = self._reference_at_phase(gait_phase)
         joint_noise = jax.random.uniform(
             joint_rng,
             (self.action_size,),
             minval=-self._config.reset_joint_noise,
             maxval=self._config.reset_joint_noise,
         )
+        reference_init = self._motion_tracking & jax.random.bernoulli(
+            reference_rng, self._config.reference_init_probability
+        )
+        initial_training = jp.where(
+            reference_init, reference_position, self._nominal_training
+        )
         initial_joints = jp.clip(
-            self._nominal_physical + joint_noise, self._lowers, self._uppers
+            initial_training * self._sign + joint_noise,
+            self._lowers,
+            self._uppers,
         )
         qpos = qpos.at[self._joint_qpos].set(initial_joints)
 
@@ -282,15 +384,61 @@ class DirectionalRun(mjx_env.MjxEnv):
             minval=-self._config.reset_yaw_range,
             maxval=self._config.reset_yaw_range,
         )
-        root_quat_wxyz = jp.array([jp.cos(0.5 * yaw), 0.0, 0.0, jp.sin(0.5 * yaw)])
+        yaw_cos = jp.cos(0.5 * yaw)
+        yaw_sin = jp.sin(0.5 * yaw)
+        reference_w, reference_x, reference_y, reference_z = reference_root_quaternion
+        motion_root_quaternion = jp.array(
+            [
+                yaw_cos * reference_w - yaw_sin * reference_z,
+                yaw_cos * reference_x - yaw_sin * reference_y,
+                yaw_cos * reference_y + yaw_sin * reference_x,
+                yaw_cos * reference_z + yaw_sin * reference_w,
+            ]
+        )
+        yaw_quaternion = jp.array([yaw_cos, 0.0, 0.0, yaw_sin])
+        root_quat_wxyz = jp.where(
+            reference_init, motion_root_quaternion, yaw_quaternion
+        )
+        qpos = qpos.at[self._root_qpos + 2].set(
+            jp.where(
+                reference_init,
+                reference_root_position[2],
+                qpos[self._root_qpos + 2],
+            )
+        )
         qpos = qpos.at[self._root_qpos + 3 : self._root_qpos + 7].set(root_quat_wxyz)
-        root_velocity = jax.random.uniform(
+        root_velocity_noise = jax.random.uniform(
             vel_rng,
             (6,),
             minval=-self._config.reset_root_velocity_noise,
             maxval=self._config.reset_root_velocity_noise,
         )
+        yaw_rotation = jp.array(
+            [
+                [jp.cos(yaw), -jp.sin(yaw), 0.0],
+                [jp.sin(yaw), jp.cos(yaw), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        reference_root_velocity = jp.concatenate(
+            [
+                yaw_rotation @ reference_root_linear_velocity,
+                yaw_rotation @ reference_root_angular_velocity,
+            ]
+        )
+        root_velocity = root_velocity_noise + jp.where(
+            reference_init,
+            reference_root_velocity,
+            jp.zeros(6),
+        )
         qvel = qvel.at[self._root_dof : self._root_dof + 6].set(root_velocity)
+        qvel = qvel.at[self._joint_dof].set(
+            jp.where(
+                reference_init,
+                reference_velocity * self._sign,
+                jp.zeros(self.action_size),
+            )
+        )
 
         ctrl = jp.zeros(self._mj_model.nu)
         ctrl = ctrl.at[self._pos_actuator].set(self._nominal_physical)
@@ -325,11 +473,12 @@ class DirectionalRun(mjx_env.MjxEnv):
             "rng": rng,
             "step": jp.array(0, dtype=jp.int32),
             "command": command,
-            "gait_phase": jax.random.uniform(phase_rng),
+            "gait_phase": gait_phase,
             "gait_frequency": gait_frequency,
             "last_action": jp.zeros(self.action_size),
             "last_last_action": jp.zeros(self.action_size),
             "delay_steps": delay_steps,
+            "reference_init": reference_init,
         }
         metrics = {
             "reward/tracking_linear": jp.array(0.0),
@@ -340,6 +489,10 @@ class DirectionalRun(mjx_env.MjxEnv):
             "reward/flight": jp.array(0.0),
             "reward/single_support": jp.array(0.0),
             "reward/phase_swing": jp.array(0.0),
+            "reward/motion_joint": jp.array(0.0),
+            "reward/motion_joint_velocity": jp.array(0.0),
+            "reward/motion_contact": jp.array(0.0),
+            "reward/motion_action": jp.array(0.0),
             "cost/vertical_velocity": jp.array(0.0),
             "cost/angular_xy": jp.array(0.0),
             "cost/action_rate": jp.array(0.0),
@@ -419,6 +572,32 @@ class DirectionalRun(mjx_env.MjxEnv):
             (left_swing & (~left_contact)).astype(jp.float32)
             + (right_swing & (~right_contact)).astype(jp.float32)
         ) * moving.astype(jp.float32)
+        reference_position, reference_velocity, reference_contact, *_ = (
+            self._reference_at_phase(gait_phase)
+        )
+        joint_position_training = data.qpos[self._joint_qpos] * self._sign
+        joint_velocity_training = data.qvel[self._joint_dof] * self._sign
+        motion_joint = jp.exp(
+            -2.0 * jp.mean(jp.square(joint_position_training - reference_position))
+        )
+        motion_joint_velocity = jp.exp(
+            -0.01 * jp.mean(jp.square(joint_velocity_training - reference_velocity))
+        )
+        actual_contact = jp.array([left_contact, right_contact])
+        motion_contact = jp.mean(
+            (actual_contact == reference_contact).astype(jp.float32)
+        )
+        reference_action = jp.clip(
+            (reference_position - self._nominal_training) / self._config.action_scale,
+            -self._config.action_clip,
+            self._config.action_clip,
+        )
+        motion_action = jp.exp(-0.25 * jp.mean(jp.square(action - reference_action)))
+        tracking_enabled = jp.asarray(self._motion_tracking, dtype=jp.float32)
+        motion_joint *= tracking_enabled
+        motion_joint_velocity *= tracking_enabled
+        motion_contact *= tracking_enabled
+        motion_action *= tracking_enabled
         commanded_speed = jp.linalg.norm(state.info["command"][:2])
         locomotion_gate = jp.clip(commanded_speed / 1.2, 0.0, 1.0)
         action_rate = jp.sum(jp.square(action - state.info["last_action"]))
@@ -459,6 +638,11 @@ class DirectionalRun(mjx_env.MjxEnv):
             * single_support.astype(jp.float32)
             * locomotion_gate,
             "phase_swing": self._config.reward.phase_swing * phase_swing,
+            "motion_joint": self._config.reward.motion_joint * motion_joint,
+            "motion_joint_velocity": self._config.reward.motion_joint_velocity
+            * motion_joint_velocity,
+            "motion_contact": self._config.reward.motion_contact * motion_contact,
+            "motion_action": self._config.reward.motion_action * motion_action,
             "lateral_tracking": self._config.reward.lateral_tracking
             * jp.square(state.info["command"][1] - local_velocity[1]),
             "yaw_rate_error": self._config.reward.yaw_rate_error * yaw_error,
@@ -500,6 +684,10 @@ class DirectionalRun(mjx_env.MjxEnv):
                 "reward/flight": flight.astype(jp.float32),
                 "reward/single_support": single_support.astype(jp.float32),
                 "reward/phase_swing": phase_swing,
+                "reward/motion_joint": motion_joint,
+                "reward/motion_joint_velocity": motion_joint_velocity,
+                "reward/motion_contact": motion_contact,
+                "reward/motion_action": motion_action,
                 "cost/vertical_velocity": jp.square(local_velocity[2]),
                 "cost/angular_xy": jp.sum(
                     jp.square(data.sensordata[self._gyro_slice][:2])
@@ -521,6 +709,61 @@ class DirectionalRun(mjx_env.MjxEnv):
             obs=obs,
             reward=reward,
             done=done.astype(jp.float32),
+        )
+
+    def _reference_at_phase(self, phase: jax.Array) -> tuple[
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+        jax.Array,
+    ]:
+        """Circularly interpolate reference state and use nearest contact phase."""
+        frame = jp.mod(phase, 1.0) * self._reference_frame_count
+        lower = jp.floor(frame).astype(jp.int32) % self._reference_frame_count
+        upper = (lower + 1) % self._reference_frame_count
+        fraction = frame - jp.floor(frame)
+        position = (1.0 - fraction) * self._reference_joint_position[
+            lower
+        ] + fraction * self._reference_joint_position[upper]
+        velocity = (1.0 - fraction) * self._reference_joint_velocity[
+            lower
+        ] + fraction * self._reference_joint_velocity[upper]
+        root_position = (1.0 - fraction) * self._reference_root_position[
+            lower
+        ] + fraction * self._reference_root_position[upper]
+        lower_quaternion = self._reference_root_quaternion[lower]
+        upper_quaternion = self._reference_root_quaternion[upper]
+        upper_quaternion = jp.where(
+            jp.dot(lower_quaternion, upper_quaternion) < 0.0,
+            -upper_quaternion,
+            upper_quaternion,
+        )
+        root_quaternion = (
+            1.0 - fraction
+        ) * lower_quaternion + fraction * upper_quaternion
+        root_quaternion /= jp.maximum(jp.linalg.norm(root_quaternion), 1.0e-8)
+        root_linear_velocity = (1.0 - fraction) * self._reference_root_linear_velocity[
+            lower
+        ] + fraction * self._reference_root_linear_velocity[upper]
+        root_angular_velocity = (
+            1.0 - fraction
+        ) * self._reference_root_angular_velocity[
+            lower
+        ] + fraction * self._reference_root_angular_velocity[
+            upper
+        ]
+        contact_index = jp.where(fraction < 0.5, lower, upper)
+        return (
+            position,
+            velocity,
+            self._reference_contact[contact_index],
+            root_position,
+            root_quaternion,
+            root_linear_velocity,
+            root_angular_velocity,
         )
 
     def _foot_contacts(self, data: mjx.Data) -> tuple[jax.Array, jax.Array]:

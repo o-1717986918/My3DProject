@@ -16,6 +16,17 @@ minimum_frames: 25
 running_gate:
   minimum_consecutive_airborne_frames: 1
   minimum_airborne_duration_seconds: 0.02
+  maximum_consecutive_airborne_frames: 15
+  maximum_airborne_duration_seconds: 0.30
+  minimum_contact_fraction_per_foot: 0.05
+  average_horizontal_speed_m_s: [1.0, 4.5]
+  minimum_lower_body_excursion_rad: 0.20
+replay_gate:
+  engine: exact_RCSSServerMJ_MuJoCo_CPU
+  maximum_pitch_penetration_m: 0.015
+  maximum_non_foot_pitch_contact_frames: 0
+  minimum_root_height_m: 0.30
+  maximum_root_vertical_speed_m_s: 4.0
 provenance_required:
   - source_url
   - source_version
