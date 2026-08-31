@@ -6,6 +6,14 @@ import of [ApolloCodebase](https://github.com/XiangruiJiang/ApolloCodebase) at
 commit `71018c968969d6e55130b0e1987cd5b4f5c3b4df`, extended with this project's
 validated match and action work.
 
+The project-level objective is an evidence-backed complete and excellent robot
+football team, not merely a client that can finish a match. The capability
+route focuses on excellent locomotion and ball skills, goalkeeper and
+role-specific completeness, coordinated attack/defense and set plays, and
+opponent-diverse paired evaluation. Competition infrastructure is maintained
+as a non-regression baseline rather than treated as a team capability. The
+quantitative C0--C4 route is in `docs/team-excellence-roadmap.md`.
+
 The default path now reuses Apollo's behavior tree, dynamic role assignment,
 team communication, obstacle-aware walk planner, learned 78-to-23 walking
 policy, and learned get-up policy. My3D additions currently include bounded
@@ -144,7 +152,8 @@ Coordinated strategy development and evidence-based RoboCup2D migration are
 active. The first one-step pass loop, exact local-source audit, validation
 limits, and required directional-kick training are documented in
 `docs/strategy-migration-implementation.md`; the complete architecture and
-release gates remain in `docs/strategy-development-plan.md`.
+strategy gates remain in `docs/strategy-development-plan.md`. Both are
+workstreams under the final `docs/team-excellence-roadmap.md` objective.
 
 ## License and attribution
 

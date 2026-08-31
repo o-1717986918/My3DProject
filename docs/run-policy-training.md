@@ -8,6 +8,11 @@ Owner environment: WSL2 Ubuntu 22.04, Conda `my3d-rl`
 
 Target: Booster T1 in RCSSServerMJ 0.2.1, 50 Hz policy control
 
+Project target update: excellent locomotion is required for the final C4 team,
+but this policy remains independently gated and may not displace the stable
+walk merely to satisfy the project-level target. Its R2--R4 results feed the
+motion workstream defined in `team-excellence-roadmap.md`.
+
 ## 1. Outcome and scope
 
 This phase produces a versioned, recoverable reinforcement-learning pipeline

@@ -1,10 +1,15 @@
 # Strategy development and 2D migration plan
 
-Status: active; first one-step passing delivery accepted
+Status: active sub-plan; first one-step passing delivery accepted
 
 Planning date: 2026-08-31
 
 Runtime: `runtime/apollo/` on WSL2 Ubuntu 22.04
+
+Project-level target: a complete and excellent team. This document owns the
+strategy-migration workstream inside the broader promotion program in
+`team-excellence-roadmap.md`. Its original minimum release gates remain useful
+intermediate checks, but they no longer define the final project objective.
 
 ## Implementation progress on 2026-08-31
 
@@ -22,20 +27,20 @@ training contract are in `strategy-migration-implementation.md`.
 
 ## Mission
 
-Turn the current safe, complete 7v7 match loop into a coordinated football
-team. The next stage prioritizes high-level strategy, parameterized ball
-actions, teammate coordination, and evidence-based migration of mature
-RoboCup2D planning methods.
+Turn the current safe 7v7 match loop into an excellent coordinated football
+team. The strategy workstream must deliver not only legal action selection but
+repeatable attack, defense, support, marking, set plays, score/time adaptation,
+and opponent-diverse performance that passes the project-level C4 gates.
 
 Apollo remains the 3D execution and world-model foundation. RoboCup2D code is
 used as an algorithmic reference, not as a runtime dependency. Every migrated
 method must be rewritten against measured 3D robot and ball dynamics.
 
-Locomotion development is not abandoned, but it is no longer the critical
-path. The validated Apollo walk, get-up, path planner, and stable contact kick
-remain the release baseline. A new motion-training task is opened only when a
-measured strategy requirement cannot be met by alignment, timing, and the
-existing safe action primitives.
+The validated Apollo walk, get-up, path planner, and stable contact kick remain
+the recoverable baseline. Parameterized ball action is the immediate physical
+critical path. Excellent locomotion is also a final-target requirement and is
+developed in parallel, but it replaces the stable walk only after its own
+simulator, ONNX, server, transition, and multi-match promotion gates pass.
 
 ## Stage definition of done
 
@@ -56,6 +61,8 @@ the following in repeatable RCSSServerMJ tests:
    finite-action, fall-recovery, or illegal-defense gates;
 7. preserve enough decision and outcome telemetry to replay why each tactical
    action was selected and whether it succeeded.
+8. meet the higher C3/C4 opponent-diverse, set-play, defense, possession-chain,
+   performance, and release gates in `team-excellence-roadmap.md`.
 
 The stage does not require end-to-end multi-agent reinforcement learning,
 11v11 formation files, or an unbounded multi-step planner.
@@ -322,7 +329,8 @@ Validation ladder:
 6. 3v2 attack and defensive transition;
 7. headless 7v7 A/B runs with swapped sides;
 8. visual 7v7 review;
-9. source-complete competition package test.
+9. opponent-style, score/time-state, communication-loss, and fall-recovery
+   capability suites.
 
 Minimum release gate:
 
@@ -331,8 +339,10 @@ Minimum release gate:
 - five consecutive strict 7v7 runs produce at least three intentional pass
   attempts per match and at least 45% completed passes in aggregate;
 - a two-pass possession chain is reproduced in at least three bounded runs;
-- all 14 clients connect, join, reach `PlayOn`, and exit cleanly;
-- fatal errors, non-finite motor actions, and illegal-defense fouls remain zero;
+- the retained operational baseline still has all 14 clients connect, join,
+  reach `PlayOn`, and exit cleanly, with zero fatal errors, non-finite motor
+  actions, or illegal-defense fouls; this is a non-regression check, not a
+  capability milestone;
 - fall and recovery results are no worse than the paired baseline beyond the
   declared tolerance;
 - the candidate improves pass/possession metrics without a material regression
