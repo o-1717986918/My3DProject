@@ -54,6 +54,9 @@ struct WorldSnapshot {
     std::optional<bool> is_left_team;
     double server_time{0.0};
     double last_server_time{0.0};
+    double match_time_s{0.0};
+    int own_score{0};
+    int opponent_score{0};
     PlayMode play_mode{PlayMode::NotInitialized};
     PlayModeGroup play_mode_group{PlayModeGroup::NotInitialized};
     bool has_beamed{false};

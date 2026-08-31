@@ -1,10 +1,24 @@
 # Strategy development and 2D migration plan
 
-Status: accepted next-stage direction
+Status: active; first one-step passing delivery accepted
 
 Planning date: 2026-08-31
 
 Runtime: `runtime/apollo/` on WSL2 Ubuntu 22.04
+
+## Implementation progress on 2026-08-31
+
+The first executable strategy slice is complete. It delivers the S1 contracts,
+seed 3D ball/reach models from S2, direct and leading candidates from S3, a
+minimal `Proposed -> Ready` coordination loop from S4, and behavior-tree
+integration with physical-outcome telemetry. Native tests and a strict full
+7v7 deterministic pass scenario passed.
+
+This does not close the full stage definition below. Through passes, calibrated
+2--5 m execution, the complete intent lifecycle, receiver completion, combined
+action selection, team tactics, and multi-match A/B gates remain open. The
+exact implementation, reference-source audit, evidence, limitations, and next
+training contract are in `strategy-migration-implementation.md`.
 
 ## Mission
 
@@ -108,9 +122,11 @@ falls, and perception uncertainty invalidate long open-loop plans quickly.
 
 ## Source migration map
 
-The primary algorithm reference is Cyrus2DBase at audited commit
-`3459d1b2a0627231fa11f775658328d7a2de41b7`. Pyrus2D is a secondary readable
-reference. Apollo, FC Portugal, and Magma remain the preferred references for
+The primary local algorithm references are extracted Cyrus2DBase, HELIOS, and
+TheMY sources under `/home/win98/my_projects/rbc/teams`. Those archives have no
+`.git` metadata, so they are pinned by inspected-file hashes rather than an
+invented commit. Pyrus2D is a secondary readable online reference. Apollo, FC
+Portugal, and Magma remain the preferred references for
 3D execution, behavior integration, and formation mechanics.
 
 | Reference concept | Project decision |
@@ -124,9 +140,11 @@ reference. Apollo, FC Portugal, and Magma remain the preferred references for
 | Formation and role files | Migrate tactical zones and phase semantics, not 11v11 coordinates or role counts |
 | 2D dash, turn, kick, stamina, player-type, and ball-decay code | Reject as non-transferable runtime physics |
 
-MIT-licensed reference code may be adapted only with its notices retained.
-The default approach is clean reimplementation with source attribution. Do not
-vendor librcsc, the 2D server, or a full 2D team dependency tree.
+Archive roots and individual source files contain mixed MIT, LGPL, and GPL
+notices. The default approach is therefore clean independent reimplementation
+with source attribution; copied code would require file-level license review
+and retained notices. Do not vendor librcsc, the 2D server, or a full 2D team
+dependency tree. See `strategy-migration-implementation.md` for exact hashes.
 
 Primary references:
 

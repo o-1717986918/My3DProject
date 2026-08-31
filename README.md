@@ -11,7 +11,9 @@ team communication, obstacle-aware walk planner, learned 78-to-23 walking
 policy, and learned get-up policy. My3D additions currently include bounded
 test operation, machine-readable match telemetry, a migrated stable
 approach/kick/recover action, legal defensive-kickoff placement, strict 7v7
-acceptance, and source-complete deployment packaging.
+acceptance, source-complete deployment packaging, and a first coordinated
+direct/leading pass loop with typed intent, deterministic evaluation, receiver
+readiness, safe fallback, and physical ball-progress telemetry.
 
 The former Python client and the reinforcement-learning tools under
 `training/` remain in the repository as reference implementations and the
@@ -76,6 +78,25 @@ The gate requires all 14 clients to connect, join, reach `PlayOn`, exit
 cleanly, produce no client/server fatal errors, and commit no illegal-defense
 foul. Set `KEEP_MATCH_LOGS=1` to preserve evidence under `/tmp`.
 
+To exercise the complete strategy-to-contact pass contract in a deterministic
+full 7v7 process:
+
+```bash
+MATCH_PASS_SCENARIO=1 MATCH_REQUIRE_PASS=1 MATCH_REQUIRE_KICK=1 \
+  APOLLO_STATUS_INTERVAL=5 KEEP_MATCH_LOGS=1 \
+  scripts/run_apollo_acceptance_match.sh 600
+```
+
+Analyze the preserved status logs with:
+
+```bash
+conda run -n my3d-team python scripts/analyze_apollo_pass.py \
+  /tmp/my3d-apollo-match.*/My3D-*.log
+```
+
+This gate requires a targeted command and measurable target-direction ball
+progress. It is not yet a claim of useful pass distance or receiver control.
+
 Launch the same Apollo runtime with WSLg visualization:
 
 ```bash
@@ -119,10 +140,11 @@ Operational details and the current evidence are in
 `docs/competition-runbook.md` and `docs/validation.md`. Research and reference
 comparisons remain under `docs/`.
 
-The accepted next-stage direction is coordinated strategy development and
-evidence-based RoboCup2D algorithm migration. Its architecture, implementation
-order, promotion gates, telemetry contract, and release definition are in
-`docs/strategy-development-plan.md`.
+Coordinated strategy development and evidence-based RoboCup2D migration are
+active. The first one-step pass loop, exact local-source audit, validation
+limits, and required directional-kick training are documented in
+`docs/strategy-migration-implementation.md`; the complete architecture and
+release gates remain in `docs/strategy-development-plan.md`.
 
 ## License and attribution
 

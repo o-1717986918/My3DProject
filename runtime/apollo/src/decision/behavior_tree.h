@@ -16,7 +16,8 @@ public:
     HighLevelCommand evaluate(
         const world::WorldSnapshot& snapshot,
         Blackboard& blackboard,
-        RoleManager& role_manager) const;
+        RoleManager& role_manager,
+        bool enable_pass_strategy) const;
 };
 
 }  // namespace decision

@@ -44,10 +44,52 @@ bool TeamCommManager::is_send_slot(int player_number, int server_cycle) const {
 
 TeamCommPacket TeamCommManager::make_packet(
     const world::WorldSnapshot& snapshot,
-    int current_role) const {
+    int current_role,
+    const std::optional<OutgoingPassIntent>& outgoing_pass) const {
     TeamCommPacket packet;
     packet.version = version_byte_;
     packet.sender_player_number = static_cast<std::uint8_t>(snapshot.player_number);
+    if (outgoing_pass.has_value()) {
+        packet.kind = TeamCommPacketKind::PassIntent;
+        packet.pass_intent_state = PassIntentState::Proposed;
+        packet.passer_player_number = static_cast<std::uint8_t>(snapshot.player_number);
+        packet.receiver_player_number = static_cast<std::uint8_t>(
+            outgoing_pass->receiver_player_number);
+        packet.pass_sequence_id = outgoing_pass->sequence_id;
+        packet.pass_target_x_m = outgoing_pass->target_x_m;
+        packet.pass_target_y_m = outgoing_pass->target_y_m;
+        packet.requested_ball_speed_mps = outgoing_pass->requested_ball_speed_mps;
+        packet.predicted_ball_time_s = outgoing_pass->predicted_ball_time_s;
+        return packet;
+    }
+
+    const PassIntentRecord* proposed = nullptr;
+    for (const auto& intent : snapshot.team_comm_snapshot.pass_intents) {
+        if (intent.state != PassIntentState::Proposed ||
+            intent.receiver_player_number != snapshot.player_number) {
+            continue;
+        }
+        if (proposed == nullptr || intent.server_cycle > proposed->server_cycle) {
+            proposed = &intent;
+        }
+    }
+    const bool upright = snapshot.self.position_m[2] >= world::kFallenHeightThresholdM;
+    if (proposed != nullptr && upright &&
+        snapshot.play_mode == world::PlayMode::PlayOn) {
+        packet.kind = TeamCommPacketKind::PassIntent;
+        packet.pass_intent_state = PassIntentState::Ready;
+        packet.passer_player_number = static_cast<std::uint8_t>(
+            proposed->passer_player_number);
+        packet.receiver_player_number = static_cast<std::uint8_t>(snapshot.player_number);
+        packet.pass_sequence_id = proposed->sequence_id;
+        packet.pass_target_x_m = proposed->target_x_m;
+        packet.pass_target_y_m = proposed->target_y_m;
+        packet.requested_ball_speed_mps = proposed->requested_ball_speed_mps;
+        packet.predicted_ball_time_s = proposed->predicted_ball_time_s;
+        return packet;
+    }
+
+    packet.kind = TeamCommPacketKind::State;
     packet.self_x_m = snapshot.self.position_m[0];
     packet.self_y_m = snapshot.self.position_m[1];
     packet.fallen = snapshot.self.position_m[2] < world::kFallenHeightThresholdM;
@@ -66,6 +108,12 @@ TeamCommPacket TeamCommManager::make_packet(
 void TeamCommManager::ingest(const TeamCommPacket& packet, int current_server_cycle) {
     // Reject packets from other teams (different version byte).
     if (packet.version != version_byte_) return;
+    if (packet.kind == TeamCommPacketKind::PassIntent) {
+        auto record = TeamCommCodec::to_pass_intent_record(packet);
+        record.server_cycle = current_server_cycle;
+        pass_intents_[packet.sender_player_number] = record;
+        return;
+    }
     auto record = TeamCommCodec::to_record(packet);
     record.server_cycle = current_server_cycle;
     records_[packet.sender_player_number] = record;
@@ -76,6 +124,11 @@ TeamCommSnapshot TeamCommManager::make_snapshot(int current_server_cycle) const 
     for (const auto& [_, record] : records_) {
         if (current_server_cycle - record.server_cycle <= kMaxRecordAgeCycles) {
             snapshot.records.push_back(record);
+        }
+    }
+    for (const auto& [_, record] : pass_intents_) {
+        if (current_server_cycle - record.server_cycle <= kMaxRecordAgeCycles) {
+            snapshot.pass_intents.push_back(record);
         }
     }
     return snapshot;

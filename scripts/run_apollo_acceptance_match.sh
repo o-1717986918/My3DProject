@@ -20,6 +20,16 @@ else
 fi
 server_pid=
 player_pids=()
+client_strategy_args=()
+
+case "${APOLLO_ENABLE_PASS_STRATEGY:-1}" in
+    1) ;;
+    0) client_strategy_args+=(--disable-pass-strategy) ;;
+    *)
+        echo "APOLLO_ENABLE_PASS_STRATEGY must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
 
 cleanup() {
     for pid in "${player_pids[@]:-}"; do
@@ -77,6 +87,7 @@ for team in My3D-A My3D-B; do
             --asset-root "$asset_root" \
             --max-cycles "$max_cycles" \
             --status-interval "${APOLLO_STATUS_INTERVAL:-100}" \
+            "${client_strategy_args[@]}" \
             >"$run_dir/${team}-${number}.log" 2>&1 &
         player_pids+=("$!")
         # RCSSServerMJ 0.2.1 can reset connections when fourteen ONNX-backed
@@ -87,12 +98,77 @@ for team in My3D-A My3D-B; do
 done
 
 sleep 4
+if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
+    # Deterministic open-lane scene for the communication-to-contact pass
+    # contract. Both complete teams remain connected; only their poses and the
+    # ball are reset through the official monitor protocol.
+    "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        --delay 0.05 \
+        "(agent (unum 1) (team My3D-A) (move3d -26 0 0.8 1 0 0 0))" \
+        "(agent (unum 2) (team My3D-A) (move3d -10 -5 0.8 1 0 0 0))" \
+        "(agent (unum 3) (team My3D-A) (move3d -10 5 0.8 1 0 0 0))" \
+        "(agent (unum 4) (team My3D-A) (move3d -6 -7 0.8 1 0 0 0))" \
+        "(agent (unum 5) (team My3D-A) (move3d -6 7 0.8 1 0 0 0))" \
+        "(agent (unum 6) (team My3D-A) (move3d 4 0 0.8 1 0 0 0))" \
+        "(agent (unum 7) (team My3D-A) (move3d -3 0 0.8 1 0 0 0))" \
+        "(agent (unum 1) (team My3D-B) (move3d 26 0 0.8 0 0 0 1))" \
+        "(agent (unum 2) (team My3D-B) (move3d 18 -7 0.8 0 0 0 1))" \
+        "(agent (unum 3) (team My3D-B) (move3d 18 -4 0.8 0 0 0 1))" \
+        "(agent (unum 4) (team My3D-B) (move3d 18 -1 0.8 0 0 0 1))" \
+        "(agent (unum 5) (team My3D-B) (move3d 18 1 0.8 0 0 0 1))" \
+        "(agent (unum 6) (team My3D-B) (move3d 18 4 0.8 0 0 0 1))" \
+        "(agent (unum 7) (team My3D-B) (move3d 18 7 0.8 0 0 0 1))" \
+        "(ball (pos -20 0 0.11) (vel 0 0 0))"
+    sleep 1
+    # The client-side beam command can race the first monitor reset while all
+    # fourteen ONNX sessions finish initialization. Re-assert only the actors
+    # that define the lane after every client has emitted its first action.
+    "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        --delay 0.05 \
+        "(agent (unum 6) (team My3D-A) (move3d 4 0 0.8 1 0 0 0))" \
+        "(agent (unum 7) (team My3D-A) (move3d -3 0 0.8 1 0 0 0))" \
+        "(agent (unum 1) (team My3D-B) (move3d 26 0 0.8 0 0 0 1))" \
+        "(agent (unum 2) (team My3D-B) (move3d 18 -7 0.8 0 0 0 1))" \
+        "(agent (unum 3) (team My3D-B) (move3d 18 -4 0.8 0 0 0 1))" \
+        "(agent (unum 4) (team My3D-B) (move3d 18 -1 0.8 0 0 0 1))" \
+        "(agent (unum 5) (team My3D-B) (move3d 18 1 0.8 0 0 0 1))" \
+        "(agent (unum 6) (team My3D-B) (move3d 18 4 0.8 0 0 0 1))" \
+        "(agent (unum 7) (team My3D-B) (move3d 18 7 0.8 0 0 0 1))" \
+        "(ball (pos -20 0 0.11) (vel 0 0 0))"
+    sleep 0.5
+elif [[ "${MATCH_PASS_SCENARIO:-0}" != 0 ]]; then
+    echo "MATCH_PASS_SCENARIO must be 0 or 1" >&2
+    exit 2
+fi
+
 "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
     --host 127.0.0.1 \
     --port "$monitor_port" \
     --delay 0.5 \
     "(kickOff Left)" \
     "(dropBall)"
+
+if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
+    sleep 0.5
+    "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        --delay 0.05 \
+        "(agent (unum 6) (team My3D-A) (move3d 4 0 0.8 1 0 0 0))" \
+        "(agent (unum 7) (team My3D-A) (move3d -3 0 0.8 1 0 0 0))" \
+        "(agent (unum 1) (team My3D-B) (move3d 26 0 0.8 0 0 0 1))" \
+        "(agent (unum 2) (team My3D-B) (move3d 18 -7 0.8 0 0 0 1))" \
+        "(agent (unum 3) (team My3D-B) (move3d 18 -4 0.8 0 0 0 1))" \
+        "(agent (unum 4) (team My3D-B) (move3d 18 -1 0.8 0 0 0 1))" \
+        "(agent (unum 5) (team My3D-B) (move3d 18 1 0.8 0 0 0 1))" \
+        "(agent (unum 6) (team My3D-B) (move3d 18 4 0.8 0 0 0 1))" \
+        "(agent (unum 7) (team My3D-B) (move3d 18 7 0.8 0 0 0 1))" \
+        "(ball (pos 0 0 0.11) (vel 0 0 0))"
+fi
 
 clean_exits=0
 for pid in "${player_pids[@]}"; do
@@ -123,6 +199,21 @@ getup_samples=$(
     { grep -Eh "MY3D_STATUS.*motion=GetUp" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
+pass_plan_samples=$(
+    { grep -Eh "MY3D_STATUS.*strategy=Pass" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+pass_ready_samples=$(
+    { grep -Eh "MY3D_STATUS.*strategy=Pass.*pass_ready=1" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+targeted_pass_kick_samples=$(
+    { grep -Eh \
+        "MY3D_STATUS.*motion=Kick(Forward|Stabilize|Hold).*kick_mode=TargetedPass" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+pass_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
+    --metric contacts "$run_dir"/My3D-*.log)
 activation_warnings=0
 if [[ -f "$run_dir/MUJOCO_LOG.TXT" ]]; then
     activation_warnings=$(grep -c "Nan, Inf or huge value in CTRL" \
@@ -133,14 +224,24 @@ kick_requirement_failed=0
 if [[ "${MATCH_REQUIRE_KICK:-0}" == 1 && $kick_samples -eq 0 ]]; then
     kick_requirement_failed=1
 fi
+pass_requirement_failed=0
+if [[ "${MATCH_REQUIRE_PASS:-0}" == 1 ]] && \
+    { [[ $pass_plan_samples -eq 0 ]] || [[ $pass_ready_samples -eq 0 ]] || \
+      [[ $targeted_pass_kick_samples -eq 0 ]] || [[ $pass_contact_events -eq 0 ]]; }; then
+    pass_requirement_failed=1
+fi
 
 if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
     || $play_on -ne 14 || $failures -ne 0 || $server_errors -ne 0 \
-    || $illegal_defense -ne 0 || $kick_requirement_failed -ne 0 ]]; then
+    || $illegal_defense -ne 0 || $kick_requirement_failed -ne 0 \
+    || $pass_requirement_failed -ne 0 ]]; then
     echo "Apollo 7v7 acceptance failed: cycles=$max_cycles clean_exits=$clean_exits " \
         "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
         "server_errors=$server_errors illegal_defense=$illegal_defense " \
         "kick_samples=$kick_samples getup_samples=$getup_samples " \
+        "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
+        "targeted_pass_kick_samples=$targeted_pass_kick_samples " \
+        "pass_contact_events=$pass_contact_events " \
         "activation_warnings=$activation_warnings" >&2
     tail -100 "$run_dir/server.log" >&2
     if [[ "${KEEP_MATCH_LOGS:-0}" == 1 ]]; then
@@ -153,6 +254,9 @@ echo "Apollo 7v7 acceptance passed: cycles=$max_cycles clean_exits=$clean_exits 
     "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
     "server_errors=$server_errors illegal_defense=$illegal_defense " \
     "kick_samples=$kick_samples getup_samples=$getup_samples " \
+    "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
+    "targeted_pass_kick_samples=$targeted_pass_kick_samples " \
+    "pass_contact_events=$pass_contact_events " \
     "activation_warnings=$activation_warnings"
 if [[ "${KEEP_MATCH_LOGS:-0}" == 1 ]]; then
     echo "Logs preserved at $run_dir"

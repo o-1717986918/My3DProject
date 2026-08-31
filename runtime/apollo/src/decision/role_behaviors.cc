@@ -194,14 +194,23 @@ using GKNodePtr = bt::NodePtr<GKDecisionContext>;
 
 HighLevelCommand make_dribble_command(
     APDecisionContext& context,
-    double absolute_direction_deg) {
+    double absolute_direction_deg,
+    const strategy::CooperativeAction* cooperative_action = nullptr,
+    bool allow_kick = true) {
     const double now = context.snapshot.server_time;
     if (context.state.kick_active_until_s > now) {
-        return KickCommand{};
+        return context.state.active_kick_command.value_or(KickCommand{});
     }
     if (context.state.kick_active_until_s > 0.0) {
+        const bool completed_pass = context.state.active_kick_command.has_value() &&
+            context.state.active_kick_command->mode == KickMode::TargetedPass;
         context.state.kick_active_until_s = 0.0;
         context.state.dribble_ready = false;
+        context.state.active_kick_command.reset();
+        if (completed_pass) {
+            context.state.committed_pass.reset();
+            context.state.pass_commit_until_s = 0.0;
+        }
     }
 
     const double direction_rad = math::deg_to_rad(absolute_direction_deg);
@@ -273,11 +282,34 @@ HighLevelCommand make_dribble_command(
         context.ball_distance >= kKickMinBallDistanceM &&
         context.ball_distance <= kKickMaxBallDistanceM &&
         orientation_error_deg <= kKickMaxOrientationErrorDeg;
+    // Readiness is a hard release gate. Once dribble_ready is latched the
+    // robot can drift slightly inside the valid contact envelope; gating only
+    // on setup_ready here would otherwise permit a later unacknowledged kick.
+    if (!allow_kick) {
+        WalkCommand hold_command = make_walk_command(context.self);
+        hold_command.orientation_deg = absolute_direction_deg;
+        hold_command.orientation_absolute = true;
+        hold_command.role_id = RoleManager::ROLE_AP;
+        return hold_command;
+    }
     if (legal_open_play_kick) {
         context.state.kick_active_until_s = now + kKickDurationS;
         context.state.next_kick_allowed_s =
             context.state.kick_active_until_s + kKickCooldownS;
-        return KickCommand{};
+        KickCommand kick_command;
+        if (cooperative_action != nullptr &&
+            cooperative_action->category == strategy::ActionCategory::Pass) {
+            kick_command.target_point_m = cooperative_action->target_point_m;
+            kick_command.requested_ball_speed_mps =
+                cooperative_action->requested_ball_speed_mps;
+            kick_command.receiver_player_number =
+                cooperative_action->target_player_number;
+            kick_command.action_id = cooperative_action->action_id;
+            kick_command.sequence_id = cooperative_action->sequence_id;
+            kick_command.mode = KickMode::TargetedPass;
+        }
+        context.state.active_kick_command = kick_command;
+        return kick_command;
     }
 
     return make_walk_command_avoiding(
@@ -307,6 +339,72 @@ HighLevelCommand make_ap_push_ball_to_goal(APDecisionContext& context) {
         ? math::vector_angle_deg(goal_direction)
         : 0.0;
     return make_dribble_command(context, absolute_direction_deg);
+}
+
+bool pass_commit_is_valid(
+    const world::WorldSnapshot& snapshot,
+    const strategy::CooperativeAction& pass) {
+    if (pass.category != strategy::ActionCategory::Pass ||
+        pass.target_player_number <= 0 ||
+        pass.target_player_number == snapshot.player_number) {
+        return false;
+    }
+    const auto receiver_index = static_cast<std::size_t>(pass.target_player_number - 1);
+    if (receiver_index >= snapshot.teammates.size()) return false;
+    const auto& receiver = snapshot.teammates[receiver_index];
+    constexpr double kMaximumReceiverObservationAgeS = 1.0;
+    const bool receiver_fresh = receiver.seen ||
+        (receiver.last_seen_time >= 0.0 &&
+         snapshot.server_time - receiver.last_seen_time <=
+             kMaximumReceiverObservationAgeS);
+    if (receiver.fallen || !receiver_fresh) {
+        return false;
+    }
+    const std::array<double, 2> ball{
+        snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+    const std::array<double, 2> receiver_position{
+        receiver.position_m[0], receiver.position_m[1]};
+    const double receiver_target_tolerance_m =
+        pass.pass_type == strategy::PassType::Leading ? 2.0 : 1.25;
+    return std::abs(pass.target_point_m[0]) < field_geometry::kActualHalfLengthM - 0.5 &&
+           std::abs(pass.target_point_m[1]) < field_geometry::kActualHalfWidthM - 0.5 &&
+           math::planar_dist(ball, pass.start_ball_point_m) <= 0.75 &&
+           math::planar_dist(receiver_position, pass.target_point_m) <=
+               receiver_target_tolerance_m;
+}
+
+bool receiver_is_ready(
+    const world::WorldSnapshot& snapshot,
+    const strategy::CooperativeAction& pass) {
+    for (const auto& intent : snapshot.team_comm_snapshot.pass_intents) {
+        if (intent.state == comm::PassIntentState::Ready &&
+            intent.passer_player_number == snapshot.player_number &&
+            intent.receiver_player_number == pass.target_player_number &&
+            intent.sequence_id == pass.sequence_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const comm::PassIntentRecord* incoming_pass_intent(
+    const world::WorldSnapshot& snapshot) {
+    const comm::PassIntentRecord* best = nullptr;
+    for (const auto& intent : snapshot.team_comm_snapshot.pass_intents) {
+        if (intent.state != comm::PassIntentState::Proposed ||
+            intent.receiver_player_number != snapshot.player_number ||
+            intent.passer_player_number == snapshot.player_number) {
+            continue;
+        }
+        if (std::abs(intent.target_x_m) >= field_geometry::kActualHalfLengthM ||
+            std::abs(intent.target_y_m) >= field_geometry::kActualHalfWidthM) {
+            continue;
+        }
+        if (best == nullptr || intent.server_cycle > best->server_cycle) {
+            best = &intent;
+        }
+    }
+    return best;
 }
 
 bool is_gk_our_goal_kick(const GKDecisionContext& context) {
@@ -385,8 +483,9 @@ bool APBehavior::matches(const Blackboard& blackboard) const {
 
 HighLevelCommand APBehavior::make_command(
     const world::WorldSnapshot& snapshot,
-    const Blackboard& blackboard,
-    RoleManager& role_manager) const {
+    Blackboard& blackboard,
+    RoleManager& role_manager,
+    bool enable_pass_strategy) const {
     static const APNodePtr ap_tree = bt::command<APDecisionContext>(make_ap_push_ball_to_goal);
 
     if (!is_our_set_play(snapshot)) {
@@ -400,6 +499,54 @@ HighLevelCommand APBehavior::make_command(
         {snapshot.self.position_m[0], snapshot.self.position_m[1]},
         0.0};
     context.ball_distance = math::planar_dist(context.ball, context.self);
+
+    if (enable_pass_strategy && snapshot.play_mode == world::PlayMode::PlayOn) {
+        strategy::PlanningResult plan = action_planner_.plan(snapshot);
+        blackboard.set(Blackboard::kKeyStrategyPlan, plan);
+
+        if (state_.committed_pass.has_value() &&
+            (snapshot.server_time >= state_.pass_commit_until_s ||
+             !pass_commit_is_valid(snapshot, *state_.committed_pass))) {
+            state_.committed_pass.reset();
+            state_.pass_commit_until_s = 0.0;
+        }
+
+        constexpr double kPassPlanningEngageDistanceM = 2.5;
+        constexpr double kPassCommitDurationS = 6.0;
+        if (!state_.committed_pass.has_value() && plan.selected.has_value() &&
+            context.ball_distance <= kPassPlanningEngageDistanceM) {
+            strategy::CooperativeAction committed = *plan.selected;
+            state_.next_pass_sequence_id = static_cast<std::uint8_t>(
+                state_.next_pass_sequence_id + 1U);
+            if (state_.next_pass_sequence_id == 0U) {
+                state_.next_pass_sequence_id = 1U;
+            }
+            committed.sequence_id = state_.next_pass_sequence_id;
+            state_.committed_pass = committed;
+            state_.pass_commit_until_s = snapshot.server_time + kPassCommitDurationS;
+        }
+
+        if (state_.committed_pass.has_value()) {
+            blackboard.set(
+                Blackboard::kKeySelectedCooperativeAction,
+                *state_.committed_pass);
+            const auto target_direction = math::vec2_sub(
+                state_.committed_pass->target_point_m, context.ball);
+            if (math::norm2(target_direction) > 1.0e-6) {
+                const double direction_deg = math::vector_angle_deg(target_direction);
+                return make_dribble_command(
+                    context,
+                    direction_deg,
+                    &*state_.committed_pass,
+                    receiver_is_ready(snapshot, *state_.committed_pass));
+            }
+            state_.committed_pass.reset();
+            state_.pass_commit_until_s = 0.0;
+        }
+    } else {
+        state_.committed_pass.reset();
+        state_.pass_commit_until_s = 0.0;
+    }
 
     if (is_our_set_play(snapshot) && state_.set_play_released) {
         return make_walk_command_avoiding(
@@ -429,7 +576,14 @@ bool SimpleRoleBehavior::matches(const Blackboard& blackboard) const {
 
 HighLevelCommand SimpleRoleBehavior::make_command(
     const world::WorldSnapshot& snapshot,
-    const Blackboard& blackboard) const {
+    Blackboard& blackboard) const {
+    if (snapshot.play_mode == world::PlayMode::PlayOn) {
+        if (const auto* intent = incoming_pass_intent(snapshot); intent != nullptr) {
+            return make_walk_command_avoiding(
+                {intent->target_x_m, intent->target_y_m}, snapshot, std::nullopt,
+                true, true, role_id_, true);
+        }
+    }
     if (role_id_ == RoleManager::ROLE_ST && is_our_set_play(snapshot)) {
         if (!snapshot.ball.velocity_valid) {
             relay_state_ = {};
@@ -465,7 +619,7 @@ bool GKBehavior::matches(const Blackboard& blackboard) const {
 
 HighLevelCommand GKBehavior::make_command(
     const world::WorldSnapshot& snapshot,
-    const Blackboard& /*blackboard*/) const {
+    Blackboard& /*blackboard*/) const {
     static const GKNodePtr gk_tree = bt::fallback<GKDecisionContext>({
         bt::sequence<GKDecisionContext>({
             bt::condition<GKDecisionContext>(is_gk_our_goal_kick),
@@ -487,13 +641,15 @@ HighLevelCommand GKBehavior::make_command(
 
 std::optional<HighLevelCommand> select_role_behavior(
     const world::WorldSnapshot& snapshot,
-    const Blackboard& blackboard,
-    RoleManager& role_manager) {
+    Blackboard& blackboard,
+    RoleManager& role_manager,
+    bool enable_pass_strategy) {
     // AP is the only behavior that needs RoleManager (to latch the set-play
     // push); dispatch it directly and let the other behaviors share the
     // 2-param base interface.
     if (ap_behavior_instance().matches(blackboard)) {
-        return ap_behavior_instance().make_command(snapshot, blackboard, role_manager);
+        return ap_behavior_instance().make_command(
+            snapshot, blackboard, role_manager, enable_pass_strategy);
     }
     static const std::array<const RoleBehavior*, 6> behaviors{
         &cbm_behavior_instance(),

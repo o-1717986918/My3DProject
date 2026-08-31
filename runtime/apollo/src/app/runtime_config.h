@@ -24,6 +24,8 @@ struct RuntimeConfig {
     /// Emit one machine-readable status line at this cycle interval.
     /// Zero keeps the competition runtime silent.
     std::size_t status_interval_cycles{0U};
+    /// Enables the bounded one-step pass planner and pass-intent protocol.
+    bool enable_pass_strategy{true};
 
     /// Parses supported command-line options and preserves unspecified defaults.
     static RuntimeConfig from_args(int argc, char* argv[]);

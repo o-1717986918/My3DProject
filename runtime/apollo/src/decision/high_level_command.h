@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -28,8 +29,24 @@ struct WalkCommand {
 
 /// Requests execution of the learned get-up policy.
 struct GetUpCommand {};
-/// Requests the validated My3D forward-contact kick macro.
-struct KickCommand {};
+enum class KickMode : std::uint8_t {
+    ForwardContact,
+    TargetedPass,
+    Shot,
+    Clear,
+};
+
+/// Requests the validated My3D contact macro. Target metadata is consumed by
+/// the decision/coordination layers; a default value preserves the original
+/// forward-contact behavior and remains the same-cycle safety fallback.
+struct KickCommand {
+    std::optional<std::array<double, 2>> target_point_m;
+    double requested_ball_speed_mps{0.0};
+    std::optional<int> receiver_player_number;
+    std::uint32_t action_id{0U};
+    std::uint8_t sequence_id{0U};
+    KickMode mode{KickMode::ForwardContact};
+};
 /// Requests the neutral standing keyframe.
 struct NeutralCommand {};
 

@@ -37,6 +37,9 @@ bash -n start.sh start7v7.sh kill.sh build_binary.sh scripts/*.sh runtime/apollo
 git diff --check
 MATCH_REQUIRE_KICK=1 APOLLO_STATUS_INTERVAL=10 \
   scripts/run_apollo_acceptance_match.sh 1200
+
+MATCH_PASS_SCENARIO=1 MATCH_REQUIRE_PASS=1 MATCH_REQUIRE_KICK=1 \
+  APOLLO_STATUS_INTERVAL=5 scripts/run_apollo_acceptance_match.sh 600
 ```
 
 The 7v7 gate owns a temporary server, starts two complete teams, transitions
@@ -47,6 +50,15 @@ through kickoff into `PlayOn`, and checks:
 3. at least one `KickForward`, `KickStabilize`, or `KickHold` sample when
    `MATCH_REQUIRE_KICK=1`;
 4. bounded process shutdown and preserved logs when requested.
+
+The second command is the deterministic strategy-to-contact gate. It retains
+all 14 players and uses monitor placement only to create an open 2v0 lane
+inside the full match. It additionally requires candidate selection,
+`Proposed/Ready` coordination, an exact `TargetedPass` kick mode, and at least
+0.10 m of ball progress projected toward the declared target. Set
+`KEEP_MATCH_LOGS=1`, then use `scripts/analyze_apollo_pass.py` for the detailed
+outcome record. This threshold detects physical wiring; promotion to a useful
+pass still requires the 2--5 m, 16/20 corridor gate.
 
 `RCSSServerMJ 0.2.1` currently prints one MuJoCo `CTRL` warning during each
 player activation while recompiling the full model. The gate reports this

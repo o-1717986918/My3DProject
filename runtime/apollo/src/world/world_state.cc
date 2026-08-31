@@ -131,6 +131,9 @@ void WorldState::update_from_perception(
         }
 
         const bool side = snapshot_.is_left_team.value_or(normalized_is_left_team);
+        snapshot_.match_time_s = gs.play_time;
+        snapshot_.own_score = side ? gs.score_left : gs.score_right;
+        snapshot_.opponent_score = side ? gs.score_right : gs.score_left;
         const PlayMode prev_play_mode = snapshot_.play_mode;
         snapshot_.play_mode = play_mode_from_token(gs.play_mode, side);
         snapshot_.play_mode_group = world::play_mode_group(snapshot_.play_mode, side);

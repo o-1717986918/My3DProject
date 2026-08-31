@@ -52,3 +52,25 @@ source. See `apollo-integration.md` for the exact provenance and reuse boundary.
 `OtherTasks/cs61a` is unrelated coursework and bundled third-party educational
 code.  It has no reference value for RCSSServerMJ motion or match behaviour and
 must be excluded from team packaging, linting, and test discovery.
+
+## Local RoboCup2D team archives
+
+The WSL reference directory `/home/win98/my_projects/rbc/teams` contains
+Cyrus2DBase, two HELIOS base variants, TheMY, and CppDNN. Their main value is
+not executable reuse in a 3D client but mature tactical decomposition:
+cooperative action types, direct/leading/through candidate generation,
+receiver-opponent arrival races, field evaluation, receive intentions, and
+compact pass communication.
+
+Reference value: **very high for planner concepts and tactical test cases;
+low for direct runtime or physics reuse**. RoboCup2D dash/turn/kick cycles,
+point-player kinematics, stamina, offside assumptions, and ball decay cannot
+be transferred into the MuJoCo humanoid runtime. They must be replaced with
+measured Apollo contact trajectories, rotation/locomotion reach time, fall
+risk, observation freshness, and 3D rule geometry.
+
+The local copies are extracted archives without Git metadata. Root license
+files and individual file headers are also mixed across MIT, LGPL, and GPL.
+The first strategy migration consequently uses a clean independent C++17
+implementation and records the exact inspected-file hashes and license
+boundary in `strategy-migration-implementation.md`.

@@ -6,6 +6,7 @@
 #include "src/decision/blackboard.h"
 #include "src/decision/high_level_command.h"
 #include "src/decision/role_manager.h"
+#include "src/strategy/action_planner.h"
 #include "src/world/world_snapshot.h"
 
 #include <optional>
@@ -19,7 +20,7 @@ public:
     virtual bool matches(const Blackboard& blackboard) const = 0;
     virtual HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
-        const Blackboard& blackboard) const = 0;
+        Blackboard& blackboard) const = 0;
 };
 
 /// Persistent attacker state carried between decision cycles.
@@ -29,6 +30,10 @@ struct APState {
     double previous_ball_distance{0.0};
     double kick_active_until_s{0.0};
     double next_kick_allowed_s{0.0};
+    double pass_commit_until_s{0.0};
+    std::uint8_t next_pass_sequence_id{0U};
+    std::optional<strategy::CooperativeAction> committed_pass;
+    std::optional<KickCommand> active_kick_command;
 };
 
 /// Generates the active-player command and set-play handoff state.
@@ -37,11 +42,13 @@ public:
     bool matches(const Blackboard& blackboard) const;
     HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
-        const Blackboard& blackboard,
-        RoleManager& role_manager) const;
+        Blackboard& blackboard,
+        RoleManager& role_manager,
+        bool enable_pass_strategy) const;
     void reset_state() const { state_ = {}; }
 private:
     mutable APState state_;
+    strategy::ActionPlanner action_planner_;
 };
 
 /// Walk-to-formation behavior shared by CBM, ST, CBL, CBR, and CDM.
@@ -55,7 +62,7 @@ public:
     bool matches(const Blackboard& blackboard) const override;
     HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
-        const Blackboard& blackboard) const override;
+        Blackboard& blackboard) const override;
 private:
     int role_id_;
     bool defensive_opponent_clip_;
@@ -68,7 +75,7 @@ public:
     bool matches(const Blackboard& blackboard) const override;
     HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
-        const Blackboard& blackboard) const override;
+        Blackboard& blackboard) const override;
     void reset_state() const {}
 };
 
@@ -80,7 +87,8 @@ int current_role_from_blackboard(const Blackboard& blackboard);
 /// Selects the behavior matching the current role, if one is available.
 std::optional<HighLevelCommand> select_role_behavior(
     const world::WorldSnapshot& snapshot,
-    const Blackboard& blackboard,
-    RoleManager& role_manager);
+    Blackboard& blackboard,
+    RoleManager& role_manager,
+    bool enable_pass_strategy);
 
 }  // namespace decision

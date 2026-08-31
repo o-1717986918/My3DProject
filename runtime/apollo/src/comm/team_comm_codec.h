@@ -23,6 +23,7 @@ public:
     static std::vector<std::uint8_t> encode(const TeamCommPacket& packet);
     static TeamCommPacket decode(const std::vector<std::uint8_t>& encoded);
     static TeamCommRecord to_record(const TeamCommPacket& packet);
+    static PassIntentRecord to_pass_intent_record(const TeamCommPacket& packet);
 };
 
 }  // namespace comm

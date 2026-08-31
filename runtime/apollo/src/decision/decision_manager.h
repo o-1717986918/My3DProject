@@ -7,6 +7,7 @@
 #include "src/decision/blackboard.h"
 #include "src/decision/high_level_command.h"
 #include "src/decision/role_manager.h"
+#include "src/strategy/action_planner.h"
 #include "src/world/world_snapshot.h"
 
 namespace decision {
@@ -14,15 +15,18 @@ namespace decision {
 /// Owns persistent decision state and evaluates one command per world snapshot.
 class DecisionManager {
 public:
-    DecisionManager();
+    explicit DecisionManager(bool enable_pass_strategy = true);
 
     HighLevelCommand decide(const world::WorldSnapshot& snapshot);
     const Blackboard& blackboard() const;
+    const strategy::PlanningResult* strategy_plan() const;
+    const strategy::CooperativeAction* selected_cooperative_action() const;
 
 private:
     Blackboard blackboard_;
     RoleManager role_manager_;
     BehaviorTree behavior_tree_;
+    bool enable_pass_strategy_{true};
 };
 
 }  // namespace decision

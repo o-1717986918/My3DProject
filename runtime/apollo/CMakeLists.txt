@@ -88,6 +88,16 @@ add_library(comm_core
     src/comm/team_comm_manager.cc
 )
 
+add_library(strategy_core
+    src/strategy/action_planner.cc
+    src/strategy/ball_trajectory_model.cc
+    src/strategy/cooperative_action.cc
+    src/strategy/field_evaluator.cc
+    src/strategy/pass_candidate_generator.cc
+    src/strategy/reach_time_model.cc
+    src/strategy/tactical_state.cc
+)
+
 add_library(decision_core
     src/decision/blackboard.cc
     src/decision/behavior_tree.cc
@@ -129,6 +139,11 @@ target_include_directories(world_core
 )
 
 target_include_directories(comm_core
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_include_directories(strategy_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
@@ -177,6 +192,13 @@ target_compile_options(comm_core
         -Wpedantic
 )
 
+target_compile_options(strategy_core
+    PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+)
+
 target_compile_options(server_core
     PRIVATE
         -Wall
@@ -200,8 +222,9 @@ target_compile_options(behavior_core
 
 target_link_libraries(world_core PUBLIC robot_core)
 target_link_libraries(comm_core PUBLIC world_core)
+target_link_libraries(strategy_core PUBLIC world_core)
 target_link_libraries(server_core PUBLIC robot_core)
-target_link_libraries(decision_core PUBLIC world_core)
+target_link_libraries(decision_core PUBLIC world_core strategy_core)
 target_link_libraries(behavior_core PUBLIC robot_core world_core decision_core "${APOLLO_YAML_CPP_LINK}" "${ONNXRUNTIME_LIBRARY}")
 set_target_properties(behavior_core PROPERTIES
     BUILD_RPATH "${ONNXRUNTIME_ROOT}/lib"
@@ -231,4 +254,24 @@ if(BUILD_TESTING)
     target_include_directories(field_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(field_geometry_test PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME field_geometry_test COMMAND field_geometry_test)
+
+    add_executable(strategy_core_test tests/strategy_core_test.cc)
+    target_link_libraries(strategy_core_test PRIVATE strategy_core)
+    target_include_directories(strategy_core_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(strategy_core_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME strategy_core_test COMMAND strategy_core_test)
+
+    add_executable(team_comm_strategy_test tests/team_comm_strategy_test.cc)
+    target_link_libraries(team_comm_strategy_test PRIVATE comm_core)
+    target_include_directories(team_comm_strategy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(team_comm_strategy_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME team_comm_strategy_test COMMAND team_comm_strategy_test)
+
+    add_executable(decision_strategy_integration_test
+        tests/decision_strategy_integration_test.cc
+    )
+    target_link_libraries(decision_strategy_integration_test PRIVATE decision_core)
+    target_include_directories(decision_strategy_integration_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(decision_strategy_integration_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME decision_strategy_integration_test COMMAND decision_strategy_integration_test)
 endif()

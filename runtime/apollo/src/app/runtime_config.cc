@@ -56,6 +56,10 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
                 throw std::invalid_argument("--status-interval must be positive");
             }
             config.status_interval_cycles = static_cast<std::size_t>(value);
+        } else if (arg == "--disable-pass-strategy") {
+            config.enable_pass_strategy = false;
+        } else if (arg == "--enable-pass-strategy") {
+            config.enable_pass_strategy = true;
         }
     }
 

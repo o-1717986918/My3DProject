@@ -17,6 +17,8 @@ public:
     // drifts one side off the other.
     static constexpr const char* kKeyCurrentRole = "current_role";
     static constexpr const char* kKeyRolePos = "role_pos";
+    static constexpr const char* kKeyStrategyPlan = "strategy_plan";
+    static constexpr const char* kKeySelectedCooperativeAction = "selected_cooperative_action";
 
     template <typename T>
     void set(const std::string& key, T value) {

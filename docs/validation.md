@@ -15,6 +15,9 @@ recorded in `runtime/apollo/UPSTREAM.md`.
 - CMake `RelWithDebInfo` build with GCC/C++17: passed.
 - `runtime_config_test`: passed.
 - `field_geometry_test`: passed.
+- `strategy_core_test`: passed.
+- `team_comm_strategy_test`: passed.
+- `decision_strategy_integration_test`: passed.
 - Strict 1200-cycle Apollo 7v7 acceptance: passed.
 - Connections/joins/`PlayOn`/clean exits: 14/14/14/14.
 - Fatal client failures/server errors/illegal defense: 0/0/0.
@@ -31,12 +34,45 @@ geometry regression test.
 
 ## Automated checks
 
-- `pytest -q`: 40 passed (29 existing runtime checks plus 11 guarded
-  reference-posture checks).
+- `pytest -q`: 42 passed, including the targeted-pass log parser and physical
+  progress analyzer checks.
 - `PYTHONPATH=training pytest training/tests -q`: 43 passed in `my3d-rl`.
 - Client bytecode compilation: passed.
 - Shell syntax validation: passed.
 - Patch whitespace validation: passed.
+
+The strategy increment adds parser/outcome tests for targeted-pass telemetry.
+
+## One-step passing closure
+
+The release runtime now contains an independently implemented one-step
+direct/leading pass planner, eight-byte `Proposed/Ready` intent exchange,
+receiver movement, immediate pre-contact revalidation, safe forward-contact
+fallback, and physical-outcome telemetry. The strict deterministic pass gate
+completed with:
+
+```text
+cycles=600 clean_exits=14 connections=14 joins=14 play_on=14
+failures=0 server_errors=0 illegal_defense=0
+kick_samples=20 pass_plan_samples=48 pass_ready_samples=36
+targeted_pass_kick_samples=20 pass_contact_events=2
+activation_warnings=14
+```
+
+After the readiness hard-gate and one-second receiver-freshness regression
+fixes, the source-complete archive was rebuilt and extracted to a clean `/tmp`
+directory. Its packaged binary and assets passed the same 600-cycle strict
+gate: 14/14 clean exits, zero fatal errors or illegal defense, 11 exact
+targeted-pass samples, and one physical contact event.
+
+The preserved trace `/tmp/my3d-pass-scenario-final` contains one unique
+targeted release with a requested target distance of 4.823 m and 0.644 m
+maximum projected progress toward the target. Other trials were weaker,
+including 0.186 m progress and a miss. Therefore this gate proves the complete
+decision/communication/contact instrumentation path, but not a reliable
+short-pass skill or a completed reception. Parameterized directional kick
+training is the next physical blocker. Full evidence interpretation and its
+promotion gates are in `strategy-migration-implementation.md`.
 
 The tests cover canonical field orientation, perception freshness, joint-state
 mapping, finite/clamped motor output, beam lifecycle, attack phase transitions,
@@ -134,11 +170,11 @@ The minimum match loop is operational: legal active/passive kickoff formation,
 perception, canonical localisation, ball search, approach, alignment, repeated
 stable ball contact, learned four-direction recovery, set-play response,
 zone-based single-player ball ownership, forward support, and process shutdown.
-The accepted next stage is coordinated strategy development and evidence-based
-RoboCup2D algorithm migration. It starts with a strategy-to-execution contract,
-measured target-directed passing, and teammate intent communication before
-adding pass selection, off-ball support, marking, and bounded action chains.
-The complete gates are recorded in `docs/strategy-development-plan.md`.
+Coordinated strategy development is now active. Its first one-step pass loop
+has passed the strict 7v7 wiring/contact gate, while calibrated passing,
+receiver completion, through passes, complete intent lifecycle, off-ball
+support, marking, and bounded action chains remain open. The complete gates
+are recorded in `docs/strategy-development-plan.md`.
 
 The v4/GMR capability is present in the formal action stack behind explicit
 activation and integrity checks. It is not release-default locomotion: stable
