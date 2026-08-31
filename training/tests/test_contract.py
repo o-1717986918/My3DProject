@@ -4,6 +4,7 @@ from my3d_rl import load_policy_contract
 
 
 CONTRACT = Path(__file__).parents[1] / "contracts" / "kick_policy_v1.yaml"
+CONTRACT_V2 = Path(__file__).parents[1] / "contracts" / "kick_policy_v2.yaml"
 
 
 def test_kick_policy_contract_is_internally_consistent():
@@ -55,3 +56,16 @@ def test_joint_order_matches_rcssservermj_sensor_order():
         "rle5",
         "rle6",
     )
+
+
+def test_kick_v2_conditions_on_range_speed_and_action_mode():
+    contract = load_policy_contract(CONTRACT_V2)
+
+    assert contract.policy_name == "kick_policy_v2"
+    assert contract.observation_size == 96
+    assert contract.input_shape == (1, 96)
+    fields = dict(contract.observation_fields)
+    assert fields["target_distance"] == 1
+    assert fields["requested_ball_speed"] == 1
+    assert fields["desired_arrival_speed"] == 1
+    assert fields["action_mode"] == 3

@@ -18,7 +18,7 @@ from .contract import PolicyContract, load_policy_contract
 from .rcss_scene import DEFAULT_RESOURCE_ROOT, build_single_t1_soccer_model
 
 
-DEFAULT_CONTRACT = Path(__file__).parents[1] / "contracts" / "kick_policy_v1.yaml"
+DEFAULT_CONTRACT = Path(__file__).parents[1] / "contracts" / "kick_policy_v2.yaml"
 
 
 def default_config() -> config_dict.ConfigDict:
@@ -61,12 +61,14 @@ def default_config() -> config_dict.ConfigDict:
         ],
         ball_x_range=[-0.01, 0.08],
         ball_y_range=[-0.08, 0.08],
-        target_angle_range=[-0.35, 0.35],
+        target_angle_range=[-0.261799, 0.261799],
+        target_distance_range=[2.0, 5.0],
+        rolling_deceleration_mps2=0.08,
     )
 
 
 class DirectionalKick(mjx_env.MjxEnv):
-    """First-stage fixed-ball task with a deployable 90-value actor state."""
+    """Target-conditioned fixed-ball task with a deployable 96-value state."""
 
     def __init__(
         self,
@@ -158,7 +160,15 @@ class DirectionalKick(mjx_env.MjxEnv):
         return self._mjx_model
 
     def reset(self, rng: jax.Array) -> mjx_env.State:
-        rng, ball_x_rng, ball_y_rng, target_rng = jax.random.split(rng, 4)
+        (
+            rng,
+            ball_x_rng,
+            ball_y_rng,
+            target_rng,
+            distance_rng,
+            arrival_rng,
+            mode_rng,
+        ) = jax.random.split(rng, 7)
         qpos = jp.asarray(self._mj_model.qpos0)
         qvel = jp.zeros(self._mj_model.nv)
         ball_x = jax.random.uniform(
@@ -180,6 +190,22 @@ class DirectionalKick(mjx_env.MjxEnv):
             maxval=self._config.target_angle_range[1],
         )
         target_world = jp.array([jp.cos(target_angle), jp.sin(target_angle)])
+        target_distance = jax.random.uniform(
+            distance_rng,
+            minval=self._config.target_distance_range[0],
+            maxval=self._config.target_distance_range[1],
+        )
+        action_mode_index = jax.random.randint(mode_rng, (), 0, 3)
+        arrival_min = jp.array([0.4, 1.5, 1.0])[action_mode_index]
+        arrival_max = jp.array([1.2, 2.5, 2.0])[action_mode_index]
+        desired_arrival_speed = jax.random.uniform(
+            arrival_rng, minval=arrival_min, maxval=arrival_max
+        )
+        requested_ball_speed = jp.sqrt(
+            desired_arrival_speed * desired_arrival_speed
+            + 2.0 * self._config.rolling_deceleration_mps2 * target_distance
+        )
+        action_mode = jax.nn.one_hot(action_mode_index, 3)
 
         ctrl = jp.zeros(self._mj_model.nu)
         ctrl = ctrl.at[self._pos_actuator].set(self._default_pose)
@@ -198,15 +224,23 @@ class DirectionalKick(mjx_env.MjxEnv):
             "step": jp.array(0, dtype=jp.int32),
             "last_action": jp.zeros(self.action_size),
             "target_world": target_world,
+            "target_distance": target_distance,
+            "requested_ball_speed": requested_ball_speed,
+            "desired_arrival_speed": desired_arrival_speed,
+            "action_mode": action_mode,
             "initial_ball_xy": ball_pos[:2],
             "last_progress": jp.array(0.0),
         }
         metrics = {
             "reward/directional_velocity": jp.array(0.0),
             "reward/ball_progress": jp.array(0.0),
+            "reward/target_range": jp.array(0.0),
+            "reward/arrival_speed": jp.array(0.0),
+            "reward/corridor": jp.array(0.0),
             "reward/upright": jp.array(0.0),
             "cost/action_rate": jp.array(0.0),
             "cost/fall": jp.array(0.0),
+            "cost/overshoot": jp.array(0.0),
         }
         obs = self._get_obs(data, info)
         return mjx_env.State(
@@ -233,20 +267,34 @@ class DirectionalKick(mjx_env.MjxEnv):
         ball_xy = data.xpos[self._ball_body, :2]
         ball_vel_xy = data.qvel[self._ball_dof : self._ball_dof + 2]
         target = state.info["target_world"]
-        progress = jp.dot(ball_xy - state.info["initial_ball_xy"], target)
+        displacement = ball_xy - state.info["initial_ball_xy"]
+        progress = jp.dot(displacement, target)
+        lateral_error = jp.dot(displacement, jp.array([-target[1], target[0]]))
         directional_velocity = jp.clip(jp.dot(ball_vel_xy, target), 0.0, 6.0)
         progress_delta = jp.clip(progress - state.info["last_progress"], -0.1, 0.1)
+        remaining_distance = state.info["target_distance"] - progress
+        target_range = jp.exp(-2.0 * jp.abs(remaining_distance))
+        arrival_speed = target_range * jp.exp(
+            -2.0 * jp.abs(directional_velocity - state.info["desired_arrival_speed"])
+        )
+        corridor = jp.exp(-8.0 * jp.square(lateral_error))
+        before_target = (remaining_distance >= -0.25).astype(jp.float32)
+        overshoot = jp.maximum(-remaining_distance, 0.0)
         upright = jp.clip(torso_xmat[2, 2], 0.0, 1.0)
         action_rate = jp.sum(jp.square(action - state.info["last_action"]))
         fall = (torso_height < 0.35) | (torso_xmat[2, 2] < 0.0)
         invalid = jp.isnan(data.qpos).any() | jp.isnan(data.qvel).any()
 
         reward_terms = {
-            "directional_velocity": 2.0 * directional_velocity,
+            "directional_velocity": 1.5 * directional_velocity * before_target,
             "ball_progress": 20.0 * progress_delta,
+            "target_range": 1.0 * target_range,
+            "arrival_speed": 0.75 * arrival_speed,
+            "corridor": 0.15 * corridor,
             "upright": 0.2 * upright,
             "action_rate": -0.01 * action_rate,
             "fall": -5.0 * fall.astype(jp.float32),
+            "overshoot": -2.0 * overshoot,
         }
         reward = sum(reward_terms.values()) * self.dt
 
@@ -259,9 +307,13 @@ class DirectionalKick(mjx_env.MjxEnv):
             {
                 "reward/directional_velocity": directional_velocity,
                 "reward/ball_progress": progress_delta,
+                "reward/target_range": target_range,
+                "reward/arrival_speed": arrival_speed,
+                "reward/corridor": corridor,
                 "reward/upright": upright,
                 "cost/action_rate": action_rate,
                 "cost/fall": fall.astype(jp.float32),
+                "cost/overshoot": overshoot,
             }
         )
         return state.replace(
@@ -301,6 +353,10 @@ class DirectionalKick(mjx_env.MjxEnv):
                     [ball_local_vel_xy[0], ball_local_vel_xy[1], ball_world_vel[2]]
                 ),
                 target_local,
+                jp.array([info["target_distance"]]),
+                jp.array([info["requested_ball_speed"]]),
+                jp.array([info["desired_arrival_speed"]]),
+                info["action_mode"],
                 jp.array([0.0, 1.0]),
                 jp.array([jp.sin(phase), jp.cos(phase)]),
                 jp.array([0.0, 1.0, 0.0]),

@@ -26,6 +26,10 @@ struct RuntimeConfig {
     std::size_t status_interval_cycles{0U};
     /// Enables the bounded one-step pass planner and pass-intent protocol.
     bool enable_pass_strategy{true};
+    /// Enables the experimental target/speed-conditioned contact macro.
+    /// The validated fixed forward contact remains the default until server
+    /// calibration passes the R1 promotion gate.
+    bool enable_parameterized_kick{false};
 
     /// Parses supported command-line options and preserves unspecified defaults.
     static RuntimeConfig from_args(int argc, char* argv[]);

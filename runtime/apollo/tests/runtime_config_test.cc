@@ -35,13 +35,13 @@ int main() {
         "ApolloCodeBase", "--team", "My3D", "--player-number", "7",
         "--host", "localhost", "--port", "61000", "--max-cycles", "800",
         "--status-interval", "20",
-        "--disable-pass-strategy",
+        "--disable-pass-strategy", "--enable-parameterized-kick",
     });
 
     if (config.team_name != "My3D" || config.player_number != 7 ||
         config.host != "localhost" || config.port != 61000 ||
         config.max_cycles != 800U || config.status_interval_cycles != 20U ||
-        config.enable_pass_strategy) {
+        config.enable_pass_strategy || !config.enable_parameterized_kick) {
         std::cerr << "valid runtime arguments were not parsed correctly\n";
         return 1;
     }
@@ -50,6 +50,20 @@ int main() {
         "ApolloCodeBase", "--disable-pass-strategy", "--enable-pass-strategy"});
     if (!enabled.enable_pass_strategy) {
         std::cerr << "pass strategy could not be re-enabled\n";
+        return 1;
+    }
+
+    const app::RuntimeConfig safe_default = parse({"ApolloCodeBase"});
+    if (safe_default.enable_parameterized_kick) {
+        std::cerr << "experimental parameterized kick was enabled by default\n";
+        return 1;
+    }
+
+    const app::RuntimeConfig kick_disabled = parse({
+        "ApolloCodeBase", "--enable-parameterized-kick",
+        "--disable-parameterized-kick"});
+    if (kick_disabled.enable_parameterized_kick) {
+        std::cerr << "parameterized kick could not be disabled\n";
         return 1;
     }
 

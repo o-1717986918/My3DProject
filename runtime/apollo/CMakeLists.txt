@@ -112,6 +112,7 @@ add_library(decision_core
 add_library(behavior_core
     src/behavior/getup_runner.cc
     src/behavior/keyframe_runner.cc
+    src/behavior/kick_execution_profile.cc
     src/behavior/motion_manager.cc
     src/behavior/onnx_session.cc
     src/behavior/walk_runner.cc
@@ -274,4 +275,13 @@ if(BUILD_TESTING)
     target_include_directories(decision_strategy_integration_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(decision_strategy_integration_test PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME decision_strategy_integration_test COMMAND decision_strategy_integration_test)
+
+    add_executable(kick_execution_profile_test
+        tests/kick_execution_profile_test.cc
+        src/behavior/kick_execution_profile.cc
+    )
+    target_link_libraries(kick_execution_profile_test PRIVATE world_core)
+    target_include_directories(kick_execution_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(kick_execution_profile_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME kick_execution_profile_test COMMAND kick_execution_profile_test)
 endif()

@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Evaluate a serialized kick teacher under held-out ball placement noise."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+
+from my3d_rl.kick_teacher import (
+    KickTeacherEvaluator,
+    KickTeacherSpec,
+    kick_trial_success,
+)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("manifest", type=Path)
+    parser.add_argument("--trials", type=int, default=20)
+    parser.add_argument("--seed", type=int, default=2201)
+    parser.add_argument("--ball-x-min", type=float, default=-0.01)
+    parser.add_argument("--ball-x-max", type=float, default=0.08)
+    parser.add_argument("--ball-y-min", type=float, default=-0.08)
+    parser.add_argument("--ball-y-max", type=float, default=0.08)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    if args.trials < 1:
+        raise ValueError("--trials must be positive")
+    if args.ball_x_min > args.ball_x_max or args.ball_y_min > args.ball_y_max:
+        raise ValueError("ball offset minimum must not exceed maximum")
+
+    source = json.loads(args.manifest.read_text(encoding="utf-8"))
+    raw_spec = source["spec"]
+    spec = KickTeacherSpec(
+        target_distance_m=float(raw_spec["target_distance_m"]),
+        target_angle_deg=float(raw_spec["target_angle_deg"]),
+        requested_ball_speed_mps=float(raw_spec["requested_ball_speed_mps"]),
+        duration_s=float(raw_spec["duration_s"]),
+        evaluation_duration_s=float(raw_spec.get("evaluation_duration_s", 3.0)),
+        control_dt_s=float(raw_spec["control_dt_s"]),
+        simulation_dt_s=float(raw_spec["simulation_dt_s"]),
+    )
+    parameters = np.asarray(source["parameters"], dtype=np.float64)
+    evaluator = KickTeacherEvaluator(spec)
+    rng = np.random.default_rng(args.seed)
+    trials: list[dict[str, object]] = []
+    for trial_index in range(args.trials):
+        ball_x = float(rng.uniform(args.ball_x_min, args.ball_x_max))
+        ball_y = float(rng.uniform(args.ball_y_min, args.ball_y_max))
+        metrics = evaluator.rollout(
+            parameters,
+            ball_x_offset_m=ball_x,
+            ball_y_offset_m=ball_y,
+        )
+        trials.append(
+            {
+                "trial": trial_index,
+                "ball_x_offset_m": ball_x,
+                "ball_y_offset_m": ball_y,
+                "success": kick_trial_success(metrics),
+                "metrics": metrics,
+            }
+        )
+
+    successful = sum(bool(trial["success"]) for trial in trials)
+    report = {
+        "purpose": "r1_kick_teacher_held_out_evaluation",
+        "source_manifest": str(args.manifest),
+        "seed": args.seed,
+        "trial_count": args.trials,
+        "successful_trials": successful,
+        "success_rate": successful / args.trials,
+        "gate": {
+            "required_successes": int(np.ceil(0.9 * args.trials)),
+            "passed": successful >= int(np.ceil(0.9 * args.trials)),
+            "range_tolerance_m": 0.5,
+            "corridor_half_width_m": 0.5,
+            "launch_speed_tolerance_mps": 1.0,
+        },
+        "ball_offset_ranges_m": {
+            "x": [args.ball_x_min, args.ball_x_max],
+            "y": [args.ball_y_min, args.ball_y_max],
+        },
+        "trials": trials,
+    }
+    serialized = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(serialized, encoding="utf-8")
+    print(serialized, end="")
+
+
+if __name__ == "__main__":
+    main()

@@ -3,10 +3,14 @@
 This directory contains reproducible training inputs and deployment contracts.
 Generated runs belong under `/home/win98/rl_runs` and are not committed.
 
-The first task is `kick_policy_v1`: a 50 Hz, ball-aware residual joint-position
-policy for Booster T1. It is intentionally separate from the deterministic team
-decision maker. See [`../docs/rl-training-plan.md`](../docs/rl-training-plan.md)
-for the acceptance gates.
+The preserved first task is `kick_policy_v1`: a 50 Hz direction-only residual
+joint-position contract for Booster T1. Active R1 development uses
+`kick_policy_v2`, which adds requested range, launch speed, arrival speed and
+pass/shot/clear mode to the deployable observation. It remains intentionally
+separate from the deterministic team decision maker until the documented
+physics, ONNX and server gates pass. See
+[`../docs/rl-training-plan.md`](../docs/rl-training-plan.md) for the acceptance
+gates.
 
 Fast locomotion keeps immutable `run_policy_v1`/`v2` compatibility contracts.
 The experimental v3/v4 contracts add reference-centred residual decoding;
@@ -242,6 +246,31 @@ PYTHONPATH=training python training/tools/slice_motion_reference.py \
 Conservative motion transfer uses the versioned `legacy_motion_track_v3`
 profile. Its adaptive-KL range is explicitly bounded to `2.5e-7..2e-6`; the
 Brax default lower bound (`1e-5`) must not be used for this profile.
+
+Build a deterministic kick teacher before PPO exploration:
+
+```bash
+PYTHONPATH=training python training/tools/optimize_kick_teacher.py \
+  --target-distance 2.0 --target-angle 0 --requested-speed 1.43 \
+  --population 32 --generations 6 --robust-samples 1 --seed 1701 \
+  --output-prefix /home/win98/rl_runs/kick-teacher/kick-v2-2m-center-s1701
+```
+
+The optimizer replays Apollo's accepted walk policy against exact RCSS assets,
+adds a bounded 14-value contact trajectory, and writes a hashed NPZ plus JSON
+manifest outside Git. A teacher remains non-promotable until it passes held-out
+ball-placement evaluation:
+
+```bash
+PYTHONPATH=training python training/tools/evaluate_kick_teacher.py \
+  /home/win98/rl_runs/kick-teacher/kick-v2-2m-center-s1701.json \
+  --trials 20 --seed 2201 \
+  --output /home/win98/rl_runs/kick-teacher/kick-v2-2m-center-s1701-eval.json
+```
+
+Do not use repeated fixed-trajectory tuning to hide placement failures. Generate
+conditioned demonstrations and train the v2 range/direction/speed policy when a
+single teacher cannot cover the declared ball-pose envelope.
 
 Exercise one real PPO training/checkpoint path (integration test only):
 

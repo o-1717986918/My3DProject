@@ -6,6 +6,7 @@
 #include "src/app/runtime_config.h"
 #include "src/decision/high_level_command.h"
 #include "src/behavior/getup_runner.h"
+#include "src/behavior/kick_execution_profile.h"
 #include "src/behavior/keyframe_runner.h"
 #include "src/behavior/walk_runner.h"
 #include "src/robot/joint_targets.h"
@@ -42,9 +43,6 @@ private:
 
     // Maximum getup duration (seconds) before forcing recovery.
     static constexpr double kGetUpTimeoutS = 6.0;
-    static constexpr double kKickForwardDurationS = 0.65;
-    static constexpr double kKickTotalDurationS = 1.0;
-
     WalkRunner walk_runner_;
     KeyframeRunner neutral_runner_;
     GetupRunner getup_runner_;
@@ -52,12 +50,15 @@ private:
     bool get_up_phase_reset_pending_{false};
     double get_up_start_time_{0.0};
     double kick_start_time_{0.0};
+    bool parameterized_kick_enabled_{false};
+    KickExecutionProfile kick_profile_;
 
     MotionStepResult step_get_up(
         const world::WorldSnapshot& snapshot,
         bool reset);
     MotionStepResult step_kick(
         const world::WorldSnapshot& snapshot,
+        const decision::KickCommand& command,
         bool reset);
     void enter_get_up_phase(
         GetUpPhase phase,

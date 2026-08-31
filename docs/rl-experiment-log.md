@@ -505,3 +505,44 @@ the stable control observed five. This passes the new integration gate but not
 the running-policy R2 gate. `MY3D_RUN_BACKEND` therefore defaults to `stable`,
 the model/reference remain external and local-only, and v4 retains rejected
 release status.
+
+## Target-conditioned kick foundation and CEM teacher — 2026-08-31
+
+R1 now has an executable parameter boundary on both sides. `KickCommand`
+target, requested speed and mode metadata can drive an opt-in bounded contact
+profile; the flag defaults off and every invalid, non-finite, over-angle or
+over-speed request returns the exact accepted fixed contact. The training
+contract advances from the preserved 90-value direction-only v1 contract to
+`kick_policy_v2`, a 96-value observation containing target distance, requested
+launch speed, desired arrival speed, and pass/shot/clear mode.
+
+A deterministic exact-MuJoCo CEM route was added before policy training. The
+first neutral-pose keyframe search made upright contact but moved the ball only
+0.076--0.094 m and was rejected. Re-centering the same bounded 14-parameter
+trajectory on Apollo's accepted walk policy changed the result materially.
+Nominal 2 m centre-target searches with seeds 1701, 1702 and 1703 produced
+2.033, 2.075 and 2.429 m maximum progress, closest-target lateral errors of
+0.046, 0.115 and 0.050 m, and no falls. This exceeds the earlier physical
+0.186--0.644 m contact baseline in the exact-asset training simulator.
+
+The measurement was then corrected so distance is scored at closest passage
+over a three-second rollout and launch-speed error is explicit. A small
+speed-aware search reached the 2 m plane within 0.0014 m, with 0.223 m lateral
+error, 2.129 m/s maximum forward ball speed versus the 1.43 m/s request, and no
+fall. It is useful teacher evidence but is not a promoted kick.
+
+Held-out placement evaluation exposed the binding limitation. The nominal
+teacher passed only 5/20 trials over ball offsets
+`x=[-0.01, 0.08] m`, `y=[-0.08, 0.08] m`. A five-placement robust-objective
+ablation passed only 1/20 on the same unseen seed. All 20 robust trials made
+contact and remained upright, but direction and range varied with ball pose.
+The fixed-trajectory route is therefore closed as a universal executor. Its
+accepted role is to generate per-condition demonstrations for the v2
+target/ball-conditioned residual policy; further single-trajectory tuning is
+not justified.
+
+All manifests and NPZ trajectories remain under
+`/home/win98/rl_runs/kick-teacher`. None was copied into the competition
+runtime. The next R1 deliverable is a labeled multi-condition teacher dataset,
+supervised initialization, then randomized residual training and held-out
+ONNX/server evaluation.
