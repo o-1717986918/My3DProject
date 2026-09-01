@@ -48,9 +48,94 @@ def _sha256(path: Path) -> str:
 
 
 def _git_revision() -> str:
-    return subprocess.check_output(
+    revision = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], text=True, encoding="utf-8"
     ).strip()
+    status = subprocess.check_output(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        text=True,
+        encoding="utf-8",
+    )
+    if status:
+        raise RuntimeError("formal soccer-motion PPO requires a clean Git tree")
+    return revision
+
+
+def _external_new_directory(path: Path) -> Path:
+    if not path.is_absolute():
+        raise ValueError("run directory must be absolute")
+    resolved = path.resolve()
+    repository_root = Path(__file__).parents[2].resolve()
+    try:
+        resolved.relative_to(repository_root)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("run directory must stay outside the repository")
+    if resolved.exists():
+        raise FileExistsError(f"run directory already exists: {resolved}")
+    return resolved
+
+
+def _tree_sha256(path: Path) -> str:
+    if not path.is_dir():
+        raise FileNotFoundError(f"checkpoint directory does not exist: {path}")
+    digest = hashlib.sha256()
+    files = sorted(item for item in path.rglob("*") if item.is_file())
+    if not files:
+        raise ValueError(f"checkpoint directory is empty: {path}")
+    for item in files:
+        relative = item.relative_to(path).as_posix().encode("utf-8")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(item.read_bytes()).hexdigest().encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _load_curriculum_gate(
+    comparison_path: Path, restore_checkpoint: Path
+) -> dict[str, Any]:
+    if not comparison_path.is_file():
+        raise FileNotFoundError(comparison_path)
+    if not restore_checkpoint.is_dir():
+        raise FileNotFoundError(restore_checkpoint)
+    comparison = json.loads(comparison_path.read_text(encoding="utf-8"))
+    if comparison.get("purpose") != "k1_paired_exact_cpu_policy_comparison":
+        raise ValueError("curriculum evidence is not a paired exact-CPU comparison")
+    if comparison.get("curriculum_advance_passed") is not True:
+        raise ValueError("curriculum evidence did not authorize PPO initialization")
+    candidate_path = Path(comparison.get("candidate", ""))
+    if not candidate_path.is_file():
+        raise FileNotFoundError("curriculum candidate evaluation is unavailable")
+    candidate_sha256 = _sha256(candidate_path)
+    if candidate_sha256 != comparison.get("candidate_sha256"):
+        raise ValueError("curriculum candidate evaluation hash differs")
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    if candidate.get("purpose") != "k1_exact_cpu_fixed_motion_phase_grid":
+        raise ValueError("curriculum candidate is not an exact-CPU evaluation")
+    evaluated_checkpoint = Path(candidate.get("checkpoint", ""))
+    if evaluated_checkpoint.resolve() != restore_checkpoint.resolve():
+        raise ValueError(
+            "restore checkpoint differs from the curriculum-gated candidate"
+        )
+    return {
+        "comparison": str(comparison_path.resolve()),
+        "comparison_sha256": _sha256(comparison_path),
+        "candidate_evaluation": str(candidate_path.resolve()),
+        "candidate_evaluation_sha256": candidate_sha256,
+        "checkpoint_tree_sha256": _tree_sha256(restore_checkpoint),
+        "checkpoint_tree_hash_algorithm": (
+            "sha256_over_sorted_relative_path_nul_file_sha256_newline"
+        ),
+        "paired_trials": int(comparison["paired_trials"]),
+        "completion_rate_delta": float(comparison["completion_rate_delta"]),
+        "mean_survival_fraction_delta": float(
+            comparison["mean_survival_fraction_delta"]
+        ),
+        "curriculum_advance_passed": True,
+        "authorization_scope": "ppo_initialization_only_not_runtime_promotion",
+    }
 
 
 def _json_value(value: Any) -> Any:
@@ -95,6 +180,14 @@ def main() -> None:
     parser.add_argument("--num-eval-envs", type=int, default=64)
     parser.add_argument("--seed", type=int, default=20260901)
     parser.add_argument("--restore-checkpoint", type=Path)
+    parser.add_argument(
+        "--curriculum-comparison",
+        type=Path,
+        help=(
+            "paired exact-CPU comparison that authorized the restored "
+            "checkpoint for PPO initialization"
+        ),
+    )
     args = parser.parse_args()
     if min(
         args.num_timesteps,
@@ -105,6 +198,19 @@ def main() -> None:
         raise ValueError("training counts must be positive")
     if not args.failure_report.is_file():
         raise FileNotFoundError(args.failure_report)
+    if (args.restore_checkpoint is None) != (args.curriculum_comparison is None):
+        raise ValueError(
+            "restore-checkpoint and curriculum-comparison must be supplied together"
+        )
+
+    run_dir = _external_new_directory(args.run_dir)
+    revision = _git_revision()
+    curriculum_gate = (
+        _load_curriculum_gate(args.curriculum_comparison, args.restore_checkpoint)
+        if args.restore_checkpoint is not None
+        and args.curriculum_comparison is not None
+        else None
+    )
 
     contract = load_policy_contract(args.contract)
     profile = get_ppo_profile(args.profile)
@@ -137,11 +243,11 @@ def main() -> None:
     eval_env = FiniteSoccerMotionTracking(
         eval_corpus, config_overrides=overrides, contract=contract
     )
-    args.run_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_dir = args.run_dir / "checkpoints"
-    progress_path = args.run_dir / "progress.jsonl"
-    dashboard_path = args.run_dir / "tensorboard"
-    manifest_path = args.run_dir / "run-manifest.json"
+    run_dir.mkdir(parents=True, exist_ok=False)
+    checkpoint_dir = run_dir / "checkpoints"
+    progress_path = run_dir / "progress.jsonl"
+    dashboard_path = run_dir / "tensorboard"
+    manifest_path = run_dir / "run-manifest.json"
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "status": "running",
@@ -156,7 +262,7 @@ def main() -> None:
         "devices": [str(device) for device in jax.devices()],
         "python": platform.python_version(),
         "jax": jax.__version__,
-        "git_revision": _git_revision(),
+        "git_revision": revision,
         "seed": args.seed,
         "requested_timesteps": args.num_timesteps,
         "minimum_epoch_timesteps": minimum_epoch_timesteps,
@@ -175,10 +281,17 @@ def main() -> None:
             if args.restore_checkpoint
             else None
         ),
+        "curriculum_gate": curriculum_gate,
         "visualization": {
             "format": "tensorboard_event",
             "log_dir": str(dashboard_path.resolve()),
             "launch": f"tensorboard --logdir {dashboard_path.resolve()} --port 6006",
+            "checkpoint_replay": (
+                "PYTHONPATH=training python "
+                "training/tools/view_soccer_motion_policy.py "
+                f"{args.corpus_root.resolve()} --checkpoint <checkpoint> "
+                f"--profile {args.profile} --hold"
+            ),
         },
     }
     manifest_path.write_text(

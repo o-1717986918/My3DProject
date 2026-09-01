@@ -344,6 +344,23 @@ PYTHONPATH=training conda run -n my3d-rl python \
   --split validation --hold
 ```
 
+Any retained actor checkpoint can also be replayed under the same exact-CPU
+closed-loop dynamics used by the fixed-grid evaluator. This is the visual
+checkpoint surface for PPO/BC/DAgger rather than a kinematic teacher trace:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/view_soccer_motion_policy.py \
+  /home/win98/rl_runs/paid-k0/corpus-semantic-v4 \
+  --checkpoint /path/to/checkpoint --profile soccer_motion_residual_v3 \
+  --motion-index 0 --loops 2 --hold
+```
+
+The viewer reports the selected motion, terminal reason, joint RMSE and foot
+contact agreement. It remains separate from the vectorized accelerator loop;
+during formal PPO, TensorBoard is continuous and a checkpoint replay is
+launched only at declared evaluation boundaries.
+
 TensorBoard is a measurement surface, not a promotion gate. Candidate choice
 still uses held-out exact-CPU, Warp/ONNX parity, three seeds and RCSSServer
 replay. The MuJoCo viewer is deliberately separate from accelerated training
@@ -389,6 +406,26 @@ motion-specific phase correction. Adding that correction to the already
 distilled student double-counts the teacher and is invalid. DAgger retraining
 may freeze the feature extractor with `--trainable-layers output`; it still
 requires a new exact-CPU grid that excludes all teacher and DAgger start frames.
+
+State-feedback DAgger additionally enables a short exact-CPU candidate search
+with `--state-feedback-horizon`, `--minimum-state-feedback-improvement` and
+`--maximum-state-feedback-action-delta`. Formal PPO restoration is deliberately
+fail-closed: `train_soccer_motion.py` requires both the restored checkpoint and
+the paired exact-CPU comparison that has `curriculum_advance_passed=true`.
+The comparison, candidate report and checkpoint-tree hashes are copied into the
+run manifest:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/train_soccer_motion.py \
+  /home/win98/rl_runs/paid-k0/corpus-semantic-v4 \
+  --failure-report /home/win98/rl_runs/paid-k1/semantic-apollo-runtime-prefailure-v2.json \
+  --contract training/contracts/soccer_motion_policy_v2.yaml \
+  --profile soccer_motion_residual_v3 --stage reference_track \
+  --restore-checkpoint /path/to/state-feedback/checkpoint \
+  --curriculum-comparison /path/to/paired-comparison.json \
+  --run-dir /home/win98/rl_runs/paid-k1/ppo-reference-<name>
+```
 
 ## Release rule
 

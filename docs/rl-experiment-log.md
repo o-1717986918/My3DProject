@@ -1047,3 +1047,32 @@ remaining limitation is the open-loop phase teacher, not a lack of supervised
 optimizer steps. A state-feedback short-horizon exact-CPU teacher is required
 before PPO resume. Full paths and hashes are in
 `training/locks/paid_k1b_2026_09_01.yaml`.
+
+## PAiD K1-B state-feedback curriculum gate — 2026-09-01
+
+The remaining causal defect was addressed with an exact-CPU, short-horizon
+teacher that evaluates bounded corrections from the state actually visited by
+the student. Its two-frame search accepts a label only when local cost improves
+by at least `0.001`, and clips the label to `0.2` action units from the student.
+The formal beta-zero collection covers 388 student episodes and selects 12,717
+useful state-feedback labels; the aggregate has 19,551 frames. An output-head-
+only 1,000-step clone preserves the retained feature extractor and critic.
+
+The 679-trial tuning grid improved mean survival from 0.56025 to 0.57919. The
+final grid and its thresholds were committed before evaluation; it excludes
+the state-feedback training starts and the complete tuning grid. On 777 paired
+trials the original BC completes 256 and the candidate 266. Transitions are
+13 candidate-only versus three baseline-only (`p=0.0106354`). Mean survival
+improves by 0.021339 with 367 improvements, 70 regressions and 340 ties
+(`p=5.73e-50`); tracking tolerances pass. Both the ordinary exact-grid gate and
+the narrower PPO-curriculum gate pass.
+
+The state-feedback checkpoint therefore replaces the original BC as the K1
+training actor and authorizes PPO initialization only. It is not an Apollo
+runtime model. Formal PPO now requires the passing comparison file, verifies
+that it names the exact restored checkpoint, hashes the checkpoint tree and
+refuses dirty/in-repository runs. TensorBoard stays live at
+`http://localhost:6006`; the new exact-CPU checkpoint viewer supplies visual
+closed-loop replays at evaluation boundaries. All evidence hashes and the
+remaining three-seed, ball-outcome and server-replay gates are locked in
+`training/locks/paid_k1b_2026_09_01.yaml`.

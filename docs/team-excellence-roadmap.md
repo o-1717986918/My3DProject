@@ -436,6 +436,27 @@ short-horizon state feedback on observed failure windows; more fixed-phase BC
 or PPO steps are not justified. Evidence is locked in
 `training/locks/paid_k1b_2026_09_01.yaml`.
 
+K1-B state-feedback checkpoint (2026-09-01): the exact-CPU teacher now queries
+bounded student-relative actions over a two-frame horizon and retains only
+labels whose local cost improvement is at least `0.001`. It selected 12,717
+student-state labels. A conservative 1,000-step output-head clone was first
+selected on a 679-trial tuning grid, then evaluated once on the predeclared
+untouched 777-trial grid that excludes both the state-feedback dataset and the
+tuning report. Completion improves from 256 to 266 (13 candidate-only, three
+baseline-only, one-sided exact McNemar `p=0.01064`) and mean survival improves
+by `0.02134` with 367 improvements versus 70 regressions (exact sign
+`p=5.73e-50`). Tracking tolerances pass. This closes the predeclared gate for
+PPO initialization and makes the state-feedback clone the retained K1 actor.
+It does not authorize Apollo runtime deployment: three-seed PPO, ball-contact,
+direction/arrival-speed and RCSSServer replay gates remain open.
+
+Formal PPO resume is now evidence-bound and fail-closed. The trainer requires
+the passing paired comparison alongside its restored checkpoint, verifies the
+candidate report and checkpoint identity, records all hashes, requires a clean
+Git tree and an external new run directory, and emits continuous TensorBoard
+metrics. A separate exact-CPU checkpoint viewer shows the actual closed-loop
+policy at declared evaluation boundaries without slowing vectorized training.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

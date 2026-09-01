@@ -1,7 +1,7 @@
 schema_version: 1
 recorded_at: 2026-09-01
-stage: paid_k1b_full_corpus_bc_and_closed_loop_dagger
-status: behavior_clone_retained_dagger_not_promoted
+stage: paid_k1b_full_corpus_bc_closed_loop_dagger_and_state_feedback
+status: state_feedback_clone_retained_for_ppo_initialization_only
 
 source:
   corpus_root: /home/win98/rl_runs/paid-k0/corpus-semantic-v4
@@ -104,10 +104,11 @@ visualization:
   behavior_clone_event_sha256: e091b4067d682afebc10060b1299e86e5f7d816dbb0639157eafd9d5e2b3eafe
   corrected_dagger_event_sha256: 5899e88634f4219e134c483b44a472adf4196e1910120dd65492a1ff72513e2a
   conservative_dagger_bc_event_sha256: c0ce160ff48547de381d0141975a52d008c33ca90e8416741fc344ca70bd9096
+  state_feedback_collection_event_sha256: 69950c90cb24c1e54aef1c6f9293519a372ad8abc19740305d21fba13495ae9a
   dashboard: http://localhost:6006
 
 state_feedback_curriculum_candidate:
-  status: final_untouched_gate_pending
+  status: final_untouched_gate_passed
   teacher_git_revision: cd8f3a8e19c7170209904d98911bcfc84bc8dbb9
   teacher_horizon_frames: 2
   minimum_local_cost_improvement: 0.001
@@ -127,7 +128,7 @@ state_feedback_curriculum_candidate:
     trials: 679
     baseline_report_sha256: 35d9bf6a3978ef2f38ca941d98cc62dd2a060c74b58a90d4ebcc7ccb21c5eb73
     candidate_report_sha256: 6eadfa85fc308f60370ae5b8c8b6ad62fc8f50d77bc1d8120442ccf11c95875b
-    comparison_sha256: 2c5448be36b1cba0d5001585495bc48968941faac0ef6dc7434d68a671fe0ed7
+    comparison_sha256: 8a72c7547380c420c1f8c7b9d3ac17528b775cfa3c4c49dc754080a2f8d496a1
     baseline_completions: 196
     candidate_completions: 198
     baseline_mean_survival_fraction: 0.5602500949
@@ -147,14 +148,40 @@ state_feedback_curriculum_candidate:
       survival_improvements_exceed_regressions: true
       one_sided_exact_survival_sign_p_at_most: 0.01
       tracking_tolerance_required: true
+  final_untouched_result:
+    baseline_report: /home/win98/rl_runs/paid-k1/k1b-state-feedback-final96/base-bc-s20260951.json
+    baseline_report_sha256: a7fdef078ca7f1f9b45546347039c76ae3fc4b4859cc07c5738b4d95afb280c6
+    candidate_report: /home/win98/rl_runs/paid-k1/k1b-state-feedback-final96/candidate-s20260962.json
+    candidate_report_sha256: b8c82d074bf65b08a503507783ad80d083a0a74dc82662117232215c5f415f55
+    comparison: /home/win98/rl_runs/paid-k1/k1b-state-feedback-final96/comparison-s20260962.json
+    comparison_sha256: b3e345fc0757f768b49ef2a738f70f34e18bad9d5fbae8199e4a153f3986c7ee
+    trials: 777
+    baseline_completions: 256
+    candidate_completions: 266
+    candidate_only_completions: 13
+    baseline_only_completions: 3
+    completion_rate_delta: 0.0128700129
+    one_sided_exact_mcnemar_p: 0.0106353760
+    baseline_mean_survival_fraction: 0.5894196860
+    candidate_mean_survival_fraction: 0.6107587715
+    mean_survival_fraction_delta: 0.0213390855
+    survival_improvements: 367
+    survival_regressions: 70
+    survival_ties: 340
+    one_sided_exact_survival_sign_p: 5.7271321258e-50
+    tracking_tolerance_passed: true
+    exact_grid_promotion_gate_passed: true
+    ppo_curriculum_advance_gate_passed: true
+    authorization_scope: ppo_initialization_only_not_apollo_runtime_promotion
 
 decision:
-  current_retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-bc-formal-s20260951-v1/checkpoints/000000005000
+  current_retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
   runtime_promotable: false
-  ppo_resume_gate_passed: false
-  blocker: fixed_phase_teacher_is_not_state_feedback_and_corrected_dagger_lacks_significant_completion_gain
+  ppo_resume_gate_passed: true
+  blocker: three_seed_ppo_ball_contact_and_rcssserver_runtime_gates_remain_open
   next:
-    - implement_short_horizon_exact_cpu_state_feedback_teacher_on_failure_windows
-    - aggregate_only_state_feedback_labels_that_outperform_the_student_locally
-    - require_a_new_untouched_grid_before_any_ppo_resume
-    - keep_the_current_behavior_clone_as_fallback_and_ablation
+    - resume_reference_track_ppo_from_the_hash_bound_state_feedback_checkpoint
+    - compare_every_candidate_to_the_retained_checkpoint_on_blind_exact_cpu_grids
+    - repeat_the_retained_protocol_across_three_independent_seeds
+    - add_ball_contact_direction_arrival_speed_and_rcssserver_replay_gates
+    - keep_the_original_full_corpus_behavior_clone_as_fallback_and_ablation
