@@ -1,0 +1,113 @@
+schema_version: 1
+recorded_at: 2026-09-01
+stage: K1_finite_multi_motion_tracking
+status: experimental_not_promoted
+
+contracts:
+  policy_v1: training/contracts/soccer_motion_policy_v1.yaml
+  policy_v2: training/contracts/soccer_motion_policy_v2.yaml
+  environment: training/my3d_rl/soccer_motion_env.py
+  corpus_loader: training/my3d_rl/soccer_motion_corpus.py
+  cpu_replay: training/my3d_rl/soccer_motion_dynamics.py
+  trainer: training/tools/train_soccer_motion.py
+  fixed_seed_evaluator: training/tools/evaluate_soccer_motion_policy.py
+  exact_cpu_evaluator: training/tools/evaluate_soccer_motion_cpu.py
+  paired_comparator: training/tools/compare_soccer_motion_policy_evaluations.py
+
+local_evidence_root: /home/win98/rl_runs/paid-k1
+
+zero_residual_dynamic_ablation:
+  protocol:
+    scene: exact_RCSSServerMJ_soccer_world_plus_T1
+    control_hz: 50
+    phase_restarts_per_motion: 8
+    motions: 13
+    full_clip_completion: 0_of_13_for_every_method_and_gain_profile
+  legacy_25_0_6:
+    semantic:
+      report_sha256: e840e38ebf0dc7399cd79e651652a67a61701d25f8e6601163855248577faaa0
+      phase_completion_rate: 0.2692307692
+      mean_joint_rmse_rad: 0.0908364904
+      mean_contact_agreement: 0.8202264027
+    calibrated_gmr_body_ik:
+      report_sha256: 91245a85aba5caee6d0db81420992742a7efd2776beb0a408c5199b27d0ab6d0
+      phase_completion_rate: 0.25
+      mean_joint_rmse_rad: 0.0938558695
+      mean_contact_agreement: 0.7320755345
+  selected_run_v4_50_1_2:
+    semantic_report_sha256: a4835a921a164d1638465d13695761d167934d9bd6b3ce2bfa50c83e86ae1aad
+    gmr_report_sha256: 90d7241e56e8409dfc553ee0bc2b0b3942bb066702706d9d3b96400b01d5ad73
+    semantic_phase_completion_rate: 0.2980769231
+    gmr_phase_completion_rate: 0.2884615385
+  apollo_runtime_per_joint:
+    semantic:
+      report_sha256: 7ab5a5857ad58ed37e09f17af9f3fcaab119a719ff2dbbd3018e0c7d4d9c4b85
+      phase_completion_rate: 0.2980769231
+      mean_joint_rmse_rad: 0.0625
+      mean_contact_agreement: 0.8115
+    calibrated_gmr_body_ik:
+      report_sha256: 2124b0f23c8a1a4fa0398ac35f5bee65bcc696db2cefbd8a16696f407152f922
+      phase_completion_rate: 0.2980769231
+      mean_joint_rmse_rad: 0.0644
+      mean_contact_agreement: 0.7287
+  decision:
+    k1_parallel_primary: semantic
+    retain_gmr_ablation: true
+    reason: semantic_has_better_tracking_and_contact_under_equal_dynamic_protocol
+    gain_profile: apollo_runtime_per_joint
+
+training:
+  smoke:
+    manifest_sha256: 63eda2b9bce34e94a9eadc5b2391d06a46fc34abe489b4ba3acbbd28dfc3164e
+    checkpoint: train-semantic-smoke-s20260901/checkpoints/000000001024
+    status: pipeline_pass_only
+  policy_v1_scale_0_15:
+    conservative_manifest_sha256: a2d3a4c69650e2e0bbc219b1614912810bc379f91e00ed75637707300bdb349e
+    exploratory_manifest_sha256: 1bfffaaf7fc5db0bc36e2ded9b6e05e65d810a05740b4e619f812053ad521432
+    fixed_128_zero_successes: 36
+    fixed_128_candidate_successes: 36
+    decision: reject_no_effect
+  policy_v2_scale_0_35:
+    initial_manifest_sha256: 071e19235dd0109e9343444744c6c5ebbdbfd57e88a322694dca7dfa689f062c
+    prefailure_curriculum:
+      report_sha256: c5a6cd660d699d6c0f5fa14d4947cc0c48e91239ee25ba5ee29060865c06d2b5
+      kernel_frames: 25
+      lead_frames: 5
+    continued_manifest_sha256: f25f61a45e4ba5b3beb4ee6963f7d2f6e7a13bb506156a11ed774125cadeff0a
+    checkpoint: train-semantic-prefailure-v3-s20260904/checkpoints/000002359296
+    fixed_128_zero_successes: 36
+    fixed_128_candidate_successes: 39
+    decision: retain_experimental_pending_stronger_evidence
+
+exact_cpu_fixed_grid:
+  semantic:
+    baseline_report_sha256: 1fdb449b72ce8b7d130942d03b4c980014fb8dc818ab5e729a3f246d03af28fa
+    candidate_report_sha256: ecb8bf5c464c79954b06a63fad35c8600654513f93481257de3d03912d8c5233
+    comparison_sha256: 4d1c087b693b3524d800f26deb6a1ec6976d7cc1b474920cd27359813fdde355
+    trials: 104
+    baseline_successes: 31
+    candidate_successes: 35
+    candidate_only_successes: 4
+    baseline_only_successes: 0
+    one_sided_exact_mcnemar_p: 0.0625
+    promoted: false
+  gmr_transfer:
+    baseline_report_sha256: c24ddca111d9b1e552ce5a08309eec57fd1aba08deed13510284279d31edceed
+    candidate_report_sha256: 6c9ac0b4340851c48ec301a71190c72da33b2add7fd5707a380bbd9e408874eb
+    comparison_sha256: c36562dda611a4cfa398c3ecacb2392d20da5d522392e70c32a567a0f860eddc
+    trials: 104
+    baseline_successes: 31
+    candidate_successes: 34
+    candidate_only_successes: 4
+    baseline_only_successes: 1
+    one_sided_exact_mcnemar_p: 0.1875
+    promoted: false
+
+stop_and_next:
+  stop: do_not_add_more_steps_to_the_same_reward_only_ppo_branch
+  next:
+    - optimize_phase_level_residual_teachers_before_each_measured_failure
+    - behavior_clone_teacher_corrections_with_the_110_value_contract
+    - resume_ppo_only_after_teacher_exact_cpu_improves_the_paired_grid
+    - keep_all_external_and_derived_PAiD_assets_outside_git
+  k1_exit_gate_open: true

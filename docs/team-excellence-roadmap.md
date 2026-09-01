@@ -376,6 +376,22 @@ ball contact and target outcome remain open. The machine-readable evidence is
 `training/locks/paid_k0_2026_09_01.yaml`; no external or derived motion asset is
 committed.
 
+K1 implementation checkpoint (2026-09-01): the non-periodic 110-input/23-output
+multi-motion contract, padded hash-bound corpus loader, Apollo-gain MJX/Warp
+environment, failure-phase curriculum, resumable PPO trainer, fixed-seed Warp
+evaluator and exact-CPU fixed-grid evaluator are complete. Dynamic evidence
+corrects K0's provisional choice: semantic A has better equal-protocol tracking
+and contact than body-IK B, so A and B are now parallel K1 candidates with A
+first. Neither open loop completes any of 13 full clips. The best retained
+residual checkpoint improves semantic exact-CPU phase completion from 31/104
+to 35/104, with four paired improvements and zero regressions, but its one-sided
+exact McNemar result is `p=0.0625`; it is not promoted. GMR transfer improves
+31/104 to 34/104 with four improvements and one regression (`p=0.1875`). More
+reward-only PPO steps on this branch are stopped. The next K1 experiment is a
+phase-level optimized correction teacher, behavior cloning, then PPO resume
+only if the teacher first improves the same exact-CPU grid. Evidence is locked
+in `training/locks/paid_k1_2026_09_01.yaml`.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

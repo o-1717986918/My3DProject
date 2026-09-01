@@ -1,0 +1,110 @@
+schema_version: 1
+policy_name: soccer_motion_policy_v1
+robot: Booster T1
+experimental: true
+control:
+  frequency_hz: 50
+  mode: motion_reference_residual_joint_position
+  action_size: 23
+  action_clip: [-1.0, 1.0]
+  action_scale: 0.15
+  units: normalized_residual
+
+joint_order:
+  - AAHead_yaw
+  - Head_pitch
+  - Left_Shoulder_Pitch
+  - Left_Shoulder_Roll
+  - Left_Elbow_Pitch
+  - Left_Elbow_Yaw
+  - Right_Shoulder_Pitch
+  - Right_Shoulder_Roll
+  - Right_Elbow_Pitch
+  - Right_Elbow_Yaw
+  - Waist
+  - Left_Hip_Pitch
+  - Left_Hip_Roll
+  - Left_Hip_Yaw
+  - Left_Knee_Pitch
+  - Left_Ankle_Pitch
+  - Left_Ankle_Roll
+  - Right_Hip_Pitch
+  - Right_Hip_Roll
+  - Right_Hip_Yaw
+  - Right_Knee_Pitch
+  - Right_Ankle_Pitch
+  - Right_Ankle_Roll
+
+effector_order:
+  - he1
+  - he2
+  - lae1
+  - lae2
+  - lae3
+  - lae4
+  - rae1
+  - rae2
+  - rae3
+  - rae4
+  - te1
+  - lle1
+  - lle2
+  - lle3
+  - lle4
+  - lle5
+  - lle6
+  - rle1
+  - rle2
+  - rle3
+  - rle4
+  - rle5
+  - rle6
+
+actor_observation:
+  size: 110
+  frame: body_local_plus_finite_motion_reference
+  fields:
+    - {name: interleaved_reference_joint_position_error_velocity_error_previous_residual_action, size: 69, units: normalized}
+    - {name: body_angular_velocity, size: 3, units: normalized_rad_s}
+    - {name: projected_gravity, size: 3, units: normalized}
+    - {name: reference_joint_position, size: 23, units: normalized_rad}
+    - {name: reference_root_linear_velocity, size: 3, units: normalized_m_s}
+    - {name: reference_root_angular_velocity, size: 3, units: normalized_rad_s}
+    - {name: reference_foot_contact, size: 2, units: boolean}
+    - {name: finite_progress_cos_sin, size: 2, units: normalized}
+    - {name: kick_leg_one_hot, size: 2, units: boolean}
+  normalization:
+    joint_position_error_divisor: 4.6
+    joint_velocity_error_divisor: 110.0
+    previous_residual_action_divisor: 10.0
+    body_angular_velocity_divisor: 50.0
+    reference_joint_position_divisor: 4.6
+    reference_root_linear_velocity_divisor: 5.0
+    reference_root_angular_velocity_divisor: 10.0
+    observation_clip: [-10.0, 10.0]
+
+decoder:
+  formula: q_target_physical=clip(q_reference_physical[motion,frame]+0.15*clip(action,-1,1),joint_limits)
+  zero_action_invariant: q_target_physical=q_reference_physical_at_finite_frame
+  progression: nonperiodic_one_frame_per_50hz_control_step_clamped_at_final_frame
+  gains: apollo_t1_per_joint
+  reference_artifact:
+    path_policy: external_local_only_not_committed
+    format: soccer_motion_reference_v1_npz_corpus
+    provenance_lock: training/locks/paid_k0_2026_09_01.yaml
+
+reset_curriculum:
+  motion_sampling: uniform_then_per_motion_outcome_balanced
+  phase_sampling: finite_pre_failure_exponential_kernel_plus_uniform
+  clip_endpoint_wrap: forbidden
+
+deployment:
+  format: ONNX_residual_actor_plus_external_finite_reference_decoder
+  input_name: observations
+  output_name: residual_actions
+  input_shape: [1, 110]
+  output_shape: [1, 23]
+  requires_finite_output: true
+  reference_required: true
+  release_status: training_only
+  fallback: accepted_apollo_kick_bank_then_walk

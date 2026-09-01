@@ -901,3 +901,53 @@ PAiD/soccer-reference tests pass, all 115 training tests pass, all 50 root
 regression tests pass, the three changed YAML files parse, and
 `git diff --check` passes. The full corpus was regenerated after the final
 label-dominance and provenance changes before evidence hashes were locked.
+
+## PAiD-to-T1 K1 finite motion tracking — 2026-09-01
+
+K1 first measures the K0 corpora under the actual 50 Hz position-plus-velocity
+actuator protocol. With 25/0.6 gains, semantic and calibrated body IK have zero
+full-clip completions; semantic phase completion is 26.9% versus 25.0%. The
+50/1.2 locomotion ablation and Apollo's deployed per-joint gains reduce tracking
+RMSE from about 0.09 to 0.06 rad and raise phase completion to about 29.8%, but
+still complete zero of thirteen full clips. Semantic preserves about 81% contact
+agreement under Apollo gains versus 73% for body IK. This dynamic evidence makes
+semantic the first training candidate without deleting the kinematically cleaner
+body-IK corpus.
+
+The implemented training boundary is finite rather than circular. It pads the
+13 clips only for static JAX shapes, carries the true length, forbids endpoint
+wrap, samples motion and failure-focused phases, advances exactly one frame at
+50 Hz, uses Apollo per-joint gains and clamps residual targets against exact T1
+limits. The actor has 110 values and the asymmetric critic 118. A 1,024-step
+Warp smoke run completed optimization, evaluation and checkpoint data. An
+attempt at 256 simultaneous Warp evaluation episodes later caused a process
+segmentation fault on the 8 GB GPU; 128 is the verified local evaluation batch
+limit and the failed attempt produced no evidence file.
+
+Three measured policy iterations followed. Conservative v1 and higher-exploration
+v2 at 0.15 rad both remained exactly 36/128 on a fixed seed set. Contract v2
+raises residual authority to 0.35 rad, consistent with the existing Apollo kick
+scale, without changing zero-action behavior. Moving resets five frames before
+a 25-frame pre-failure window and continuing the v3 checkpoint reached 39/128
+on the fixed Warp set.
+
+The decisive exact CPU grid has eight deterministic start phases for every
+motion. Semantic zero residual completes 31/104; the retained checkpoint
+completes 35/104. Paired transitions are four improvements, zero regressions,
+giving one-sided exact McNemar `p=0.0625`. Mean joint RMSE changes from 0.0725
+to 0.0735 rad and contact agreement stays essentially flat. Applied to body-IK
+references without retraining, the same actor changes 31/104 to 34/104, with
+four improvements, one regression and `p=0.1875`. Neither comparison passes the
+predeclared `p<=0.05` promotion rule. The checkpoint remains experimental and
+no competition runtime asset changes.
+
+The reward-only PPO branch is stopped. The next K1 experiment must optimize
+phase-level residual teachers before measured failures, verify those teachers
+on the same exact CPU grid, behavior-clone the successful corrections, and only
+then resume PPO. All report and manifest hashes are in
+`training/locks/paid_k1_2026_09_01.yaml`; PAiD-derived arrays and checkpoints
+remain outside Git.
+
+K1 checkpoint verification: every changed/new Python file compiles; all 122
+training tests and all 50 root regression tests pass in WSL; both policy
+contracts and the K1 evidence lock parse as YAML; `git diff --check` passes.

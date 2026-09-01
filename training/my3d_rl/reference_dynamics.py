@@ -90,6 +90,46 @@ def failure_phase_sampling_weights(
     return weights / np.sum(weights)
 
 
+def nonperiodic_failure_frame_sampling_weights(
+    failure_frames: np.ndarray,
+    *,
+    frame_count: int,
+    kernel_size: int = 5,
+    kernel_decay: float = 0.8,
+    uniform_ratio: float = 0.1,
+    lead_frames: int = 0,
+) -> np.ndarray:
+    """Build reset weights before failures without wrapping clip endpoints.
+
+    Soccer kicks are finite motions, so treating their last and first frames as
+    adjacent would train on an artificial discontinuity. Each failure adds a
+    decaying trail to preceding frames; the uniform mixture preserves coverage.
+    An empty failure set deliberately falls back to uniform sampling.
+    """
+    failures = np.asarray(failure_frames, dtype=np.int64).reshape(-1)
+    if frame_count < 2 or kernel_size < 1 or lead_frames < 0:
+        raise ValueError("frame sampling requires at least two frames and one tap")
+    if not 0.0 < kernel_decay <= 1.0:
+        raise ValueError("kernel decay must lie in (0, 1]")
+    if not 0.0 < uniform_ratio <= 1.0:
+        raise ValueError("uniform ratio must lie in (0, 1]")
+    if np.any(failures < 0) or np.any(failures >= frame_count):
+        raise ValueError("failure frames must lie inside the finite clip")
+    if failures.size == 0:
+        return np.full(frame_count, 1.0 / frame_count, dtype=np.float64)
+
+    focused = np.zeros(frame_count, dtype=np.float64)
+    for failure in failures:
+        for offset in range(kernel_size):
+            frame = int(failure) - lead_frames - offset
+            if frame < 0:
+                break
+            focused[frame] += kernel_decay**offset
+    focused /= np.sum(focused)
+    weights = (1.0 - uniform_ratio) * focused + uniform_ratio / frame_count
+    return weights / np.sum(weights)
+
+
 def _joint_addresses(
     model: mujoco.MjModel, contract: PolicyContract, prefix: str
 ) -> tuple[np.ndarray, np.ndarray, int, int]:
@@ -109,8 +149,8 @@ def configure_pd_actuators(
     model: mujoco.MjModel,
     contract: PolicyContract,
     *,
-    kp: float,
-    kd: float,
+    kp: float | np.ndarray,
+    kd: float | np.ndarray,
     prefix: str,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Configure the exact position-plus-velocity actuator protocol."""

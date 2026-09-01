@@ -163,3 +163,20 @@ projection remains the A/B baseline and deterministic fallback. The result does
 not establish dynamic trackability or football accuracy. Pinned commands,
 report hashes and aggregate metrics are in
 `training/locks/paid_k0_2026_09_01.yaml`.
+
+## K1 dynamic correction
+
+Equal-protocol exact dynamics supersedes K0's kinematics-only primary choice.
+Across 104 phase restarts, Apollo per-joint gains produce about 29.8% completion
+for both retargeters, but semantic projection has lower joint RMSE and materially
+higher contact agreement. Semantic therefore becomes the first K1 training
+candidate while body IK remains an ablation; no source is discarded.
+
+The PAiD-style finite phase sampler, 110-value actor contract and zero-mean
+residual PPO path now run end to end. Low-authority 0.15 rad policies did not
+change any outcome on a fixed 128-state set. A separately versioned 0.35 rad
+contract plus a failure-before rather than failure-at reset window produced the
+first exact-CPU improvement: 31/104 to 35/104 on semantic references. The paired
+one-sided exact result is `p=0.0625`, so it remains experimental. The evidence
+does not support more steps on the same reward-only branch. K1 next builds
+phase-level correction teachers before behavior cloning and guarded PPO resume.
