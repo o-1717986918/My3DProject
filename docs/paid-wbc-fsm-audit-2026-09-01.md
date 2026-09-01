@@ -139,3 +139,27 @@ selection or role allocation.
   distribution assumptions.
 - Do not expand to shot/clear/team tactics until K1 motion tracking and K2
   controlled 2 m pass gates are closed.
+
+## K0 implementation result
+
+K0 is complete as a kinematic stage. A strict loader audited all thirteen
+official clips at the pinned revision: ten standard, three stylized, four
+left-foot and nine right-foot. The conversion stores neither upstream nor
+derived assets in Git.
+
+Two paired candidates were evaluated against identical source hashes. The
+semantic projection retained the existing same-joint T1 knowledge and passed
+13/13 exact-geometry gates. A naive SMPLX-offset GMR attempt was correctly
+rejected; calibrating robot-to-robot body offsets from the semantic first pose
+and clipping only the solver initialization produced a second 13/13 corpus.
+Compared with the semantic baseline, calibrated body IK reduced total
+joint-limit clips from 1,987 to 157 and maximum correction from 0.303 to 0.10
+rad, while both corpora had zero non-foot pitch contacts and nearly identical
+mean labeled-foot peak speed (4.99 m/s). Every label has at least a 1.20
+labeled-foot/other-foot peak-speed ratio; the body-IK minimum is 1.45.
+
+This evidence selects body IK only as the K1 motion-tracking primary. Semantic
+projection remains the A/B baseline and deterministic fallback. The result does
+not establish dynamic trackability or football accuracy. Pinned commands,
+report hashes and aggregate metrics are in
+`training/locks/paid_k0_2026_09_01.yaml`.

@@ -1,0 +1,78 @@
+schema_version: 1
+recorded_at: 2026-09-01
+stage: K0_paid_to_t1_motion_reference
+status: passed
+
+sources:
+  paid:
+    repository: https://github.com/TeleHuman/HumanoidSoccer
+    revision: e72e470230047dedaf66df0983f1d0ab746faeb5
+    license: CC-BY-NC-4.0
+    asset_policy: local_attributed_noncommercial_only_never_commit_or_redistribute
+  gmr:
+    repository: https://github.com/YanjieZe/GMR
+    revision: bb1bbe40774794fceb2a7c579a3464a28e68c844
+    license: MIT
+
+contracts:
+  source_loader: training/my3d_rl/paid_motion.py
+  output_schema: training/contracts/soccer_motion_reference_v1.yaml
+  validator: training/tools/validate_soccer_motion_reference.py
+  corpus_driver: training/tools/retarget_paid_corpus.py
+  comparison: training/tools/compare_paid_retarget_corpora.py
+
+local_evidence:
+  root: /home/win98/rl_runs/paid-k0
+  provenance_audit:
+    path: /home/win98/rl_runs/paid-k0/audit-e72e470.json
+    sha256: 44f7ca9063676909916de34210c70dbbded036a4f0506d41311c825b87acf7c1
+    motions: 13
+    standard: 10
+    stylized: 3
+    left_kick: 4
+    right_kick: 9
+  semantic_baseline:
+    path: /home/win98/rl_runs/paid-k0/corpus-semantic-v4-summary.json
+    sha256: d34e90a1c75255c51cd8d7522e29eee3f4c706eb148cd902ddb09d0cb5a7d858
+    passed: 13
+    total: 13
+  calibrated_body_ik:
+    path: /home/win98/rl_runs/paid-k0/corpus-gmr-body-ik-v4-summary.json
+    sha256: c7b7d2b4383db7a6b7c87d5abbffb761cc8b7adc6273d1d0e14acd4b43f162e0
+    passed: 13
+    total: 13
+    robot_to_robot_scale: 0.9
+    calibration: semantic_first_frame_body_pose
+  paired_comparison:
+    path: /home/win98/rl_runs/paid-k0/semantic-vs-gmr-v4.json
+    sha256: 32ac88022607a09b7ea30e8f335ce64039a2a97925e4549dc6e69a6e3f31a0c1
+    sources_identical: true
+
+aggregate_results:
+  semantic_baseline:
+    clipped_value_count_total: 1987
+    maximum_abs_joint_limit_correction_rad: 0.3029288530
+    maximum_joint_velocity_rad_s: 16.3667945862
+    maximum_root_tilt_rad: 0.4612519047
+    mean_peak_kick_foot_relative_speed_m_s: 4.9905026237
+    minimum_kick_to_other_foot_peak_speed_ratio: 1.6502980566
+    non_foot_pitch_contact_frames_total: 0
+  calibrated_body_ik:
+    clipped_value_count_total: 157
+    maximum_abs_joint_limit_correction_rad: 0.1
+    maximum_joint_velocity_rad_s: 15.1829366684
+    maximum_root_tilt_rad: 0.3751209868
+    mean_peak_kick_foot_relative_speed_m_s: 4.9980359441
+    minimum_kick_to_other_foot_peak_speed_ratio: 1.4478262483
+    non_foot_pitch_contact_frames_total: 0
+
+decision:
+  k1_primary_reference: calibrated_gmr_body_ik
+  retain_semantic_baseline: true
+  reason: same_13_of_13_gate_pass_with_1830_fewer_joint_limit_clips
+  proven_scope: source_integrity_and_exact_rcss_kinematic_feasibility
+  explicitly_unproven:
+    - dynamic_trackability
+    - ball_contact
+    - target_direction_or_arrival_speed
+    - competition_readiness

@@ -129,6 +129,7 @@ reference_only:
     released_assets: 13 labeled motion NPZ files and a G1 ONNX checkpoint
     compatibility_note: direct weights are incompatible with the Booster T1 23-DoF striker_policy_v1 contract
     reuse_policy: clean-room method reference; local non-commercial motion-retargeting research only with attribution; do not vendor source, motions, or weights
+    local_integration: pinned schema audit plus paired semantic and calibrated GMR body-IK conversion; evidence in training/locks/paid_k0_2026_09_01.yaml
   - name: wbc_fsm
     repository: https://github.com/ccrpRepo/wbc_fsm
     commit: b352409d73bed469169334040ee9ea70bc28a5f1

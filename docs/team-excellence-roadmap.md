@@ -242,9 +242,16 @@ Kick route:
 
 Kick gate:
 
-- each promoted 2--5 m central range: at least 18/20 through a one-metre
-  corridor, median direction error at most 10 degrees, upright at least 95%;
-- 5--8 m unopposed shots: at least 17/20 enter the goal mouth;
+- `18/20` for a 2--5 m central range is a screening gate only; it permits the
+  condition to enter formal validation but does not establish a 90% skill;
+- each promoted static 2--5 m central range: three seeds and at least 200
+  untouched trials per seed, raw success at least 90%, one-sided 95% Wilson
+  lower bound at least 85%, median direction error at most 10 degrees and
+  upright at least 95%;
+- randomized position, rolling-ball and light-disturbance envelopes: raw
+  success at least 80% and one-sided 95% Wilson lower bound at least 75%;
+- `17/20` for 5--8 m unopposed shots is screening only; formal promotion
+  requires at least 85% over the same three-seed/200-trial protocol;
 - clears move the ball at least 6 m away from the defended central region in
   at least 18/20 accepted trials;
 - three training seeds, source/ONNX parity, no non-finite output, and safe
@@ -355,6 +362,19 @@ source, motion or weight is vendored. `wbc_fsm` contributes only lifecycle,
 model-contract, projected-gravity termination and fallback patterns to the
 existing Apollo executor. The full evidence and stop rules are in
 [`paid-wbc-fsm-audit-2026-09-01.md`](paid-wbc-fsm-audit-2026-09-01.md).
+
+K0 completion checkpoint (2026-09-01): all thirteen pinned PAiD motions pass
+the new local-only T1 soccer-reference schema and exact RCSS kinematic gate by
+both methods. The preserved semantic A baseline passes 13/13. The calibrated
+GMR body-IK B candidate also passes 13/13, reduces aggregate joint-limit clips
+from 1,987 to 157, reduces maximum correction from 0.303 to 0.10 rad, retains
+about 4.99 m/s mean labeled-foot peak speed, has zero non-foot pitch contacts
+and preserves a minimum 1.45 kick-foot/other-foot peak-speed ratio. B becomes
+the K1 primary reference; A remains the required ablation and fallback. K0
+proves source integrity and kinematic feasibility only. Dynamic tracking,
+ball contact and target outcome remain open. The machine-readable evidence is
+`training/locks/paid_k0_2026_09_01.yaml`; no external or derived motion asset is
+committed.
 
 ### R2: complete individual football actions
 

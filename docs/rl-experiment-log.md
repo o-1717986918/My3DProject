@@ -864,3 +864,40 @@ modules and tools; 11/11 targeted striker tests, 111/111 training tests and
 environment. `git diff --check` also passed. The repository environment does
 not currently include Black, so no formatting claim beyond the existing test
 and diff gates is made.
+
+## PAiD-to-T1 K0 corpus gate — 2026-09-01
+
+The new local-only loader verifies the pinned unnamed PAiD array order, safe
+NPZ loading, 50 Hz schema, quaternion norms, left/right filename labels,
+repository revision, licence and per-file hashes. The audited corpus contains
+13/13 valid motions: ten standard, three stylized, four left-foot and nine
+right-foot.
+
+Two same-source robot-to-robot conversions were then evaluated. The A baseline
+projects same-semantic G1 joints into the existing T1 contract. The B candidate
+uses GMR whole-body IK but calibrates the G1-to-T1 body-frame offsets from A's
+first pose; the uncalibrated SMPLX offsets failed and are rejected. Both final
+corpora pass 13/13 exact RCSS kinematic gates and have zero non-foot pitch
+contact frames.
+
+| K0 aggregate | Semantic A | Calibrated body-IK B |
+|---|---:|---:|
+| joint-limit clipped values | 1,987 | 157 |
+| maximum correction | 0.303 rad | 0.10 rad |
+| maximum joint velocity | 16.37 rad/s | 15.18 rad/s |
+| maximum root tilt | 0.461 rad | 0.375 rad |
+| mean labeled-foot peak speed | 4.991 m/s | 4.998 m/s |
+| minimum labeled/other peak-speed ratio | 1.650 | 1.448 |
+
+B is the K1 primary motion reference because it preserves full-corpus passage
+with 1,830 fewer clipped values. A remains the required ablation and fallback.
+This is not a kick promotion: dynamic tracking, ball contact, direction and
+arrival-speed gates are still open. Evidence hashes are locked in
+`training/locks/paid_k0_2026_09_01.yaml`; all CC BY-NC inputs and derivatives
+remain outside Git.
+
+K0 checkpoint verification: all changed/new Python files compile, the four
+PAiD/soccer-reference tests pass, all 115 training tests pass, all 50 root
+regression tests pass, the three changed YAML files parse, and
+`git diff --check` passes. The full corpus was regenerated after the final
+label-dominance and provenance changes before evidence hashes were locked.
