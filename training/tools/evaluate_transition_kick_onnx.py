@@ -41,6 +41,8 @@ def main() -> int:
     parser.add_argument("transition_corpus", type=Path)
     parser.add_argument("--condition-index", type=int, default=60)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
+    parser.add_argument("--correction-onnx", type=Path)
+    parser.add_argument("--correction-scale", type=float, default=0.1)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -54,6 +56,19 @@ def main() -> int:
         raise ValueError("ONNX input does not match the selected contract")
     if session.get_outputs()[0].shape != list(contract.output_shape):
         raise ValueError("ONNX output does not match the selected contract")
+    correction_session = None
+    if args.correction_onnx is not None:
+        correction_session = ort.InferenceSession(
+            str(args.correction_onnx.resolve()), providers=["CPUExecutionProvider"]
+        )
+        if (
+            correction_session.get_inputs()[0].shape != list(contract.input_shape)
+            or correction_session.get_outputs()[0].shape
+            != list(contract.output_shape)
+        ):
+            raise ValueError("correction ONNX does not match the selected contract")
+    if not 0.0 < args.correction_scale <= 0.5:
+        raise ValueError("correction scale must be in (0, 0.5]")
 
     teacher = json.loads(args.teacher_manifest.read_text(encoding="utf-8"))
     records = [
@@ -103,6 +118,8 @@ def main() -> int:
             initial_qpos=qpos[row],
             initial_qvel=qvel[row],
             kick_policy_session=session,
+            kick_correction_session=correction_session,
+            kick_correction_scale=args.correction_scale,
         )
         trials.append(
             {
@@ -129,6 +146,17 @@ def main() -> int:
         "teacher_manifest_sha256": sha256_file(args.teacher_manifest),
         "model": str(args.model.resolve()),
         "model_sha256": sha256_file(args.model),
+        "correction_onnx": (
+            str(args.correction_onnx.resolve())
+            if args.correction_onnx is not None
+            else None
+        ),
+        "correction_onnx_sha256": (
+            sha256_file(args.correction_onnx)
+            if args.correction_onnx is not None
+            else None
+        ),
+        "correction_scale": args.correction_scale,
         "transition_corpus": str(args.transition_corpus.resolve()),
         "transition_corpus_sha256": sha256_file(args.transition_corpus),
         "transition_corpus_manifest": str(corpus_manifest_path.resolve()),

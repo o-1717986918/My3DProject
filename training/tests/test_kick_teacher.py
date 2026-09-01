@@ -109,6 +109,52 @@ def test_capture_only_stop_preserves_the_captured_transition_state():
     )
 
 
+def test_single_pass_transition_sequence_matches_repeated_capture_rollouts():
+    evaluator = KickTeacherEvaluator(KickTeacherSpec(evaluation_duration_s=1.2))
+    parameters = np.zeros(len(PARAMETER_NAMES))
+    setup_kwargs = {
+        "setup_ball_x_offset_m": 0.0,
+        "setup_ball_y_offset_m": 0.0,
+    }
+    requested_cycles = (1, 3, 5)
+
+    repeated = []
+    for cycles in requested_cycles:
+        metrics = evaluator.rollout(
+            parameters,
+            setup_confirmation_cycles=cycles,
+            capture_transition_entry=True,
+            stop_after_transition_capture=True,
+            **setup_kwargs,
+        )
+        entry = evaluator.captured_transition_entry
+        assert entry is not None
+        repeated.append((cycles, metrics["setup_duration_s"], entry))
+
+    evaluator.rollout(
+        parameters,
+        capture_transition_cycles=requested_cycles,
+        **setup_kwargs,
+    )
+    captured = evaluator.captured_transition_sequence
+    assert tuple(node[0] for node in captured) == requested_cycles
+    for (cycles, elapsed_s, entry), expected in zip(captured, repeated, strict=True):
+        expected_cycles, expected_elapsed_s, expected_entry = expected
+        assert cycles == expected_cycles
+        assert elapsed_s == expected_elapsed_s
+        np.testing.assert_array_equal(entry.qpos, expected_entry.qpos)
+        np.testing.assert_array_equal(entry.qvel, expected_entry.qvel)
+        np.testing.assert_array_equal(
+            entry.walk_previous_action, expected_entry.walk_previous_action
+        )
+        np.testing.assert_array_equal(
+            entry.setup_velocity_command, expected_entry.setup_velocity_command
+        )
+
+    captured[0][2].qpos.fill(np.nan)
+    assert np.isfinite(evaluator.captured_transition_sequence[0][2].qpos).all()
+
+
 def test_kick_trial_gate_requires_contact_range_direction_speed_and_upright():
     accepted = {
         "contact": True,

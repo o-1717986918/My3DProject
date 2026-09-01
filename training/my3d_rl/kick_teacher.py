@@ -394,6 +394,9 @@ class KickTeacherEvaluator:
         self._captured_observations = np.empty((0, self.contract.observation_size))
         self._captured_actions = np.empty((0, self.contract.action_size))
         self._captured_transition_entry: KickTransitionEntry | None = None
+        self._captured_transition_sequence: tuple[
+            tuple[int, float, KickTransitionEntry], ...
+        ] = ()
 
     @property
     def captured_transition_entry(self) -> KickTransitionEntry | None:
@@ -416,6 +419,16 @@ class KickTeacherEvaluator:
     def captured_targets(self) -> np.ndarray:
         """Return a defensive copy of targets from the last captured rollout."""
         return self._captured_targets.copy()
+
+    @property
+    def captured_transition_sequence(
+        self,
+    ) -> tuple[tuple[int, float, KickTransitionEntry], ...]:
+        """Return defensive copies of requested consecutive-alignment states."""
+        return tuple(
+            (cycles, elapsed_s, entry.copy())
+            for cycles, elapsed_s, entry in self._captured_transition_sequence
+        )
 
     def _stable_walk_target(
         self,
@@ -597,6 +610,7 @@ class KickTeacherEvaluator:
         initial_walk_previous_action: np.ndarray | None = None,
         capture_transition_entry: bool = False,
         stop_after_transition_capture: bool = False,
+        capture_transition_cycles: tuple[int, ...] | None = None,
         kick_policy_session: ort.InferenceSession | None = None,
         kick_correction_session: ort.InferenceSession | None = None,
         kick_correction_scale: float = 0.5,
@@ -627,6 +641,18 @@ class KickTeacherEvaluator:
             raise ValueError(
                 "stopping after transition capture requires setup capture mode"
             )
+        if capture_transition_cycles is not None:
+            if (
+                not setup_enabled
+                or capture_transition_entry
+                or tuple(sorted(set(capture_transition_cycles)))
+                != capture_transition_cycles
+                or not capture_transition_cycles
+                or capture_transition_cycles[0] < 1
+            ):
+                raise ValueError(
+                    "transition cycle capture requires setup and sorted positive cycles"
+                )
         if exact_initial_state:
             initial_qpos = np.asarray(initial_qpos, dtype=np.float64)
             initial_qvel = np.asarray(initial_qvel, dtype=np.float64)
@@ -682,10 +708,12 @@ class KickTeacherEvaluator:
             raise ValueError(
                 "setup timing, tolerance and confirmation must be positive"
             )
-        if kick_policy_session is not None and kick_correction_session is not None:
-            raise ValueError("standalone and correction kick policies are exclusive")
-        if kick_correction_session is not None and parameters is None:
-            raise ValueError("a kick correction policy requires teacher parameters")
+        if (
+            kick_correction_session is not None
+            and parameters is None
+            and kick_policy_session is None
+        ):
+            raise ValueError("a kick correction policy requires a base kick policy")
         if not 0.0 < kick_correction_scale <= 0.5:
             raise ValueError("kick_correction_scale must be in (0, 0.5]")
         if (
@@ -732,6 +760,9 @@ class KickTeacherEvaluator:
         data.ctrl[self._pos_actuator] = self._default_pose
         mujoco.mj_forward(self.model, data)
         self._captured_transition_entry = None
+        self._captured_transition_sequence = ()
+        transition_sequence: list[tuple[int, float, KickTransitionEntry]] = []
+        requested_transition_cycles = set(capture_transition_cycles or ())
         initial_ball = data.xpos[self._ball_body, :2].copy()
         target_angle = np.deg2rad(self.spec.target_angle_deg)
         target_direction = np.array([np.cos(target_angle), np.sin(target_angle)])
@@ -825,7 +856,31 @@ class KickTeacherEvaluator:
                 else:
                     setup_aligned_cycles = 0
                 action_time_s = 0.0
-                if setup_aligned_cycles >= setup_confirmation_cycles:
+                if (
+                    capture_transition_cycles is not None
+                    and setup_aligned_cycles in requested_transition_cycles
+                    and all(
+                        cycles != setup_aligned_cycles
+                        for cycles, _, _ in transition_sequence
+                    )
+                ):
+                    transition_sequence.append(
+                        (
+                            setup_aligned_cycles,
+                            float(elapsed),
+                            self._make_transition_entry(
+                                data, previous_action, velocity_command
+                            ),
+                        )
+                    )
+                    if len(transition_sequence) == len(capture_transition_cycles):
+                        setup_succeeded = True
+                        setup_duration_s = float(elapsed)
+                        break
+                if (
+                    capture_transition_cycles is None
+                    and setup_aligned_cycles >= setup_confirmation_cycles
+                ):
                     kick_started = True
                     setup_succeeded = True
                     setup_duration_s = float(elapsed)
@@ -846,6 +901,8 @@ class KickTeacherEvaluator:
                     setup_timed_out = True
                     setup_duration_s = float(elapsed)
                     velocity_command = np.zeros(3, dtype=np.float64)
+                    if capture_transition_cycles is not None:
+                        break
             elif setup_enabled and setup_timed_out:
                 action_time_s = 0.0
                 velocity_command = np.zeros(3, dtype=np.float64)
@@ -881,6 +938,15 @@ class KickTeacherEvaluator:
             )
             teacher_action = residual_target / KICK_ACTION_SCALE
             correction_action = None
+            policy_action = None
+            if kick_policy_session is not None and kick_started:
+                policy_action = kick_policy_session.run(
+                    None,
+                    {kick_policy_input: kick_observation[None, :]},
+                )[0][0].astype(np.float64)
+                policy_action = np.nan_to_num(
+                    policy_action, nan=0.0, posinf=1.0, neginf=-1.0
+                )
             if kick_correction_session is not None and kick_started:
                 correction_action = kick_correction_session.run(
                     None,
@@ -889,42 +955,28 @@ class KickTeacherEvaluator:
                 correction_action = np.nan_to_num(
                     correction_action, nan=0.0, posinf=1.0, neginf=-1.0
                 )
-                raw_kick_action = correction_action
-                label_action = correction_action
-            elif kick_policy_session is not None and kick_started:
-                policy_action = kick_policy_session.run(
-                    None,
-                    {kick_policy_input: kick_observation[None, :]},
-                )[0][0].astype(np.float64)
-                policy_action = np.nan_to_num(
-                    policy_action, nan=0.0, posinf=1.0, neginf=-1.0
-                )
-                raw_kick_action = policy_action
-                label_action = (
-                    teacher_action if parameters is not None else policy_action
-                )
+            if policy_action is not None:
+                base_kick_action = policy_action
             else:
-                raw_kick_action = teacher_action
-                label_action = raw_kick_action
+                base_kick_action = teacher_action
+            raw_kick_action = base_kick_action
+            if correction_action is not None:
+                raw_kick_action = (
+                    raw_kick_action + correction_action * kick_correction_scale
+                )
+            label_action = (
+                teacher_action if parameters is not None else raw_kick_action
+            )
             saturated_action_values += int(
                 np.count_nonzero(np.abs(raw_kick_action) > 1.0)
             )
             action_value_count += raw_kick_action.size
             kick_action = np.clip(raw_kick_action, -1.0, 1.0)
-            if correction_action is not None:
-                target = np.clip(
-                    stable_target
-                    + residual_target
-                    + kick_action * (kick_correction_scale * KICK_ACTION_SCALE),
-                    self._lowers,
-                    self._uppers,
-                )
-            else:
-                target = np.clip(
-                    stable_target + kick_action * KICK_ACTION_SCALE,
-                    self._lowers,
-                    self._uppers,
-                )
+            target = np.clip(
+                stable_target + kick_action * KICK_ACTION_SCALE,
+                self._lowers,
+                self._uppers,
+            )
             if capture_targets:
                 captured_observations.append(kick_observation)
                 captured_actions.append(
@@ -964,6 +1016,7 @@ class KickTeacherEvaluator:
             self._captured_targets = np.asarray(captured_targets)
             self._captured_observations = np.asarray(captured_observations)
             self._captured_actions = np.asarray(captured_actions)
+        self._captured_transition_sequence = tuple(transition_sequence)
 
         displacement = data.xpos[self._ball_body, :2] - initial_ball
         final_progress = float(np.dot(displacement, target_direction))

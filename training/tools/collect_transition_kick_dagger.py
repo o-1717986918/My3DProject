@@ -81,11 +81,17 @@ def main() -> int:
     parser.add_argument("--condition-index", type=int, default=60)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--failure-rollout-weight", type=float, default=2.0)
+    parser.add_argument("--fall-rollout-weight", type=float, default=6.0)
     parser.add_argument("--output-prefix", type=Path, required=True)
     args = parser.parse_args()
 
-    if args.workers < 1:
-        raise ValueError("workers must be positive")
+    if (
+        args.workers < 1
+        or args.failure_rollout_weight < 1.0
+        or args.fall_rollout_weight < args.failure_rollout_weight
+    ):
+        raise ValueError("workers or DAgger rollout weights are invalid")
     npz_path = args.output_prefix.with_suffix(".npz")
     json_path = args.output_prefix.with_suffix(".json")
     if not json_path.is_absolute() or json_path.is_relative_to(Path.cwd()):
@@ -154,6 +160,11 @@ def main() -> int:
         if not required <= set(archive.files):
             raise ValueError("base BC dataset is missing required arrays")
         base = {name: np.asarray(archive[name]) for name in required}
+        base["sample_weights"] = (
+            np.asarray(archive["sample_weights"], dtype=np.float32)
+            if "sample_weights" in archive.files
+            else np.ones(base["episode_ids"].shape, dtype=np.float32)
+        )
     train_ids = training_episode_ids(base["episode_ids"], base["split"])
     corpus_by_rollout = {
         int(rollout_id): index for index, rollout_id in enumerate(rollout_ids)
@@ -200,6 +211,22 @@ def main() -> int:
     dagger_episode_ids = np.concatenate(
         [np.full(node["sample_count"], node["episode_id"], np.int32) for node in ordered]
     )
+    dagger_sample_weights = np.concatenate(
+        [
+            np.full(
+                node["sample_count"],
+                (
+                    args.fall_rollout_weight
+                    if bool(node["metrics"]["fell"])
+                    else args.failure_rollout_weight
+                    if not bool(node["success"])
+                    else 1.0
+                ),
+                np.float32,
+            )
+            for node in ordered
+        ]
+    )
     arrays = {
         "observations": np.concatenate(
             [base["observations"], dagger_observations]
@@ -211,6 +238,9 @@ def main() -> int:
         "split": np.concatenate(
             [base["split"], np.zeros(dagger_episode_ids.size, dtype=np.uint8)]
         ),
+        "sample_weights": np.concatenate(
+            [base["sample_weights"], dagger_sample_weights]
+        ).astype(np.float32),
     }
     npz_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(npz_path, **arrays)
@@ -243,6 +273,9 @@ def main() -> int:
         "learner_fall_rollouts": sum(
             bool(node["metrics"]["fell"]) for node in ordered
         ),
+        "failure_rollout_weight": args.failure_rollout_weight,
+        "fall_rollout_weight": args.fall_rollout_weight,
+        "weighted_dagger_samples": float(np.sum(dagger_sample_weights)),
         "npz": str(npz_path.resolve()),
         "npz_sha256": sha256_file(npz_path),
     }

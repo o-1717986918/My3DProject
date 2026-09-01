@@ -323,28 +323,22 @@ def main() -> int:
             rng.uniform(-args.ball_y_jitter, args.ball_y_jitter)
         )
         candidate_ids: list[int] = []
-        for cycles in confirmation_cycles:
-            metrics = capture_evaluator.rollout(
-                setup_parameters,
-                ball_x_offset_m=ball_x,
-                ball_y_offset_m=ball_y,
-                setup_ball_x_offset_m=base_ball_x,
-                setup_ball_y_offset_m=base_ball_y,
-                setup_timeout_s=args.setup_timeout,
-                setup_tolerance_m=args.setup_tolerance,
-                setup_confirmation_cycles=cycles,
-                initial_robot_offset_m=(float(initial_offset[0]), float(initial_offset[1])),
-                initial_robot_yaw_deg=initial_yaw,
-                capture_transition_entry=True,
-                stop_after_transition_capture=True,
-            )
-            entry = capture_evaluator.captured_transition_entry
-            if (
-                not bool(metrics["setup_succeeded"])
-                or entry is None
-                or entry.torso_height_m < 0.45
-                or entry.upright < 0.75
-            ):
+        capture_evaluator.rollout(
+            setup_parameters,
+            ball_x_offset_m=ball_x,
+            ball_y_offset_m=ball_y,
+            setup_ball_x_offset_m=base_ball_x,
+            setup_ball_y_offset_m=base_ball_y,
+            setup_timeout_s=args.setup_timeout,
+            setup_tolerance_m=args.setup_tolerance,
+            initial_robot_offset_m=(float(initial_offset[0]), float(initial_offset[1])),
+            initial_robot_yaw_deg=initial_yaw,
+            capture_transition_cycles=tuple(confirmation_cycles),
+        )
+        for cycles, setup_duration_s, entry in (
+            capture_evaluator.captured_transition_sequence
+        ):
+            if entry.torso_height_m < 0.45 or entry.upright < 0.75:
                 continue
             candidate_id = len(candidates)
             candidate_ids.append(candidate_id)
@@ -353,7 +347,7 @@ def main() -> int:
                     "candidate_id": candidate_id,
                     "approach_rollout_id": rollout_id,
                     "confirmation_cycles": cycles,
-                    "setup_duration_s": float(metrics["setup_duration_s"]),
+                    "setup_duration_s": setup_duration_s,
                     "initial_robot_offset_m": initial_offset.copy(),
                     "initial_robot_yaw_deg": initial_yaw,
                     "ball_offset_m": np.array([ball_x, ball_y], dtype=np.float64),

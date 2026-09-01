@@ -55,6 +55,11 @@ def load_teacher_dataset(
             if "split" in dataset.files
             else None
         )
+        sample_weights = (
+            np.asarray(dataset["sample_weights"], dtype=np.float32)
+            if "sample_weights" in dataset.files
+            else None
+        )
     if expected_observation_size < 1:
         raise ValueError("expected observation size must be positive")
     if observations.ndim != 2 or observations.shape[1] != expected_observation_size:
@@ -70,6 +75,12 @@ def load_teacher_dataset(
         split.shape != episode_ids.shape or not set(split.tolist()) <= {0, 1}
     ):
         raise ValueError("split must be a binary vector with shape [N]")
+    if sample_weights is not None and (
+        sample_weights.shape != episode_ids.shape
+        or not np.isfinite(sample_weights).all()
+        or np.any(sample_weights <= 0.0)
+    ):
+        raise ValueError("sample_weights must be a positive finite vector with shape [N]")
     if not np.isfinite(observations).all() or not np.isfinite(actions).all():
         raise ValueError("teacher dataset must be finite")
     if np.max(np.abs(actions)) > 1.0 + 1.0e-6:
@@ -81,6 +92,8 @@ def load_teacher_dataset(
     }
     if split is not None:
         result["split"] = split
+    if sample_weights is not None:
+        result["sample_weights"] = sample_weights
     return result
 
 
@@ -143,6 +156,12 @@ def train_behavior_clone(
     train_actions = actions[train_mask]
     validation_observations = observations[validation_mask]
     validation_actions = actions[validation_mask]
+    training_weights = np.asarray(
+        dataset.get(
+            "sample_weights", np.ones(observations.shape[0], dtype=np.float32)
+        ),
+        dtype=np.float32,
+    )[train_mask]
     observation_mean = train_observations.mean(axis=0)
     observation_std = np.maximum(train_observations.std(axis=0), 1.0e-3)
     normalized_train = (train_observations - observation_mean) / observation_std
@@ -164,10 +183,12 @@ def train_behavior_clone(
         current_optimizer_state: Any,
         batch_observations: jax.Array,
         batch_actions: jax.Array,
+        batch_weights: jax.Array,
     ) -> tuple[Any, Any, jax.Array]:
         def loss_fn(candidate_params: Any) -> jax.Array:
             prediction = model.apply({"params": candidate_params}, batch_observations)
-            return jnp.mean(jnp.square(prediction - batch_actions))
+            per_sample = jnp.mean(jnp.square(prediction - batch_actions), axis=1)
+            return jnp.sum(per_sample * batch_weights) / jnp.sum(batch_weights)
 
         loss, gradients = jax.value_and_grad(loss_fn)(current_params)
         updates, new_optimizer_state = optimizer.update(
@@ -186,6 +207,7 @@ def train_behavior_clone(
             optimizer_state,
             jnp.asarray(normalized_train[indices]),
             jnp.asarray(train_actions[indices]),
+            jnp.asarray(training_weights[indices]),
         )
         if step % report_interval == 0 or step + 1 == steps:
             history.append({"step": float(step + 1), "batch_loss": float(loss)})

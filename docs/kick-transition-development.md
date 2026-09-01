@@ -235,6 +235,62 @@ Immutable local evidence:
 - seed-10002 untouched exact-CPU report SHA-256:
   `978e8c5682dbc0001cf88b39dbc711cd4250d959672df9e07a866b0baf6e65c4`.
 
+## Safety aggregation, dense timing and route closure
+
+Failure-weighted DAgger round three assigned weight 2 to failed learner
+rollouts and weight 6 to falls. It aggregated 185,365 samples, including
+43,576 new learner frames. The resulting policy restored zero falls and made
+contact in 92/92 untouched states, but passed only 16/92. This is below the
+unsafe round-two peak of 27/92 and closes fixed-teacher DAgger as the primary
+route. Its ONNX and exact report SHA-256 values are
+`543e02671e0cc39034b08e4910156a64abf52668313834e0caa3e205dd8a3260`
+and `fb69f70405cf0c0c897a2c964b0b464adce56358f2536c1a67b22425a58ba808`.
+
+A bounded PPO correction was then trained above that safe behavior clone. An
+aggressive 16,384-step smoke run regressed to 10/92 and introduced three
+falls. A conservative 131,072-step run used a 0.02 correction scale, learning
+rate `2e-5`, noise `0.01`, gate reward 100 and fall penalty 200. Every one of
+its eight checkpoints was exported and evaluated in exact CPU MuJoCo. The
+safe checkpoints passed between 12 and 15 states; two checkpoints introduced
+one fall. None exceeded the frozen 16/92 base, so this residual-PPO branch is
+also rejected. The environment and evaluator retain base-policy composition
+support for future controlled experiments, but no correction is deployable.
+
+The switch-window generator now captures all requested alignment cycles in
+one setup rollout. A regression test compares cycles 1, 3 and 5 with three
+independent legacy captures. A seed-9000 end-to-end replay produced the exact
+same NPZ SHA-256, `7f62251d625a9c3dadcd278f56566d67796bddc1ec84491a8b77006179abe951`.
+This allowed seed 10601 to scale to 512 approach rollouts and 13,752 exact
+candidate states. One prototype has a successful window in 78/102 untouched
+approaches. The corpus NPZ SHA-256 is
+`e6b537deb86d201f54683d28f618a0714a238a730b52c58d7d501b73ad8665d8`.
+
+All ten predeclared actions were replayed over that corpus: 137,520 exact CPU
+trials. Four actions selected only on the 408 training approaches cover
+383/408 (`93.87%`) there and 101/102 (`99.02%`) on validation. Thus action
+capacity is not the remaining blocker. The bank NPZ SHA-256 is
+`a81d5d80f633248079b0b066733d81fc815554c1a3b66301dbdbe5f7060b9cc6`.
+A causal ONNX selector was trained with a disjoint 326/82 fit/calibration
+split and the original 102 approaches left blind. The strongest safe all-bank
+configuration passed 66/102 with no falls; its 69 releases had `95.65%`
+precision. Anchor-history, grouped kNN, trajectory-level nearest-neighbour
+planning and a calibrated late fallback did not improve total success. The
+selector is rejected: narrow open-loop outcome windows are not sufficiently
+identifiable from a single transition state.
+
+The replacement route follows the official ICRA 2026 Booster T1 striker
+pipeline rather than adding another switch classifier. The upstream source
+`Daffan/humanoid-soccer` was frozen at commit
+`378a12ac7446cd175f973c04e32912eb9acbee10` and is Apache-2.0. Its relevant
+structure is a 20-second closed-loop task, 4,096 parallel environments,
+privileged approach-and-kick teacher, directional ball-velocity reward,
+50-frame student history, DAgger, then constrained adaptation. It matches this
+robot's 23 actions and 50 Hz control. Isaac-Gym-specific code will not be
+vendored; the task curriculum, observation ownership and teacher/student
+staging will be reimplemented against the existing MuJoCo/Warp stack. The
+short 3-second open-loop transition task remains an exact regression gate, not
+the primary learning task.
+
 ## Implementation route
 
 ### K1. Version the transition contract
@@ -308,8 +364,12 @@ Only then expand to 3.5/5 m, angle bins, shot/clear, and moving-ball entries.
 - [x] generate and repair exact-CPU per-state teachers;
 - [x] prove that a four-action switch-window bank has more than 90% untouched
       oracle coverage, and reject selectors that do not realize it;
-- [ ] continue safety-constrained closed-loop aggregation from the 27/92
-      checkpoint; promote only at 83/92 with zero falls;
+- [x] run safety-weighted DAgger and bounded residual PPO; reject both after
+      exact CPU replay fails to improve the safe 16/92 base;
+- [x] scale switch timing to 512 approaches, prove 101/102 bank oracle
+      coverage, and reject current-state, history, kNN and fallback selectors;
+- [ ] implement the long-horizon privileged approach-and-kick teacher in the
+      existing MuJoCo/Warp task, then distil a history student;
 - [ ] add the guarded C++ kick-policy runner and same-cycle fallback tests;
 - [ ] rerun the central 2 m CPU and 7v7 server gates;
 - [ ] update this record and the R1 checkpoint with immutable artifact hashes.

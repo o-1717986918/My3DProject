@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a resumable guarded kick correction policy from a teacher table."""
+"""Train a resumable guarded kick correction above a frozen base policy."""
 
 from __future__ import annotations
 
@@ -182,7 +182,18 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=6101)
     parser.add_argument("--num-evals", type=int, default=8)
     parser.add_argument("--num-eval-envs", type=int, default=32)
+    parser.add_argument("--learning-rate", type=float, default=1.0e-4)
+    parser.add_argument("--entropy-cost", type=float, default=1.0e-4)
+    parser.add_argument("--init-noise-std", type=float, default=0.05)
+    parser.add_argument("--correction-scale", type=float, default=0.1)
+    parser.add_argument("--gate-success-reward", type=float, default=20.0)
+    parser.add_argument("--fall-penalty", type=float, default=20.0)
     parser.add_argument("--restore-checkpoint", type=Path)
+    parser.add_argument(
+        "--base-kick-onnx",
+        type=Path,
+        help="freeze a kick-policy-v3 behavior clone under the PPO correction",
+    )
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
 
@@ -197,6 +208,17 @@ def main() -> None:
 
     if not args.run_dir.is_absolute() or args.run_dir.is_relative_to(Path.cwd()):
         raise ValueError("run-dir must be an absolute path outside the repository")
+    if args.base_kick_onnx is not None and not args.base_kick_onnx.is_file():
+        raise FileNotFoundError(args.base_kick_onnx)
+    if (
+        args.learning_rate <= 0.0
+        or args.entropy_cost < 0.0
+        or not 0.0 < args.init_noise_std <= 0.2
+        or not 0.0 < args.correction_scale <= 0.1
+        or args.gate_success_reward <= 0.0
+        or args.fall_penalty <= 0.0
+    ):
+        raise ValueError("PPO optimization and safety scales are invalid")
     batch_size = 256
     num_minibatches = 4
     unroll_length = 16
@@ -227,7 +249,9 @@ def main() -> None:
         "target_angle_range": [0.0, 0.0],
         "fixed_action_mode": 0,
         "fixed_desired_arrival_speed": 0.8,
-        "action_scale": (0.1 * KICK_ACTION_SCALE).tolist(),
+        "action_scale": (args.correction_scale * KICK_ACTION_SCALE).tolist(),
+        "gate_success_reward": args.gate_success_reward,
+        "fall_penalty": args.fall_penalty,
     }
     env = DirectionalKick(
         config_overrides=environment_overrides,
@@ -236,6 +260,7 @@ def main() -> None:
         teacher_ball_offsets=offsets,
         transition_qpos=train_qpos,
         transition_qvel=train_qvel,
+        base_kick_policy_path=args.base_kick_onnx,
     )
     eval_env = DirectionalKick(
         config_overrides=environment_overrides,
@@ -244,6 +269,7 @@ def main() -> None:
         teacher_ball_offsets=offsets,
         transition_qpos=validation_qpos,
         transition_qvel=validation_qvel,
+        base_kick_policy_path=args.base_kick_onnx,
     )
     network_factory = functools.partial(
         ppo_networks.make_ppo_networks,
@@ -253,7 +279,7 @@ def main() -> None:
         value_obs_key="privileged_state",
         distribution_type="normal",
         noise_std_type="log",
-        init_noise_std=0.05,
+        init_noise_std=args.init_noise_std,
         mean_clip_scale=1.0,
         mean_kernel_init_fn=jax.nn.initializers.normal,
         mean_kernel_init_kwargs={"stddev": 0.0},
@@ -266,7 +292,11 @@ def main() -> None:
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "status": "running",
-        "purpose": "formal_teacher_table_kick_correction_training",
+        "purpose": (
+            "formal_base_policy_kick_correction_training"
+            if args.base_kick_onnx is not None
+            else "formal_teacher_table_kick_correction_training"
+        ),
         "promotable": False,
         "promotion_blocker": "requires exact CPU, ONNX, three-seed and server gates",
         "backend": jax.default_backend(),
@@ -290,8 +320,26 @@ def main() -> None:
         "environment_config": env._config.to_dict(),
         "action_size": env.action_size,
         "observation_size": env.observation_size,
+        "optimizer": {
+            "learning_rate": args.learning_rate,
+            "entropy_cost": args.entropy_cost,
+            "init_noise_std": args.init_noise_std,
+            "correction_scale": args.correction_scale,
+            "gate_success_reward": args.gate_success_reward,
+            "fall_penalty": args.fall_penalty,
+        },
         "restore_checkpoint": (
             str(args.restore_checkpoint) if args.restore_checkpoint else None
+        ),
+        "base_kick_onnx": (
+            str(args.base_kick_onnx.resolve())
+            if args.base_kick_onnx is not None
+            else None
+        ),
+        "base_kick_onnx_sha256": (
+            _sha256(args.base_kick_onnx)
+            if args.base_kick_onnx is not None
+            else None
         ),
     }
     manifest_path.write_text(
@@ -318,8 +366,8 @@ def main() -> None:
             episode_length=env._config.episode_length,
             action_repeat=1,
             wrap_env_fn=wrapper.wrap_for_brax_training,
-            learning_rate=1.0e-4,
-            entropy_cost=1.0e-4,
+            learning_rate=args.learning_rate,
+            entropy_cost=args.entropy_cost,
             discounting=0.995,
             unroll_length=unroll_length,
             batch_size=batch_size,

@@ -711,3 +711,52 @@ and `978e8c5682dbc0001cf88b39dbc711cd4250d959672df9e07a866b0baf6e65c4`.
 This is meaningful growth but still a rejection at `29.35%` versus the 90%
 gate. A subsequent iteration must explicitly penalize learner falls; supervised
 loss and contact count are diagnostic only.
+
+## Safety DAgger, physical residuals and dense causal switching — 2026-09-01
+
+Failure-weighted DAgger round three contained 185,365 frames. Failed learner
+rollouts received weight 2 and fallen rollouts weight 6. Exact untouched replay
+passed 16/92, contacted in 92/92 and had zero falls. Safety recovered, but the
+round-two 27/92 peak did not. The round-three ONNX SHA-256 is
+`543e02671e0cc39034b08e4910156a64abf52668313834e0caa3e205dd8a3260`;
+the exact report SHA-256 is
+`fb69f70405cf0c0c897a2c964b0b464adce56358f2536c1a67b22425a58ba808`.
+
+The v3 clone can now run as a frozen JAX base policy under a bounded PPO
+correction. JAX inference uses highest-precision matrix multiplication and has
+a source/export parity test. The 16,384-step aggressive run passed 10/92 and
+fell three times. A 131,072-step conservative run evaluated every 16,384-step
+checkpoint in exact CPU physics. Safe results ranged from 12/92 to 15/92; the
+65,536 and 114,688 checkpoints each fell once. No checkpoint exceeded the
+safe 16/92 base, so physical residual PPO is rejected at this task scale.
+
+Single-pass sequence capture is byte-identical to the old repeated setup path.
+Seed 10601 produced 13,752 candidates from 512 approaches: 3,853 successful
+frames, 17 fallen frames and successful windows on 78/102 validation
+approaches for the original prototype. Its corpus manifest/NPZ SHA-256 values
+are `7aa8d4cc64e6cbab5750448d399a55b7c275bd91a200ae3e646197f7dd5ae56d`
+and `e6b537deb86d201f54683d28f618a0714a238a730b52c58d7d501b73ad8665d8`.
+
+Ten actions were then evaluated over every candidate. The four-action subset
+chosen only from training approaches is `[65, 107, 79, 4]`; it covers 383/408
+training and 101/102 untouched validation approaches. The bank manifest/NPZ
+SHA-256 values are `c5fce79d4dfa0d80ca46e8ab581df178eded55a5591485d05155b4308c1a2297`
+and `a81d5d80f633248079b0b066733d81fc815554c1a3b66301dbdbe5f7060b9cc6`.
+
+A deployable multi-label selector now supports whole-rollout fit/calibration/
+validation separation, group-balanced batches, causal consecutive-frame
+release, optional calibrated fallback and ONNX export. The safest all-bank
+model passes 66/102 blind approaches with zero falls and `95.65%` release
+precision. Current-state and anchor-history MLPs, grouped kNN, trajectory-level
+nearest-neighbour planning and a safe fixed fallback all remain below the
+90% total-success gate. This closes open-loop prototype selection as the main
+R1 route despite its `99.02%` oracle.
+
+An open-source refresh identified an exact robot match: the official ICRA 2026
+`Daffan/humanoid-soccer` Booster T1 source, Apache-2.0, commit
+`378a12ac7446cd175f973c04e32912eb9acbee10`. It trains a privileged 20-second
+approach-and-kick teacher in 4,096 environments, then a 50-frame-history DAgger
+student and constrained adaptation. The next experiment ports that task
+structure and curriculum to this repository's MuJoCo/Warp backend. No external
+checkpoint exists in the source, and Isaac Gym code is not copied into the
+competition runtime.

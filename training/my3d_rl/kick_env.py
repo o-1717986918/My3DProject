@@ -20,6 +20,7 @@ from .kick_transition import (
     estimate_locomotion_phase_jax,
     hip_pitch_indices,
 )
+from .kick_bc_jax import load_kick_behavior_clone_jax
 from .rcss_scene import DEFAULT_RESOURCE_ROOT, build_single_t1_soccer_model
 from .t1_control import APOLLO_DEFAULT_POSE, KICK_ACTION_SCALE, apollo_joint_gains
 
@@ -100,6 +101,7 @@ class DirectionalKick(mjx_env.MjxEnv):
         teacher_ball_offsets: np.ndarray | None = None,
         transition_qpos: np.ndarray | None = None,
         transition_qvel: np.ndarray | None = None,
+        base_kick_policy_path: Path | None = None,
     ) -> None:
         config = default_config() if config is None else config
         super().__init__(config, config_overrides)
@@ -166,7 +168,17 @@ class DirectionalKick(mjx_env.MjxEnv):
             ]
         )
         self._action_scale = jp.asarray(self._config.action_scale)
+        self._kick_action_scale = jp.asarray(KICK_ACTION_SCALE)
         self._walk_policy = load_apollo_walk_jax(DEFAULT_WALK_POLICY)
+        self._base_kick_policy = (
+            load_kick_behavior_clone_jax(
+                base_kick_policy_path,
+                observation_size=self.contract.observation_size,
+                action_size=self.contract.action_size,
+            )
+            if base_kick_policy_path is not None
+            else None
+        )
         if (teacher_joint_residuals is None) != (teacher_ball_offsets is None):
             raise ValueError(
                 "teacher residuals and ball offsets must be provided together"
@@ -343,6 +355,7 @@ class DirectionalKick(mjx_env.MjxEnv):
             "rng": rng,
             "step": jp.array(0, dtype=jp.int32),
             "last_action": jp.zeros(self.action_size),
+            "last_correction_action": jp.zeros(self.action_size),
             "walk_last_action": jp.zeros(self.action_size),
             "target_world": target_world,
             "target_distance": target_distance,
@@ -417,11 +430,18 @@ class DirectionalKick(mjx_env.MjxEnv):
             )
             - self._default_pose
         )
+        base_kick_action = teacher_joint_residual / self._kick_action_scale
+        if self._base_kick_policy is not None:
+            base_kick_action = self._base_kick_policy(state.obs["state"])
+        full_kick_action = jp.clip(
+            base_kick_action + action * self._action_scale / self._kick_action_scale,
+            -1.0,
+            1.0,
+        )
         targets = jp.clip(
             self._default_pose
             + 0.25 * walk_action
-            + teacher_joint_residual
-            + action * self._action_scale,
+            + full_kick_action * self._kick_action_scale,
             self._lowers,
             self._uppers,
         )
@@ -450,7 +470,9 @@ class DirectionalKick(mjx_env.MjxEnv):
         before_target = (remaining_distance >= -0.25).astype(jp.float32)
         overshoot = jp.maximum(-remaining_distance, 0.0)
         upright = jp.clip(torso_xmat[2, 2], 0.0, 1.0)
-        action_rate = jp.sum(jp.square(action - state.info["last_action"]))
+        action_rate = jp.sum(
+            jp.square(action - state.info["last_correction_action"])
+        )
         action_magnitude = jp.sum(jp.square(action))
         fall = (torso_height < 0.35) | (torso_xmat[2, 2] < 0.0)
         invalid = jp.isnan(data.qpos).any() | jp.isnan(data.qvel).any()
@@ -495,7 +517,8 @@ class DirectionalKick(mjx_env.MjxEnv):
         reward = sum(reward_terms.values()) * self.dt
 
         state.info["step"] += 1
-        state.info["last_action"] = action
+        state.info["last_action"] = full_kick_action
+        state.info["last_correction_action"] = action
         state.info["walk_last_action"] = walk_action
         state.info["last_progress"] = progress
         state.info["contacted"] = state.info["contacted"] | contact

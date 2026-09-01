@@ -299,6 +299,17 @@ to 10/92 and then 27/92; the second round contacts in every trial but falls in
 one. R1 remains blocked at the 83/92 and zero-fall gate, and no candidate is
 enabled in the competition runtime.
 
+Dense-transition checkpoint (2026-09-01): safety-weighted DAgger restores zero
+falls but regresses to 16/92, and every conservative physical-residual PPO
+checkpoint remains at or below 15/92. Byte-identical single-pass capture then
+scales timing evidence to 512 approaches. A four-action bank has 101/102 blind
+oracle coverage, while the best causal all-bank selector reaches 66/102 with
+zero falls and `95.65%` release precision. The missing capability is therefore
+not another prototype or threshold: open-loop outcomes are poorly identifiable
+at the switch boundary. R1 now ports the official ICRA 2026 Booster T1
+long-horizon privileged-teacher/history-student curriculum to MuJoCo/Warp;
+the default-off table remains only a regression fallback.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

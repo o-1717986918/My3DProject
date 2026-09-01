@@ -62,3 +62,26 @@ def test_validation_episodes_are_resolved_without_sample_leakage() -> None:
         validation_episodes_from_sample_split(
             episode_ids, np.array([0, 0, 0, 1, 0])
         )
+
+
+def test_teacher_dataset_validates_optional_sample_weights(tmp_path: Path) -> None:
+    path = tmp_path / "weighted.npz"
+    np.savez(
+        path,
+        observations=np.zeros((2, 96), dtype=np.float32),
+        actions=np.zeros((2, 23), dtype=np.float32),
+        episode_ids=np.array([0, 1]),
+        sample_weights=np.array([1.0, 3.0], dtype=np.float32),
+    )
+    dataset = load_teacher_dataset(path)
+    np.testing.assert_array_equal(dataset["sample_weights"], [1.0, 3.0])
+
+    np.savez(
+        path,
+        observations=np.zeros((2, 96), dtype=np.float32),
+        actions=np.zeros((2, 23), dtype=np.float32),
+        episode_ids=np.array([0, 1]),
+        sample_weights=np.array([1.0, 0.0], dtype=np.float32),
+    )
+    with pytest.raises(ValueError, match="positive finite"):
+        load_teacher_dataset(path)

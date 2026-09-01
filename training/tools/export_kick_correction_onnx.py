@@ -57,8 +57,15 @@ def main() -> None:
     parser.add_argument("--contract", type=Path, default=TRANSITION_CONTRACT)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--parity-output", type=Path)
+    parser.add_argument(
+        "--base-kick-onnx",
+        type=Path,
+        help="record the frozen base policy required by this correction",
+    )
     parser.add_argument("--seed", type=int, default=6201)
     args = parser.parse_args()
+    if args.base_kick_onnx is not None and not args.base_kick_onnx.is_file():
+        raise FileNotFoundError(args.base_kick_onnx)
 
     contract = load_policy_contract(args.contract)
 
@@ -164,13 +171,25 @@ def main() -> None:
         opset_imports=[helper.make_opsetid("", 17)],
     )
     model.ir_version = 10
-    for key, value in {
+    metadata = {
         "checkpoint": str(args.checkpoint.resolve()),
         "policy": contract.policy_name,
         "contract": str(args.contract.resolve()),
         "contract_sha256": _sha256(args.contract),
-        "composition": "apollo_walk_plus_teacher_table_plus_bounded_correction",
-    }.items():
+        "composition": (
+            "apollo_walk_plus_base_policy_plus_bounded_correction"
+            if args.base_kick_onnx is not None
+            else "apollo_walk_plus_teacher_table_plus_bounded_correction"
+        ),
+    }
+    if args.base_kick_onnx is not None:
+        metadata.update(
+            {
+                "base_kick_onnx": str(args.base_kick_onnx.resolve()),
+                "base_kick_onnx_sha256": _sha256(args.base_kick_onnx),
+            }
+        )
+    for key, value in metadata.items():
         entry = model.metadata_props.add()
         entry.key = key
         entry.value = value
