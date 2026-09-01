@@ -85,6 +85,12 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
     parser.add_argument("--base-anchor-weight", type=float, default=0.05)
     parser.add_argument("--action-bound-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--trainable-layers",
+        choices=("all", "output"),
+        default="all",
+        help="freeze the retained feature extractor when set to output",
+    )
     parser.add_argument("--seed", type=int, default=20260950)
     args = parser.parse_args()
     if (
@@ -126,7 +132,17 @@ def main() -> None:
         preprocess_observations_fn=preprocess,
     )
     normalizer_params, initial_actor_params, critic_params = base_params
-    optimizer = optax.adamw(args.learning_rate, weight_decay=1.0e-6)
+    base_optimizer = optax.adamw(args.learning_rate, weight_decay=1.0e-6)
+    if args.trainable_layers == "all":
+        optimizer = base_optimizer
+    else:
+        labels = jax.tree.map(lambda unused: "freeze", initial_actor_params)
+        labels["params"]["Dense_0"] = jax.tree.map(
+            lambda unused: "train", initial_actor_params["params"]["Dense_0"]
+        )
+        optimizer = optax.multi_transform(
+            {"train": base_optimizer, "freeze": optax.set_to_zero()}, labels
+        )
     optimizer_state = optimizer.init(initial_actor_params)
 
     @jax.jit
@@ -223,6 +239,7 @@ def main() -> None:
             "and_clipped_to_policy_contract"
         ),
         "action_bound_weight": args.action_bound_weight,
+        "trainable_layers": args.trainable_layers,
         "seed": args.seed,
         "train_samples": int(np.sum(data["split"] == 0)),
         "validation_samples": int(np.sum(data["split"] == 1)),
