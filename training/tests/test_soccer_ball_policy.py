@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import jax.numpy as jp
 
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.soccer_ball_policy import (
@@ -11,6 +12,7 @@ from my3d_rl.soccer_ball_policy import (
     append_ball_target_features,
     empty_ball_target_features,
     soccer_ball_target_features,
+    soccer_ball_target_features_jax,
 )
 
 
@@ -82,3 +84,25 @@ def test_append_preserves_inherited_actor_prefix():
     np.testing.assert_array_equal(result[110:], features)
     with pytest.raises(ValueError, match="shape"):
         append_ball_target_features(actor[:-1], features)
+
+
+def test_numpy_and_jax_ball_feature_encoders_match():
+    kwargs = {
+        "torso_position_world": np.array([1.0, -2.0, 0.7]),
+        "torso_yaw_rad": 0.31,
+        "torso_linear_velocity_world": np.array([0.2, -0.1, 0.0]),
+        "ball_position_world": np.array([1.4, -1.8, 0.11]),
+        "ball_velocity_world": np.array([2.0, 0.4, 0.1]),
+        "target_position_world_xy": np.array([4.0, -0.3]),
+        "requested_launch_speed_m_s": 3.2,
+        "requested_arrival_speed_m_s": 0.8,
+        "observation_age_s": 0.04,
+        "observation_valid": True,
+    }
+    numpy_features = soccer_ball_target_features(action_mode="pass", **kwargs)
+    jax_features = soccer_ball_target_features_jax(
+        **{name: jp.asarray(value) for name, value in kwargs.items()},
+        action_mode_one_hot=jp.array([1.0, 0.0, 0.0]),
+    )
+
+    np.testing.assert_allclose(jax_features, numpy_features, atol=1.0e-7)

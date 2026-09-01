@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+import jax
+import jax.numpy as jp
 import numpy as np
 
 
@@ -130,3 +132,57 @@ def append_ball_target_features(
         "ball_target_features", ball_target_features, SOCCER_BALL_FEATURE_SIZE
     )
     return np.concatenate([actor, features]).astype(np.float32)
+
+
+def soccer_ball_target_features_jax(
+    *,
+    torso_position_world: jax.Array,
+    torso_yaw_rad: jax.Array,
+    torso_linear_velocity_world: jax.Array,
+    ball_position_world: jax.Array,
+    ball_velocity_world: jax.Array,
+    target_position_world_xy: jax.Array,
+    requested_launch_speed_m_s: jax.Array,
+    requested_arrival_speed_m_s: jax.Array,
+    action_mode_one_hot: jax.Array,
+    observation_age_s: jax.Array,
+    observation_valid: jax.Array,
+) -> jax.Array:
+    """JAX form of the exact same 16-value deployment feature contract."""
+    cosine, sine = jp.cos(torso_yaw_rad), jp.sin(torso_yaw_rad)
+    world_to_yaw = jp.array(
+        [[cosine, sine, 0.0], [-sine, cosine, 0.0], [0.0, 0.0, 1.0]]
+    )
+    ball_position_local = world_to_yaw @ (
+        ball_position_world - torso_position_world
+    )
+    ball_velocity_local = world_to_yaw @ (
+        ball_velocity_world - torso_linear_velocity_world
+    )
+    target_delta_world = target_position_world_xy - ball_position_world[:2]
+    target_distance = jp.linalg.norm(target_delta_world)
+    target_direction_local = (
+        world_to_yaw[:2, :2] @ target_delta_world
+    ) / jp.maximum(target_distance, 1.0e-6)
+    features = jp.concatenate(
+        [
+            ball_position_local / jp.array([6.0, 4.0, 2.0]),
+            ball_velocity_local / jp.array([15.0, 15.0, 10.0]),
+            target_direction_local,
+            jp.array(
+                [
+                    target_distance / 20.0,
+                    requested_launch_speed_m_s / 15.0,
+                    requested_arrival_speed_m_s / 10.0,
+                ]
+            ),
+            action_mode_one_hot,
+            jp.array([jp.minimum(observation_age_s, 1.0), 1.0]),
+        ]
+    )
+    features = jp.clip(
+        jp.nan_to_num(features, nan=0.0, posinf=10.0, neginf=-10.0),
+        -10.0,
+        10.0,
+    )
+    return jp.where(observation_valid, features, jp.zeros_like(features))

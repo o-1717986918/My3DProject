@@ -38,6 +38,9 @@ def default_config() -> config_dict.ConfigDict:
         reset_joint_noise=0.002,
         reset_root_velocity_noise=0.005,
         reset_yaw_range=0.01,
+        fixed_motion_index=-1,
+        fixed_start_frame_min=-1,
+        fixed_start_frame_max=-1,
         action_delay_max_steps=0,
         foot_contact_tolerance=0.0,
         joint_position_scale=4.6,
@@ -89,15 +92,34 @@ class FiniteSoccerMotionTracking(mjx_env.MjxEnv):
         if self.contract.policy_name not in {
             "soccer_motion_policy_v1",
             "soccer_motion_policy_v2",
+            "soccer_ball_motion_policy_v1",
         }:
             raise ValueError("finite soccer tracking requires a soccer policy contract")
-        if self.contract.observation_size != 110 or self.contract.action_size != 23:
-            raise ValueError("soccer motion policy requires the 110 -> 23 boundary")
+        expected_observation_size = (
+            126
+            if self.contract.policy_name == "soccer_ball_motion_policy_v1"
+            else 110
+        )
+        if (
+            self.contract.observation_size != expected_observation_size
+            or self.contract.action_size != 23
+        ):
+            raise ValueError("soccer motion policy has an incompatible boundary")
         if self.contract.action_scale is None or not np.isclose(
             self._config.action_scale, self.contract.action_scale
         ):
             raise ValueError("environment action scale differs from policy contract")
         self.corpus = corpus
+        if not -1 <= self._config.fixed_motion_index < corpus.motion_count:
+            raise ValueError("fixed_motion_index is outside the motion corpus")
+        fixed_start_values = (
+            self._config.fixed_start_frame_min,
+            self._config.fixed_start_frame_max,
+        )
+        if (fixed_start_values[0] < 0) != (fixed_start_values[1] < 0):
+            raise ValueError("fixed start-frame bounds must be enabled together")
+        if fixed_start_values[0] >= 0 and fixed_start_values[0] > fixed_start_values[1]:
+            raise ValueError("fixed start-frame bounds must be increasing")
         self.prefix = prefix
         self._resource_root = resource_root
 
@@ -246,6 +268,17 @@ class FiniteSoccerMotionTracking(mjx_env.MjxEnv):
         )
         return jp.clip(reference + residual, self._lowers, self._uppers)
 
+    def _step_targets(
+        self,
+        state: mjx_env.State,
+        applied_action: jax.Array,
+        motion: jax.Array,
+        frame: jax.Array,
+    ) -> jax.Array:
+        """Control hook retained by ball-conditioned post-contact recovery."""
+        del state
+        return self.decode_action_targets(applied_action, motion, frame)
+
     def reset(self, rng: jax.Array) -> mjx_env.State:
         (
             rng,
@@ -256,10 +289,24 @@ class FiniteSoccerMotionTracking(mjx_env.MjxEnv):
             yaw_rng,
             delay_rng,
         ) = jax.random.split(rng, 7)
-        motion = jax.random.randint(
-            motion_rng, (), 0, self.corpus.motion_count, dtype=jp.int32
+        motion = (
+            jp.asarray(self._config.fixed_motion_index, dtype=jp.int32)
+            if self._config.fixed_motion_index >= 0
+            else jax.random.randint(
+                motion_rng, (), 0, self.corpus.motion_count, dtype=jp.int32
+            )
         )
-        frame = jax.random.categorical(frame_rng, self._reset_logits[motion])
+        frame = (
+            jax.random.randint(
+                frame_rng,
+                (),
+                self._config.fixed_start_frame_min,
+                self._config.fixed_start_frame_max + 1,
+                dtype=jp.int32,
+            )
+            if self._config.fixed_start_frame_min >= 0
+            else jax.random.categorical(frame_rng, self._reset_logits[motion])
+        )
         (
             root_position,
             root_quaternion,
@@ -370,7 +417,9 @@ class FiniteSoccerMotionTracking(mjx_env.MjxEnv):
         motion = state.info["motion"]
         length = self._lengths[motion]
         frame = jp.minimum(state.info["reference_frame"] + 1, length - 1)
-        targets = self.decode_action_targets(applied_action, motion, frame)
+        targets = self._step_targets(
+            state, applied_action, motion, frame
+        )
         ctrl = state.data.ctrl.at[self._pos_actuator].set(targets)
         data = mjx_env.step(self._mjx_model, state.data, ctrl, self.n_substeps)
         (

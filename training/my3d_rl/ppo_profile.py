@@ -195,6 +195,26 @@ PROFILES = {
         init_noise_std=0.2,
         zero_mean_init=True,
     ),
+    # Checkpoint-compatible small-batch integration profile.  It exists only
+    # to exercise reset, rollout, gradient, checkpoint and dashboard paths;
+    # its output is never eligible for physical or runtime promotion.
+    "soccer_ball_motion_smoke_v1": PpoProfile(
+        name="soccer_ball_motion_smoke_v1",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=8,
+        batch_size=32,
+        num_minibatches=4,
+        num_updates_per_batch=1,
+        discounting=0.99,
+        entropy_cost=1.0e-4,
+        learning_rate=1.0e-5,
+        normalize_observations=False,
+        policy_contract="soccer_ball_motion_policy_v1",
+        init_noise_std=0.2,
+        zero_mean_init=True,
+    ),
     # Kept solely so the first integration checkpoints remain reproducible.
     "smoke_20260830": PpoProfile(
         name="smoke_20260830",
