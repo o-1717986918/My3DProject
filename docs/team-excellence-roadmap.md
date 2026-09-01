@@ -416,6 +416,26 @@ rendering in the accelerated loop. Evidence is locked in
 `training/locks/paid_k1a_2026_09_01.yaml`; next is full-corpus teacher generation,
 then BC and closed-loop DAgger before any PPO resume.
 
+K1-B full-corpus checkpoint (2026-09-01): all thirteen selected teachers now
+form a 6,834-frame hash-bound corpus. A PPO-compatible behavior clone passes a
+new 388-trial blind exact-CPU grid, improving completion from 111 to 117 with
+seven paired improvements, one regression and one-sided exact McNemar
+`p=0.0352`; mean survival improves from 0.5410 to 0.5638. It is the retained
+K1 actor, but remains outside the competition runtime because the finite
+motions do not yet constitute a parameterized ball skill or pass three seeds.
+
+Closed-loop DAgger exposed and corrected a teacher-definition defect: the
+fixed phase correction must be added to the original teacher-base actor, not
+to the already distilled student. All v1 aggregate/candidate evidence using
+the double correction is invalidated. Corrected beta-zero collection labels
+20,682 student-state frames. Conservative output-head-only retraining raises
+mean survival from 0.5517 to 0.5704 on a separate 666-trial grid, but completion
+changes only 183 to 184 (three improvements, two regressions, `p=0.5`). It is
+not promoted and PPO remains gated. The next teacher must use exact-CPU
+short-horizon state feedback on observed failure windows; more fixed-phase BC
+or PPO steps are not justified. Evidence is locked in
+`training/locks/paid_k1b_2026_09_01.yaml`.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

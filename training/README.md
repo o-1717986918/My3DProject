@@ -366,6 +366,30 @@ motion directory is preserved with an `incomplete-*` suffix before retry. The
 combined `teacher-corpus.npz` is created only when all 13 per-motion teacher
 gates pass, so behavior cloning cannot silently mix rejected demonstrations.
 
+Train the compatible actor from the selected corpus, then collect beta-zero
+DAgger labels on student states using the frozen teacher-base policy:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/train_soccer_motion_bc.py /path/to/teacher-corpus.npz \
+  --selection-manifest /path/to/selection-manifest.json \
+  --base-checkpoint /path/to/base/checkpoint \
+  --output-dir /home/win98/rl_runs/paid-k1/k1b-bc-<name>
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/collect_soccer_motion_dagger.py /path/to/corpus \
+  --student-checkpoint /path/to/bc/checkpoint \
+  --selection-manifest /path/to/selection-manifest.json \
+  --source-dataset /path/to/teacher-corpus.npz \
+  --output-dir /home/win98/rl_runs/paid-k1/k1b-dagger-<name>
+```
+
+The collector deliberately separates the executed student from the label
+policy. The label is the frozen teacher-base actor plus its selected
+motion-specific phase correction. Adding that correction to the already
+distilled student double-counts the teacher and is invalid. DAgger retraining
+may freeze the feature extractor with `--trainable-layers output`; it still
+requires a new exact-CPU grid that excludes all teacher and DAgger start frames.
+
 ## Release rule
 
 A checkpoint cannot be integrated until its model manifest, source revisions,

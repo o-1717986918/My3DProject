@@ -1,0 +1,118 @@
+schema_version: 1
+recorded_at: 2026-09-01
+stage: paid_k1b_full_corpus_bc_and_closed_loop_dagger
+status: behavior_clone_retained_dagger_not_promoted
+
+source:
+  corpus_root: /home/win98/rl_runs/paid-k0/corpus-semantic-v4
+  contract: training/contracts/soccer_motion_policy_v2.yaml
+  contract_sha256: ac4260e8d75d905d2b68d13c0033fb8af4f2a061660147f90343b0e45ba3e5df
+  teacher_base_checkpoint: /home/win98/rl_runs/paid-k1/train-semantic-prefailure-v3-s20260904/checkpoints/000002359296
+  selected_teacher_manifest: /home/win98/rl_runs/paid-k1/k1a-teacher-corpus-selected-v1/selection-manifest.json
+  selected_teacher_manifest_sha256: 9ec33391a6ebe7a849d1bd2b6c4184d3257c2b3c6394b76ba7a2e359b1381b4e
+  selected_teacher_dataset: /home/win98/rl_runs/paid-k1/k1a-teacher-corpus-selected-v1/teacher-corpus.npz
+  selected_teacher_dataset_sha256: f1d0d7983f9b079967b897ab600f8bf542926eaa625c3c627e1aa7e8841f4b7e
+
+full_corpus_teacher:
+  motion_count: 13
+  frames: 6834
+  train_frames: 3980
+  validation_frames: 2854
+  training:
+    baseline_completions: 14_of_56
+    teacher_completions: 20_of_56
+    mean_survival_fraction_delta: 0.1105426915
+    survival_improvements: 40
+    survival_regressions: 0
+  selected_teacher_validation:
+    baseline_completions: 24_of_56
+    teacher_completions: 25_of_56
+    mean_survival_fraction_delta: 0.0383956485
+    survival_improvements: 24
+    survival_regressions: 4
+  selection_boundary: teacher_validation_was_used_to_select_demonstrations
+
+behavior_clone:
+  git_revision: 6e951364efb02b352b71bc867d62378a1c3f4c9a
+  run_manifest: /home/win98/rl_runs/paid-k1/k1b-bc-formal-s20260951-v1/run-manifest.json
+  run_manifest_sha256: 79ca661386b8cb9f2e97a6883d43312d6a9ca9e9603ea04d39e0ff4cf08ad1b0
+  checkpoint: /home/win98/rl_runs/paid-k1/k1b-bc-formal-s20260951-v1/checkpoints/000000005000
+  checkpoint_tree_sha256: ceea98d0a94e4c4163b115d697ed546bf1f4e739888a7dde02542890692cb5de
+  checkpoint_tree_hash_algorithm: sha256_over_sorted_relative_path_nul_file_sha256_newline
+  steps: 5000
+  seed: 20260951
+  best_teacher_validation_mse: 0.0004717197
+  first_blind_grid:
+    trials: 388
+    excluded_teacher_starts: true
+    baseline_report_sha256: 4317bd773cb0495870bf107ceabb7073b48dc02e098ea588682346fbf282bc82
+    candidate_report_sha256: 55d6d10d10cec79f66373ced328e841a0a5a492fb47555eb9201c78b46e8b7af
+    comparison_sha256: 60af979d73662a52d0f0ccbb2346c85a4100df9619c4fa62e421566b8c72f7e4
+    baseline_completions: 111
+    candidate_completions: 117
+    candidate_only_completions: 7
+    baseline_only_completions: 1
+    baseline_mean_survival_fraction: 0.5410234470
+    candidate_mean_survival_fraction: 0.5637690866
+    one_sided_exact_mcnemar_p: 0.03515625
+    tracking_tolerance_passed: true
+    promotion_gate_passed: true
+  decision: retain_as_current_k1_actor_not_runtime_promoted
+
+dagger:
+  corrected_collector_git_revision: ed03e8a8bcf8b77d5733fc738d6086d386c7f308
+  execution_beta: 0.0
+  episodes: 388
+  corrected_student_state_frames: 20682
+  aggregate_frames: 27516
+  corrected_manifest: /home/win98/rl_runs/paid-k1/k1b-dagger-r1-formal-s20260957-v2/run-manifest.json
+  corrected_manifest_sha256: 33b2c0ea51c2adf3414ba19f19c7000d366ee5cf6c5a0812562db533def5feff
+  corrected_dataset: /home/win98/rl_runs/paid-k1/k1b-dagger-r1-formal-s20260957-v2/dagger-corpus.npz
+  corrected_dataset_sha256: 39a3c34426bd27c8ee97a896d2dd6f35343fa08c9843012a2ffba961d3d1b309
+  teacher_query: fixed_teacher_base_actor_plus_selected_phase_correction_on_student_states
+  conservative_candidate:
+    trainable_layers: output_only
+    steps: 1000
+    seed: 20260958
+    run_manifest_sha256: e199ba2ab4d1a1c976df1e03ac0d21fc8fee9e790b2cb6647062bd8b5ca1dfde
+    checkpoint_tree_sha256: 3f15d243aafd1afb6d29a52605c530e3bb0d3e0c71c6a27f243918a947996ef7
+  post_dagger_tuning_grid:
+    trials: 666
+    excludes_teacher_and_dagger_starts: true
+    baseline_report_sha256: e1ee29bd2484109172c15d197780007609335d0bbd4775290cf631bbdc3ee6b7
+    candidate_report_sha256: 3532515c9a024e3ac5ec3d77dd2af1009721c634c775731f11bca66a3759a7bb
+    comparison_sha256: 36c30d5911183aca76e1d462caae5695f3d561f636b4ccb7d0ac330a6d7f29c1
+    baseline_completions: 183
+    candidate_completions: 184
+    candidate_only_completions: 3
+    baseline_only_completions: 2
+    baseline_mean_survival_fraction: 0.5516663880
+    candidate_mean_survival_fraction: 0.5703934572
+    one_sided_exact_mcnemar_p: 0.5
+    tracking_tolerance_passed: true
+    promotion_gate_passed: false
+  decision: retain_experimental_do_not_replace_behavior_clone
+
+invalidated_evidence:
+  dagger_v1_manifest_sha256: 6ab66f4213700b030ba89794b6493dacfe13865c40b48d9e99cbf003d8db2eed
+  dagger_v1_dataset_sha256: d6350150b9a8dc48f53b6e8b71e0221761a6abe4948b6a3c9c0a63c53d747ce4
+  reason: teacher_phase_correction_was_erroneously_added_to_the_already_distilled_student_action
+  use_for_training_or_selection: false
+
+visualization:
+  tensorboard_root: /home/win98/rl_runs/paid-k1
+  behavior_clone_event_sha256: e091b4067d682afebc10060b1299e86e5f7d816dbb0639157eafd9d5e2b3eafe
+  corrected_dagger_event_sha256: 5899e88634f4219e134c483b44a472adf4196e1910120dd65492a1ff72513e2a
+  conservative_dagger_bc_event_sha256: c0ce160ff48547de381d0141975a52d008c33ca90e8416741fc344ca70bd9096
+  dashboard: http://localhost:6006
+
+decision:
+  current_retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-bc-formal-s20260951-v1/checkpoints/000000005000
+  runtime_promotable: false
+  ppo_resume_gate_passed: false
+  blocker: fixed_phase_teacher_is_not_state_feedback_and_corrected_dagger_lacks_significant_completion_gain
+  next:
+    - implement_short_horizon_exact_cpu_state_feedback_teacher_on_failure_windows
+    - aggregate_only_state_feedback_labels_that_outperform_the_student_locally
+    - require_a_new_untouched_grid_before_any_ppo_resume
+    - keep_the_current_behavior_clone_as_fallback_and_ablation

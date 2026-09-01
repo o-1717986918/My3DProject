@@ -1013,3 +1013,37 @@ This supports expanding the teacher to all thirteen locked motions and then
 training BC/DAgger. It does not promote a model, widen a runtime envelope, or
 justify PPO resume by itself. The report, 585-frame dataset and eight-generation
 TensorBoard event are bound by `training/locks/paid_k1a_2026_09_01.yaml`.
+
+## PAiD K1-B full-corpus BC and corrected DAgger — 2026-09-01
+
+Thirteen independent accepted teachers were assembled without copying local
+motions into Git. The selected corpus contains 6,834 frames and is bound to
+selection-manifest SHA-256 `9ec33391a6ebe7a849d1bd2b6c4184d3257c2b3c6394b76ba7a2e359b1381b4e`.
+The compatible 512-256-128 PPO actor was fine-tuned for 5,000 steps while the
+normalizer and critic were retained. Teacher-validation MSE reached
+`0.00047172`.
+
+The first model-selection grid excluded every teacher train/validation start.
+Across 388 paired exact-CPU episodes, completion changed from 111 to 117,
+survival from 0.5410 to 0.5638, and transitions were seven candidate-only
+versus one baseline-only completion (`p=0.03515625`). Tracking tolerances pass,
+so this BC checkpoint replaces the prior K1 experimental actor, not the Apollo
+competition motion.
+
+The initial DAgger implementation was then rejected for a causal defect. It
+queried `student + phase correction`; because the student already distilled
+`teacher base + phase correction`, this doubled the correction and caused mean
+blind action magnitude to grow from 0.0666 to 0.2548. Dataset SHA-256
+`d6350150...` and every candidate derived from it are explicitly invalid.
+
+The corrected collector executes the student with beta zero and labels the
+same state using the frozen original teacher-base actor plus the selected
+motion correction. It aggregates 20,682 new frames. Output-head-only retraining
+keeps mean blind action at 0.0685 and improves mean survival from 0.5517 to
+0.5704 on 666 starts excluded from both teacher and DAgger data. Completion is
+only 184 versus 183, however, with three improvements, two regressions and
+`p=0.5`; the DAgger candidate is not promoted. This demonstrates that the
+remaining limitation is the open-loop phase teacher, not a lack of supervised
+optimizer steps. A state-feedback short-horizon exact-CPU teacher is required
+before PPO resume. Full paths and hashes are in
+`training/locks/paid_k1b_2026_09_01.yaml`.
