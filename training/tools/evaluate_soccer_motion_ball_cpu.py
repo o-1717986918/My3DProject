@@ -8,6 +8,7 @@ from collections import defaultdict
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 from typing import Any
 
 import mujoco
@@ -47,15 +48,47 @@ def _sha256_file(path: Path) -> str:
 
 
 def _checkpoint_tree_sha256(path: Path) -> str:
+    if not path.is_dir():
+        raise FileNotFoundError(f"checkpoint directory does not exist: {path}")
     files = sorted(item for item in path.rglob("*") if item.is_file())
     if not files:
         raise ValueError("checkpoint directory is empty")
     digest = hashlib.sha256()
     for item in files:
-        digest.update(str(item.relative_to(path)).encode("utf-8"))
+        digest.update(item.relative_to(path).as_posix().encode("utf-8"))
         digest.update(b"\0")
-        digest.update(hashlib.sha256(item.read_bytes()).digest())
+        digest.update(hashlib.sha256(item.read_bytes()).hexdigest().encode("ascii"))
+        digest.update(b"\n")
     return digest.hexdigest()
+
+
+def _git_provenance() -> dict[str, Any]:
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], text=True, encoding="utf-8"
+    ).strip()
+    status = subprocess.check_output(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        text=True,
+        encoding="utf-8",
+    )
+    return {
+        "revision": revision,
+        "dirty": bool(status),
+        "working_tree_status_sha256": hashlib.sha256(status.encode()).hexdigest(),
+    }
+
+
+def _validate_output_path(path: Path) -> None:
+    if not path.is_absolute():
+        raise ValueError("output path must be absolute")
+    try:
+        path.resolve().relative_to(REPOSITORY_ROOT.resolve())
+    except ValueError:
+        pass
+    else:
+        raise ValueError("output path must stay outside the repository")
+    if path.exists():
+        raise FileExistsError(f"output already exists: {path}")
 
 
 def _reference_foot_centers(
@@ -443,7 +476,19 @@ def main() -> None:
     )
     parser.add_argument("--recovery-blend-frames", type=int, default=20)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="allow exploratory output from an uncommitted tree",
+    )
     args = parser.parse_args()
+    _validate_output_path(args.output)
+    git_provenance = _git_provenance()
+    if git_provenance["dirty"] and not args.allow_dirty:
+        raise RuntimeError(
+            "formal ball screening requires a clean Git tree; use --allow-dirty "
+            "only for exploratory runs"
+        )
 
     if args.zero_policy == (args.checkpoint is not None):
         raise ValueError("select exactly one of --zero-policy or --checkpoint")
@@ -673,10 +718,14 @@ def main() -> None:
             "three untouched seeds, arrival-speed gates and server replay"
         ),
         "engine": f"MuJoCo {mujoco.__version__}",
+        "git_provenance": git_provenance,
         "policy": "zero_residual" if args.zero_policy else "checkpoint",
         "checkpoint": str(args.checkpoint.resolve()) if args.checkpoint else None,
         "checkpoint_tree_sha256": (
             _checkpoint_tree_sha256(args.checkpoint) if args.checkpoint else None
+        ),
+        "checkpoint_tree_hash_algorithm": (
+            "sha256_over_sorted_posix_relative_path_nul_file_sha256_hex_newline"
         ),
         "contract": str(args.contract.resolve()),
         "contract_sha256": _sha256_file(args.contract),

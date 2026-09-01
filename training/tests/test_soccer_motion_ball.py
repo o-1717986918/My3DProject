@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import numpy as np
 import pytest
 
@@ -9,6 +10,32 @@ from my3d_rl.soccer_motion_ball import (
     place_reference_ball_xy,
     select_reference_strike,
 )
+from tools.evaluate_soccer_motion_ball_cpu import (
+    _checkpoint_tree_sha256,
+    _validate_output_path,
+)
+
+
+def test_ball_evaluator_uses_canonical_checkpoint_tree_hash(tmp_path):
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "z").write_bytes(b"last")
+    (checkpoint / "a").write_bytes(b"first")
+    expected = hashlib.sha256()
+    for name, value in (("a", b"first"), ("z", b"last")):
+        expected.update(name.encode("utf-8"))
+        expected.update(b"\0")
+        expected.update(hashlib.sha256(value).hexdigest().encode("ascii"))
+        expected.update(b"\n")
+
+    assert _checkpoint_tree_sha256(checkpoint) == expected.hexdigest()
+
+
+def test_ball_evaluator_refuses_existing_output(tmp_path):
+    output = tmp_path / "report.json"
+    output.write_text("existing")
+    with pytest.raises(FileExistsError, match="already exists"):
+        _validate_output_path(output)
 
 
 def test_ball_placement_perturbation_is_deterministic_and_bounded():
