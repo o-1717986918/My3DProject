@@ -144,7 +144,13 @@ std::array<float, 3> WalkRunner::compute_velocity_command(
         rel_orientation_deg = math::normalize_deg(command.orientation_deg.value());
     }
 
-    velocity[2] = static_cast<float>(kOrientationToAngVelScale * deg_to_rad(rel_orientation_deg));
+    const double orientation_gain = std::clamp(
+        std::isfinite(command.orientation_gain) ? command.orientation_gain : 1.0,
+        0.0,
+        4.0);
+    velocity[2] = static_cast<float>(
+        kOrientationToAngVelScale * orientation_gain *
+        deg_to_rad(rel_orientation_deg));
     velocity[0] = std::clamp(velocity[0], -0.5F, 1.0F);
     velocity[1] = std::clamp(velocity[1], -0.5F, 0.5F);
     velocity[2] = std::clamp(velocity[2], -0.5F, 0.5F);

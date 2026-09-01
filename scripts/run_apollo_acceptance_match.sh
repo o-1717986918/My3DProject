@@ -21,12 +21,74 @@ fi
 server_pid=
 player_pids=()
 client_strategy_args=()
+pass_sender_x=-3
+pass_sender_y=0
+pass_sender_qw=1
+pass_sender_qz=0
+pass_receiver_x=4
+pass_reassert_delay=0.05
+pass_reassert_settle_s=0.5
+kickoff_command_delay=0.5
+kick_calibration_scenario=0
 
 case "${APOLLO_ENABLE_PASS_STRATEGY:-1}" in
     1) ;;
     0) client_strategy_args+=(--disable-pass-strategy) ;;
     *)
         echo "APOLLO_ENABLE_PASS_STRATEGY must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+
+case "${MATCH_PARAMETERIZED_KICK_SCENARIO:-0}" in
+    1)
+        # Start outside the robot's near-field camera occlusion. The decision
+        # layer must perceive and commit the pass, then perform its validated
+        # 0.35 m setup before the residual kick is eligible.
+        pass_sender_x=-1.0
+        pass_sender_y=-0.5
+        pass_sender_qw=0.9238795
+        pass_sender_qz=0.3826834
+        # The planner's 1 m leading offset turns this into the table's
+        # validated 2 m target while the 1 m direct candidate is rejected as
+        # too near.
+        pass_receiver_x=1.0
+        ;;
+    0) ;;
+    *)
+        echo "MATCH_PARAMETERIZED_KICK_SCENARIO must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+
+case "${MATCH_KICK_CALIBRATION_SCENARIO:-0}" in
+    1)
+        # Motion-identification scene: preserve the real 7v7 strategy and
+        # Ready handshake, but remove most long-approach gait-state variance.
+        # Enter PlayOn before the passer walks into the torso-occlusion zone,
+        # so the world model can establish a new-mode self-vision track.
+        pass_sender_x=-0.8
+        pass_sender_y=0
+        pass_sender_qw=1
+        pass_sender_qz=0
+        pass_receiver_x=1.0
+        pass_reassert_delay=0.01
+        pass_reassert_settle_s=0.05
+        kickoff_command_delay=0.05
+        kick_calibration_scenario=1
+        ;;
+    0) ;;
+    *)
+        echo "MATCH_KICK_CALIBRATION_SCENARIO must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+
+case "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" in
+    1) client_strategy_args+=(--enable-parameterized-kick) ;;
+    0) ;;
+    *)
+        echo "APOLLO_ENABLE_PARAMETERIZED_KICK must be 0 or 1" >&2
         exit 2
         ;;
 esac
@@ -111,8 +173,8 @@ if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
         "(agent (unum 3) (team My3D-A) (move3d -10 5 0.8 1 0 0 0))" \
         "(agent (unum 4) (team My3D-A) (move3d -6 -7 0.8 1 0 0 0))" \
         "(agent (unum 5) (team My3D-A) (move3d -6 7 0.8 1 0 0 0))" \
-        "(agent (unum 6) (team My3D-A) (move3d 4 0 0.8 1 0 0 0))" \
-        "(agent (unum 7) (team My3D-A) (move3d -3 0 0.8 1 0 0 0))" \
+        "(agent (unum 6) (team My3D-A) (move3d $pass_receiver_x 0 0.8 1 0 0 0))" \
+        "(agent (unum 7) (team My3D-A) (move3d $pass_sender_x $pass_sender_y 0.8 $pass_sender_qw 0 0 $pass_sender_qz))" \
         "(agent (unum 1) (team My3D-B) (move3d 26 0 0.8 0 0 0 1))" \
         "(agent (unum 2) (team My3D-B) (move3d 18 -7 0.8 0 0 0 1))" \
         "(agent (unum 3) (team My3D-B) (move3d 18 -4 0.8 0 0 0 1))" \
@@ -128,9 +190,9 @@ if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
     "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
         --host 127.0.0.1 \
         --port "$monitor_port" \
-        --delay 0.05 \
-        "(agent (unum 6) (team My3D-A) (move3d 4 0 0.8 1 0 0 0))" \
-        "(agent (unum 7) (team My3D-A) (move3d -3 0 0.8 1 0 0 0))" \
+        --delay "$pass_reassert_delay" \
+        "(agent (unum 6) (team My3D-A) (move3d $pass_receiver_x 0 0.8 1 0 0 0))" \
+        "(agent (unum 7) (team My3D-A) (move3d $pass_sender_x $pass_sender_y 0.8 $pass_sender_qw 0 0 $pass_sender_qz))" \
         "(agent (unum 1) (team My3D-B) (move3d 26 0 0.8 0 0 0 1))" \
         "(agent (unum 2) (team My3D-B) (move3d 18 -7 0.8 0 0 0 1))" \
         "(agent (unum 3) (team My3D-B) (move3d 18 -4 0.8 0 0 0 1))" \
@@ -139,7 +201,7 @@ if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
         "(agent (unum 6) (team My3D-B) (move3d 18 4 0.8 0 0 0 1))" \
         "(agent (unum 7) (team My3D-B) (move3d 18 7 0.8 0 0 0 1))" \
         "(ball (pos -20 0 0.11) (vel 0 0 0))"
-    sleep 0.5
+    sleep "$pass_reassert_settle_s"
 elif [[ "${MATCH_PASS_SCENARIO:-0}" != 0 ]]; then
     echo "MATCH_PASS_SCENARIO must be 0 or 1" >&2
     exit 2
@@ -148,26 +210,51 @@ fi
 "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
     --host 127.0.0.1 \
     --port "$monitor_port" \
-    --delay 0.5 \
-    "(kickOff Left)" \
-    "(dropBall)"
+    --delay "$kickoff_command_delay" \
+    "(kickOff Left)"
 
 if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
-    sleep 0.5
     "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
         --host 127.0.0.1 \
         --port "$monitor_port" \
-        --delay 0.05 \
-        "(agent (unum 6) (team My3D-A) (move3d 4 0 0.8 1 0 0 0))" \
-        "(agent (unum 7) (team My3D-A) (move3d -3 0 0.8 1 0 0 0))" \
+        --delay 0 \
+        "(agent (unum 6) (team My3D-A) (move3d $pass_receiver_x 0 0.8 1 0 0 0))" \
+        "(agent (unum 7) (team My3D-A) (move3d $pass_sender_x $pass_sender_y 0.8 $pass_sender_qw 0 0 $pass_sender_qz))" \
         "(agent (unum 1) (team My3D-B) (move3d 26 0 0.8 0 0 0 1))" \
         "(agent (unum 2) (team My3D-B) (move3d 18 -7 0.8 0 0 0 1))" \
         "(agent (unum 3) (team My3D-B) (move3d 18 -4 0.8 0 0 0 1))" \
         "(agent (unum 4) (team My3D-B) (move3d 18 -1 0.8 0 0 0 1))" \
         "(agent (unum 5) (team My3D-B) (move3d 18 1 0.8 0 0 0 1))" \
         "(agent (unum 6) (team My3D-B) (move3d 18 4 0.8 0 0 0 1))" \
-        "(agent (unum 7) (team My3D-B) (move3d 18 7 0.8 0 0 0 1))" \
+        "(agent (unum 7) (team My3D-B) (move3d 18 7 0.8 0 0 0 1))"
+    sleep 0.1
+    "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        "(dropBall)"
+    sleep 0.1
+    "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
         "(ball (pos 0 0 0.11) (vel 0 0 0))"
+    if [[ "$kick_calibration_scenario" == 1 ]]; then
+        # First allow a post-transition camera update at 0.8 m, then remove
+        # approach gait phase and accidental pre-kick contacts. Decision,
+        # Ready handshake, residual selection, and physics remain unchanged.
+        sleep 0.2
+        "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+            --host 127.0.0.1 \
+            --port "$monitor_port" \
+            --delay 0 \
+            "(agent (unum 6) (team My3D-A) (move3d $pass_receiver_x 0 0.8 1 0 0 0))" \
+            "(agent (unum 7) (team My3D-A) (move3d -0.33 0 0.8 1 0 0 0))"
+        sleep 0.05
+    fi
+else
+    "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        "(dropBall)"
 fi
 
 clean_exits=0
@@ -192,7 +279,11 @@ play_on=$(
 )
 illegal_defense=$(grep -c "Illegal defense" "$run_dir/server.log" || true)
 kick_samples=$(
-    { grep -Eh "MY3D_STATUS.*motion=Kick(Forward|Stabilize|Hold)" \
+    { grep -Eh "MY3D_STATUS.*motion=(Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold)" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+parameterized_kick_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=Parameterized(Residual)?Kick(Forward|Stabilize|Hold)" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
 getup_samples=$(
@@ -209,7 +300,7 @@ pass_ready_samples=$(
 )
 targeted_pass_kick_samples=$(
     { grep -Eh \
-        "MY3D_STATUS.*motion=Kick(Forward|Stabilize|Hold).*kick_mode=TargetedPass" \
+        "MY3D_STATUS.*motion=(Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold).*kick_mode=TargetedPass" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
 pass_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
@@ -224,6 +315,11 @@ kick_requirement_failed=0
 if [[ "${MATCH_REQUIRE_KICK:-0}" == 1 && $kick_samples -eq 0 ]]; then
     kick_requirement_failed=1
 fi
+parameterized_kick_requirement_failed=0
+if [[ "${MATCH_REQUIRE_PARAMETERIZED_KICK:-0}" == 1 && \
+    $parameterized_kick_samples -eq 0 ]]; then
+    parameterized_kick_requirement_failed=1
+fi
 pass_requirement_failed=0
 if [[ "${MATCH_REQUIRE_PASS:-0}" == 1 ]] && \
     { [[ $pass_plan_samples -eq 0 ]] || [[ $pass_ready_samples -eq 0 ]] || \
@@ -234,11 +330,13 @@ fi
 if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
     || $play_on -ne 14 || $failures -ne 0 || $server_errors -ne 0 \
     || $illegal_defense -ne 0 || $kick_requirement_failed -ne 0 \
+    || $parameterized_kick_requirement_failed -ne 0 \
     || $pass_requirement_failed -ne 0 ]]; then
     echo "Apollo 7v7 acceptance failed: cycles=$max_cycles clean_exits=$clean_exits " \
         "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
         "server_errors=$server_errors illegal_defense=$illegal_defense " \
-        "kick_samples=$kick_samples getup_samples=$getup_samples " \
+        "kick_samples=$kick_samples parameterized_kick_samples=$parameterized_kick_samples " \
+        "getup_samples=$getup_samples " \
         "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
         "targeted_pass_kick_samples=$targeted_pass_kick_samples " \
         "pass_contact_events=$pass_contact_events " \
@@ -253,7 +351,8 @@ fi
 echo "Apollo 7v7 acceptance passed: cycles=$max_cycles clean_exits=$clean_exits " \
     "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
     "server_errors=$server_errors illegal_defense=$illegal_defense " \
-    "kick_samples=$kick_samples getup_samples=$getup_samples " \
+    "kick_samples=$kick_samples parameterized_kick_samples=$parameterized_kick_samples " \
+    "getup_samples=$getup_samples " \
     "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
     "targeted_pass_kick_samples=$targeted_pass_kick_samples " \
     "pass_contact_events=$pass_contact_events " \

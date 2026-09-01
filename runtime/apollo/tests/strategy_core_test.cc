@@ -19,6 +19,8 @@ world::WorldSnapshot make_open_pass_snapshot() {
     snapshot.play_mode_group = world::PlayModeGroup::Other;
     snapshot.self.position_m = {-0.6, 0.0, 0.8};
     snapshot.ball.visible = true;
+    snapshot.ball.position_valid = true;
+    snapshot.ball.position_age_s = 0.0;
     snapshot.ball.position_m = {0.0, 0.0, 0.11};
     snapshot.teammates.resize(7);
     for (int number = 1; number <= 7; ++number) {
@@ -66,6 +68,27 @@ int main() {
         first.selected->action_id != second.selected->action_id ||
         first.tactical_state.possession != strategy::PossessionOwner::Ours) {
         std::cerr << "open passing lane was not selected deterministically\n";
+        return 1;
+    }
+
+    world::WorldSnapshot tracked = open;
+    tracked.ball.visible = false;
+    tracked.ball.position_age_s = 0.12;
+    const auto tracked_result = planner.plan(tracked);
+    if (!tracked_result.selected.has_value() ||
+        tracked_result.selected->category != strategy::ActionCategory::Pass) {
+        std::cerr << "validated ball track was rejected between camera frames\n";
+        return 1;
+    }
+
+    world::WorldSnapshot invalid_ball = tracked;
+    invalid_ball.ball.position_valid = false;
+    const strategy::PassCandidateGenerator default_generator;
+    const auto invalid_ball_result = default_generator.generate(invalid_ball);
+    if (!invalid_ball_result.candidates.empty() ||
+        !has_rejection(
+            invalid_ball_result, strategy::RejectionReason::BallNotVisible)) {
+        std::cerr << "invalid ball track was not rejected\n";
         return 1;
     }
 

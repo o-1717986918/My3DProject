@@ -8,6 +8,7 @@
 #include "src/world/play_mode.h"
 
 #include <optional>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -15,7 +16,11 @@
 namespace world {
 
 constexpr double kFallenHeightThresholdM = 0.3;
-
+inline constexpr double kBallPositionFreshLifetimeS = 0.20;
+// A close ball routinely disappears behind the robot's torso during the final
+// approach. A track established by the robot's own near-field vision gets this
+// larger, still bounded lifetime; ordinary global estimates do not.
+inline constexpr double kNearContactBallTrackLifetimeS = 3.5;
 
 /// Estimated state of the controlled robot in the canonical team frame.
 struct SelfState {
@@ -31,6 +36,9 @@ struct SelfState {
 /// Best available ball estimate in the canonical team frame.
 struct BallState {
     bool visible{false};
+    bool position_valid{false};
+    bool near_contact_track{false};
+    double position_age_s{std::numeric_limits<double>::infinity()};
     Vec3 position_m{0.0, 0.0, 0.0};
     Vec3 velocity_mps{0.0, 0.0, 0.0};
     bool velocity_valid{false};

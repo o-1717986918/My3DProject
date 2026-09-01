@@ -24,6 +24,10 @@ struct WalkCommand {
     bool target_absolute{true};
     std::optional<double> orientation_deg;
     bool orientation_absolute{true};
+    // Multiplier for the walk runner's orientation controller. Keep the
+    // default neutral; precision tasks may raise it to overcome the learned
+    // locomotion policy's small-command dead zone.
+    double orientation_gain{1.0};
     std::optional<int> role_id;
 };
 

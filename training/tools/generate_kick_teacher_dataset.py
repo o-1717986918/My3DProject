@@ -13,6 +13,7 @@ import numpy as np
 
 from my3d_rl.kick_env import DEFAULT_CONTRACT
 from my3d_rl.kick_teacher import (
+    CEMResult,
     DEFAULT_WALK_POLICY,
     KickTeacherEvaluator,
     KickTeacherSpec,
@@ -51,6 +52,11 @@ def main() -> None:
         type=Path,
         nargs="+",
         help="reuse matching per-condition CEM parameters from earlier runs",
+    )
+    parser.add_argument(
+        "--reuse-exact-without-optimization",
+        action="store_true",
+        help="copy exact accepted initial nodes and optimize only missing conditions",
     )
     parser.add_argument(
         "--output-prefix",
@@ -114,24 +120,55 @@ def main() -> None:
         evaluator = KickTeacherEvaluator(spec)
         condition_key = (distance, angle, ball_x, ball_y, args.mode)
         condition_initial = initial_parameters_by_condition.get(condition_key)
-        restart_results = []
-        for restart in range(args.restarts):
-            condition_seed = args.seed + condition_index * args.restarts + restart
-            restart_results.append(
-                evaluator.optimize(
-                    seed=condition_seed,
-                    population=args.population,
-                    generations=args.generations,
-                    robust_samples=args.robust_samples,
-                    ball_x_offset_m=ball_x,
-                    ball_y_offset_m=ball_y,
-                    initial_parameters=(
-                        condition_initial
-                        if restart == 0 and condition_initial is not None
-                        else warm_start if restart == 0 else None
+        reused_exact = (
+            args.reuse_exact_without_optimization and condition_initial is not None
+        )
+        if condition_initial is None and initial_parameters_by_condition:
+            compatible = [
+                (key, parameters)
+                for key, parameters in initial_parameters_by_condition.items()
+                if key[0] == distance and key[1] == angle and key[4] == args.mode
+            ]
+            if compatible:
+                _, condition_initial = min(
+                    compatible,
+                    key=lambda item: (
+                        ((item[0][2] - ball_x) / 0.045) ** 2
+                        + ((item[0][3] - ball_y) / 0.04) ** 2
                     ),
                 )
+        if reused_exact:
+            initial_metrics = evaluator.rollout(
+                condition_initial,
+                ball_x_offset_m=ball_x,
+                ball_y_offset_m=ball_y,
             )
+            restart_results = [
+                CEMResult(
+                    parameters=condition_initial,
+                    score=float(initial_metrics["score"]),
+                    history=tuple(),
+                )
+            ]
+        else:
+            restart_results = []
+            for restart in range(args.restarts):
+                condition_seed = args.seed + condition_index * args.restarts + restart
+                restart_results.append(
+                    evaluator.optimize(
+                        seed=condition_seed,
+                        population=args.population,
+                        generations=args.generations,
+                        robust_samples=args.robust_samples,
+                        ball_x_offset_m=ball_x,
+                        ball_y_offset_m=ball_y,
+                        initial_parameters=(
+                            condition_initial
+                            if restart == 0 and condition_initial is not None
+                            else warm_start if restart == 0 else None
+                        ),
+                    )
+                )
         result = max(restart_results, key=lambda candidate: candidate.score)
         condition_seed = (
             args.seed
@@ -185,6 +222,7 @@ def main() -> None:
                 "metrics": metrics,
                 "history": list(result.history),
                 "restart_scores": [candidate.score for candidate in restart_results],
+                "reused_exact_initial": reused_exact,
             }
         )
 
@@ -238,6 +276,7 @@ def main() -> None:
             if args.initial_manifest is not None
             else []
         ),
+        "initialization": "exact_condition_then_nearest_compatible_condition",
         "records": records,
     }
     manifest_path.write_text(

@@ -37,6 +37,12 @@ public:
         const decision::HighLevelCommand& command,
         bool reset);
 
+    int active_kick_condition_index() const {
+        return kick_residual_active_ && kick_residual_runner_.has_value()
+            ? kick_residual_runner_->selected_condition_index()
+            : -1;
+    }
+
 private:
     enum class GetUpPhase : std::uint8_t {
         Idle,

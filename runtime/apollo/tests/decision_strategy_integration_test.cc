@@ -14,9 +14,11 @@ world::WorldSnapshot make_open_pass_snapshot() {
     snapshot.server_time = 1.0;
     snapshot.play_mode = world::PlayMode::PlayOn;
     snapshot.play_mode_group = world::PlayModeGroup::Other;
-    snapshot.self.position_m = {-0.6, 0.0, 0.8};
+    snapshot.self.position_m = {-0.33, 0.0, 0.8};
     snapshot.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
     snapshot.ball.visible = true;
+    snapshot.ball.position_valid = true;
+    snapshot.ball.position_age_s = 0.0;
     snapshot.ball.position_m = {0.0, 0.0, 0.11};
     snapshot.teammates.resize(7);
     for (int number = 1; number <= 7; ++number) {
@@ -49,8 +51,25 @@ int main() {
 
     const auto selected = blackboard.get<strategy::CooperativeAction>(
         decision::Blackboard::kKeySelectedCooperativeAction);
+
+    // The proposal must survive temporary receiver occlusion. Execution is
+    // still impossible until the receiver sends a matching Ready packet.
+    snapshot.server_time = 1.005;
+    snapshot.teammates[5].seen = false;
+    snapshot.teammates[5].last_seen_time = -1.0;
+    snapshot.teammates[5].position_m = {0.0, 0.0, 0.8};
+    const decision::HighLevelCommand occluded_wait = behavior.make_command(
+        snapshot, blackboard, role_manager, true);
+    if (std::holds_alternative<decision::KickCommand>(occluded_wait)) {
+        std::cerr << "passer released while receiver was occluded and not ready\n";
+        return 1;
+    }
+
     snapshot.server_time = 1.01;
-    snapshot.self.position_m = {-0.6, 0.3, 0.8};
+    snapshot.teammates[5].seen = true;
+    snapshot.teammates[5].last_seen_time = snapshot.server_time;
+    snapshot.teammates[5].position_m = {4.0, 0.0, 0.8};
+    snapshot.self.position_m = {-0.35, 0.3, 0.8};
     const decision::HighLevelCommand still_waiting = behavior.make_command(
         snapshot, blackboard, role_manager, true);
     if (std::holds_alternative<decision::KickCommand>(still_waiting)) {
@@ -59,7 +78,7 @@ int main() {
     }
 
     snapshot.server_time = 1.02;
-    snapshot.self.position_m = {-0.6, 0.0, 0.8};
+    snapshot.self.position_m = {-0.33, 0.0, 0.8};
     snapshot.team_comm_snapshot.pass_intents.push_back({
         selected.target_player_number,
         51,
@@ -72,6 +91,13 @@ int main() {
         selected.requested_ball_speed_mps,
         selected.predicted_ball_time_s,
     });
+    const decision::HighLevelCommand stabilizing = behavior.make_command(
+        snapshot, blackboard, role_manager, true);
+    if (std::holds_alternative<decision::KickCommand>(stabilizing)) {
+        std::cerr << "ready pass skipped the stable setup hold\n";
+        return 1;
+    }
+    snapshot.server_time = 1.63;
     const decision::HighLevelCommand released = behavior.make_command(
         snapshot, blackboard, role_manager, true);
     if (!std::holds_alternative<decision::KickCommand>(released)) {

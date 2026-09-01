@@ -24,6 +24,8 @@ world::WorldSnapshot make_snapshot() {
     snapshot.self.position_m = {0.0, 0.0, 0.65};
     snapshot.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
     snapshot.ball.visible = true;
+    snapshot.ball.position_valid = true;
+    snapshot.ball.position_age_s = 0.0;
     snapshot.ball.position_m = {0.32, 0.0, 0.11};
     return snapshot;
 }
@@ -63,7 +65,7 @@ int main() {
         APOLLO_CODE_BASE_PROJECT_SOURCE_DIR) /
         "assets/keyframes/kick_residual_table.yaml";
     behavior::KickResidualRunner runner(table);
-    if (runner.node_count() != 15U) {
+    if (runner.node_count() < 150U) {
         std::cerr << "unexpected kick residual table size\n";
         return 1;
     }
@@ -111,8 +113,20 @@ int main() {
     }
     profile = make_profile();
     snapshot.ball.visible = false;
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "fresh occluded ball did not select a node\n";
+        return 1;
+    }
+    snapshot.ball.position_age_s = 1.50;
+    snapshot.ball.near_contact_track = true;
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "bounded near-field ball track was rejected\n";
+        return 1;
+    }
+    snapshot.ball.position_age_s =
+        world::kNearContactBallTrackLifetimeS + 0.01;
     if (runner.begin(snapshot, profile)) {
-        std::cerr << "invisible ball selected a node\n";
+        std::cerr << "expired ball position selected a node\n";
         return 1;
     }
     return 0;

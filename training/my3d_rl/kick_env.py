@@ -48,6 +48,8 @@ def default_config() -> config_dict.ConfigDict:
         ball_y_range=[-0.08, 0.08],
         target_angle_range=[-0.261799, 0.261799],
         target_distance_range=[2.0, 5.0],
+        fixed_action_mode=-1,
+        fixed_desired_arrival_speed=-1.0,
         rolling_deceleration_mps2=0.08,
     )
 
@@ -63,9 +65,17 @@ class DirectionalKick(mjx_env.MjxEnv):
         contract: PolicyContract | None = None,
         resource_root: Path = DEFAULT_RESOURCE_ROOT,
         prefix: str = "train_",
+        teacher_joint_residuals: np.ndarray | None = None,
+        teacher_ball_offsets: np.ndarray | None = None,
     ) -> None:
         config = default_config() if config is None else config
         super().__init__(config, config_overrides)
+        if self._config.fixed_action_mode not in (-1, 0, 1, 2):
+            raise ValueError("fixed_action_mode must be -1, 0, 1, or 2")
+        if self._config.fixed_desired_arrival_speed != -1.0 and not (
+            0.0 < self._config.fixed_desired_arrival_speed <= 6.0
+        ):
+            raise ValueError("fixed_desired_arrival_speed must be -1 or in (0, 6]")
         self.contract = contract or load_policy_contract(DEFAULT_CONTRACT)
         self.prefix = prefix
         self._resource_root = resource_root
@@ -119,6 +129,38 @@ class DirectionalKick(mjx_env.MjxEnv):
         )
         self._action_scale = jp.asarray(self._config.action_scale)
         self._walk_policy = load_apollo_walk_jax(DEFAULT_WALK_POLICY)
+        if (teacher_joint_residuals is None) != (teacher_ball_offsets is None):
+            raise ValueError(
+                "teacher residuals and ball offsets must be provided together"
+            )
+        if teacher_joint_residuals is None:
+            teacher_joint_residuals = np.zeros(
+                (1, self._config.episode_length, self.action_size), dtype=np.float32
+            )
+            teacher_ball_offsets = np.zeros((1, 2), dtype=np.float32)
+            self._uses_teacher_residual = False
+        else:
+            teacher_joint_residuals = np.asarray(
+                teacher_joint_residuals, dtype=np.float32
+            )
+            teacher_ball_offsets = np.asarray(teacher_ball_offsets, dtype=np.float32)
+            if (
+                teacher_joint_residuals.ndim != 3
+                or teacher_joint_residuals.shape[1] < self._config.episode_length
+                or teacher_joint_residuals.shape[2] != self.action_size
+                or teacher_ball_offsets.shape != (teacher_joint_residuals.shape[0], 2)
+            ):
+                raise ValueError(
+                    "teacher table has incompatible residual/offset shapes"
+                )
+            if (
+                not np.isfinite(teacher_joint_residuals).all()
+                or not np.isfinite(teacher_ball_offsets).all()
+            ):
+                raise ValueError("teacher table must be finite")
+            self._uses_teacher_residual = True
+        self._teacher_joint_residuals = jp.asarray(teacher_joint_residuals)
+        self._teacher_ball_offsets = jp.asarray(teacher_ball_offsets)
 
     def _configure_pd_actuators(self) -> None:
         for joint_name, effector in zip(
@@ -184,17 +226,29 @@ class DirectionalKick(mjx_env.MjxEnv):
             minval=self._config.target_distance_range[0],
             maxval=self._config.target_distance_range[1],
         )
-        action_mode_index = jax.random.randint(mode_rng, (), 0, 3)
+        action_mode_index = (
+            jp.asarray(self._config.fixed_action_mode, dtype=jp.int32)
+            if self._config.fixed_action_mode >= 0
+            else jax.random.randint(mode_rng, (), 0, 3)
+        )
         arrival_min = jp.array([0.4, 1.5, 1.0])[action_mode_index]
         arrival_max = jp.array([1.2, 2.5, 2.0])[action_mode_index]
         desired_arrival_speed = jax.random.uniform(
             arrival_rng, minval=arrival_min, maxval=arrival_max
         )
+        if self._config.fixed_desired_arrival_speed >= 0.0:
+            desired_arrival_speed = jp.asarray(
+                self._config.fixed_desired_arrival_speed, dtype=jp.float32
+            )
         requested_ball_speed = jp.sqrt(
             desired_arrival_speed * desired_arrival_speed
             + 2.0 * self._config.rolling_deceleration_mps2 * target_distance
         )
         action_mode = jax.nn.one_hot(action_mode_index, 3)
+        teacher_distance = jp.square(
+            (self._teacher_ball_offsets[:, 0] - ball_x) / 0.045
+        ) + jp.square((self._teacher_ball_offsets[:, 1] - ball_y) / 0.04)
+        teacher_index = jp.argmin(teacher_distance)
 
         ctrl = jp.zeros(self._mj_model.nu)
         ctrl = ctrl.at[self._pos_actuator].set(self._default_pose)
@@ -220,6 +274,7 @@ class DirectionalKick(mjx_env.MjxEnv):
             "action_mode": action_mode,
             "initial_ball_xy": ball_pos[:2],
             "last_progress": jp.array(0.0),
+            "teacher_index": teacher_index,
         }
         metrics = {
             "reward/directional_velocity": jp.array(0.0),
@@ -263,8 +318,25 @@ class DirectionalKick(mjx_env.MjxEnv):
             ]
         )
         walk_action = self._walk_policy(walk_observation)
+        teacher_step = jp.minimum(
+            state.info["step"], self._teacher_joint_residuals.shape[1] - 1
+        )
+        raw_teacher_joint_residual = self._teacher_joint_residuals[
+            state.info["teacher_index"], teacher_step
+        ]
+        teacher_joint_residual = (
+            jp.clip(
+                self._default_pose + raw_teacher_joint_residual,
+                self._lowers,
+                self._uppers,
+            )
+            - self._default_pose
+        )
         targets = jp.clip(
-            self._default_pose + 0.25 * walk_action + action * self._action_scale,
+            self._default_pose
+            + 0.25 * walk_action
+            + teacher_joint_residual
+            + action * self._action_scale,
             self._lowers,
             self._uppers,
         )
@@ -302,7 +374,7 @@ class DirectionalKick(mjx_env.MjxEnv):
             "corridor": 0.15 * corridor,
             "upright": 0.2 * upright,
             "action_rate": -0.01 * action_rate,
-            "fall": -5.0 * fall.astype(jp.float32),
+            "fall": -100.0 * fall.astype(jp.float32),
             "overshoot": -2.0 * overshoot,
         }
         reward = sum(reward_terms.values()) * self.dt

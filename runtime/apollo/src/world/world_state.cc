@@ -8,12 +8,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 
 namespace world {
 
 namespace {
+
+constexpr double kNearContactBallTrackActivationDistanceM = 1.5;
 
 Vec3 deg_sph2cart(const server::PolarObservation& polar) {
     const double azimuth_rad = math::deg_to_rad(polar.azimuth_deg);
@@ -150,6 +153,7 @@ void WorldState::update_from_perception(
             // explicit for any future reader.)
             last_known_ball_time_ = -1.0;
             last_known_ball_position_m_ = {0.0, 0.0, 0.0};
+            near_contact_ball_track_until_s_ = -1.0;
             // Ball was teleported by the server (kickoff/set play/goal), so the
             // constant-velocity track is meaningless now; drop it and let the
             // next real detection re-initialize.
@@ -280,6 +284,10 @@ void WorldState::update_from_perception(
             // range (far detections are noisier, so trusted less).
             const double self_to_ball =
                 math::norm3(math::vec3_sub(proposed_ball, self.position_m));
+            near_contact_ball_track_until_s_ =
+                self_to_ball <= kNearContactBallTrackActivationDistanceM
+                    ? frame.server_time + kNearContactBallTrackLifetimeS
+                    : -1.0;
             ball_kalman_.update(proposed_ball, self_to_ball, frame.server_time);
             ball.position_m = ball_kalman_.position();
             ball.visible = true;
@@ -370,6 +378,17 @@ void WorldState::update_from_perception(
         ball.velocity_mps = ball_kalman_.velocity();
         ball.velocity_valid = ball_kalman_.velocity_confident(frame.server_time);
     }
+
+    ball.position_age_s = last_known_ball_time_ > 0.0
+        ? std::max(0.0, frame.server_time - last_known_ball_time_)
+        : std::numeric_limits<double>::infinity();
+    ball.near_contact_track =
+        !ball.visible && last_known_ball_time_ > 0.0 &&
+        frame.server_time <= near_contact_ball_track_until_s_;
+    ball.position_valid =
+        ball.visible ||
+        ball.position_age_s <= kBallPositionFreshLifetimeS ||
+        ball.near_contact_track;
 
     for (auto& player : snapshot_.teammates) {
         player.seen = false;
@@ -560,6 +579,12 @@ void WorldState::set_team_comm_snapshot(const comm::TeamCommSnapshot& comm_snaps
                 // perception tick can reject teleports from the fused estimate.
                 last_known_ball_position_m_ = snapshot_.ball.position_m;
                 last_known_ball_time_ = snapshot_.server_time;
+                const double self_to_fused_ball = math::norm3(math::vec3_sub(
+                    snapshot_.ball.position_m, snapshot_.self.position_m));
+                if (self_to_fused_ball >
+                    kNearContactBallTrackActivationDistanceM) {
+                    near_contact_ball_track_until_s_ = -1.0;
+                }
                 fused_from_comm = true;
             }
         }
@@ -588,9 +613,14 @@ void WorldState::set_team_comm_snapshot(const comm::TeamCommSnapshot& comm_snaps
             // mode drop point rather than the stale last-known spot. Corner kicks
             // never reach here: their Locked anchor keeps ball.visible = true.
             constexpr double kFallbackFreshnessS = 2.0;
+            const bool have_near_contact_track =
+                last_known_ball_time_ > 0.0 &&
+                snapshot_.server_time <= near_contact_ball_track_until_s_;
             const bool have_recent_last =
                 last_known_ball_time_ > 0.0 &&
-                (snapshot_.server_time - last_known_ball_time_) <= kFallbackFreshnessS;
+                ((snapshot_.server_time - last_known_ball_time_) <=
+                     kFallbackFreshnessS ||
+                 have_near_contact_track);
             snapshot_.ball.position_m = have_recent_last
                 ? last_known_ball_position_m_
                 : set_play_ball_anchor(snapshot_.play_mode);
@@ -598,6 +628,17 @@ void WorldState::set_team_comm_snapshot(const comm::TeamCommSnapshot& comm_snaps
             snapshot_.ball.velocity_mps = {0.0, 0.0, 0.0};
         }
     }
+
+    snapshot_.ball.position_age_s = last_known_ball_time_ > 0.0
+        ? std::max(0.0, snapshot_.server_time - last_known_ball_time_)
+        : std::numeric_limits<double>::infinity();
+    snapshot_.ball.near_contact_track =
+        !snapshot_.ball.visible && last_known_ball_time_ > 0.0 &&
+        snapshot_.server_time <= near_contact_ball_track_until_s_;
+    snapshot_.ball.position_valid =
+        snapshot_.ball.visible ||
+        snapshot_.ball.position_age_s <= kBallPositionFreshLifetimeS ||
+        snapshot_.ball.near_contact_track;
 
     for (const auto& record : snapshot_.team_comm_snapshot.records) {
         if (!record.opponent_seen || record.sender_player_number == snapshot_.player_number) {

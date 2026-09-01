@@ -42,7 +42,11 @@ public:
 
 private:
     static constexpr float kActionScale = 0.25F;
-    static constexpr float kOrientationToAngVelScale = 0.2F;
+    // The policy input is an angular-velocity request in rad/s. A 0.2 gain
+    // left a persistent ~15 degree dead-zone during close ball alignment;
+    // unit gain preserves the physical meaning and reaches the 2 degree kick
+    // release gate without exceeding the existing +/-0.5 rad/s clamp.
+    static constexpr float kOrientationToAngVelScale = 1.0F;
 
     OnnxSession session_;
     robot::T1RobotModel robot_model_;

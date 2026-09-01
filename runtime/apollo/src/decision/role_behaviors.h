@@ -30,6 +30,7 @@ struct APState {
     double previous_ball_distance{0.0};
     double kick_active_until_s{0.0};
     double next_kick_allowed_s{0.0};
+    double kick_setup_stable_since_s{0.0};
     double pass_commit_until_s{0.0};
     std::uint8_t next_pass_sequence_id{0U};
     std::optional<strategy::CooperativeAction> committed_pass;

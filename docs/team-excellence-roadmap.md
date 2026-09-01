@@ -273,6 +273,15 @@ CEM and the current MLP are closed at this checkpoint; the remaining R1 route
 starts with adaptive ball setup/contact timing, then adds 2/3.5/5 m pass,
 direction, shot/clear, moving-ball, server and three-seed gates.
 
+Server transition checkpoint (2026-09-01): controlled 7v7 trials proved that
+the same residual table node can range from no contact to 2.70 m and can change
+direction error by more than 40 degrees when only the underlying walking state
+changes. Fixed ball pose and a longer stable hold did not remove the variance.
+The accepted continuation is therefore a versioned phase/state-conditioned
+transition policy trained from randomized pre-kick states, with deterministic
+setup and fallback retained. Evidence, external-method boundaries, and exact
+gates are recorded in [`kick-transition-development.md`](kick-transition-development.md).
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

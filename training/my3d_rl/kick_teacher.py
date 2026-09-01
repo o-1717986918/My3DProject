@@ -454,8 +454,20 @@ class KickTeacherEvaluator:
         ball_y_offset_m: float = 0.0,
         phase_reference_ball_x_offset_m: float | None = None,
         phase_alignment_s_per_m: float = 0.0,
+        setup_ball_x_offset_m: float | None = None,
+        setup_ball_y_offset_m: float | None = None,
+        setup_timeout_s: float = 1.2,
+        setup_tolerance_m: float = 0.015,
+        setup_confirmation_cycles: int = 5,
         kick_policy_session: ort.InferenceSession | None = None,
+        kick_correction_session: ort.InferenceSession | None = None,
+        kick_correction_scale: float = 0.5,
     ) -> dict[str, float | bool]:
+        setup_enabled = (
+            setup_ball_x_offset_m is not None and setup_ball_y_offset_m is not None
+        )
+        if (setup_ball_x_offset_m is None) != (setup_ball_y_offset_m is None):
+            raise ValueError("setup ball x/y offsets must be provided together")
         if phase_reference_ball_x_offset_m is None:
             phase_reference_ball_x_offset_m = ball_x_offset_m
         if not np.isfinite(
@@ -464,10 +476,32 @@ class KickTeacherEvaluator:
                 ball_y_offset_m,
                 phase_reference_ball_x_offset_m,
                 phase_alignment_s_per_m,
+                setup_ball_x_offset_m if setup_enabled else 0.0,
+                setup_ball_y_offset_m if setup_enabled else 0.0,
+                setup_timeout_s,
+                setup_tolerance_m,
             ]
         ).all():
             raise ValueError("ball offsets must be finite")
-        if parameters is None and kick_policy_session is None:
+        if (
+            setup_timeout_s <= 0.0
+            or setup_tolerance_m <= 0.0
+            or setup_confirmation_cycles < 1
+        ):
+            raise ValueError(
+                "setup timing, tolerance and confirmation must be positive"
+            )
+        if kick_policy_session is not None and kick_correction_session is not None:
+            raise ValueError("standalone and correction kick policies are exclusive")
+        if kick_correction_session is not None and parameters is None:
+            raise ValueError("a kick correction policy requires teacher parameters")
+        if not 0.0 < kick_correction_scale <= 0.5:
+            raise ValueError("kick_correction_scale must be in (0, 0.5]")
+        if (
+            parameters is None
+            and kick_policy_session is None
+            and kick_correction_session is None
+        ):
             raise ValueError("provide parameters, kick_policy_session, or both")
         control_times = np.arange(
             0.0,
@@ -484,15 +518,6 @@ class KickTeacherEvaluator:
             0.10,
         )
         action_times = np.clip(control_times - phase_shift_s, 0.0, None)
-        deltas = (
-            build_joint_delta_trajectory(parameters, self.contract, action_times)
-            if parameters is not None
-            else np.zeros((control_times.size, self.contract.action_size))
-        )
-        targets = np.clip(
-            self._default_pose[None, :] + deltas, self._lowers, self._uppers
-        )
-
         data = mujoco.MjData(self.model)
         data.qpos[self._ball_qpos] += ball_x_offset_m
         data.qpos[self._ball_qpos + 1] += ball_y_offset_m
@@ -517,21 +542,110 @@ class KickTeacherEvaluator:
         captured_actions: list[np.ndarray] = []
         saturated_action_values = 0
         action_value_count = 0
+        kick_started = not setup_enabled
+        kick_start_index = 0
+        setup_succeeded = not setup_enabled
+        setup_timed_out = False
+        setup_aligned_cycles = 0
+        setup_max_aligned_cycles = 0
+        setup_duration_s = 0.0
+        setup_position_error_m = 0.0
+        setup_initial_position_error_m = 0.0
+        minimum_setup_position_error_m = float("inf")
+        setup_kick_start_yaw_deg = 0.0
         kick_policy_input = (
             kick_policy_session.get_inputs()[0].name
             if kick_policy_session is not None
             else None
         )
+        kick_correction_input = (
+            kick_correction_session.get_inputs()[0].name
+            if kick_correction_session is not None
+            else None
+        )
 
         substeps = int(round(self.spec.control_dt_s / self.spec.simulation_dt_s))
-        for control_index, (action_time_s, residual_target) in enumerate(
-            zip(action_times, targets - self._default_pose[None, :], strict=True)
-        ):
+        for control_index, default_action_time_s in enumerate(action_times):
             elapsed = control_times[control_index]
-            velocity_command = np.array(
-                [0.50, -0.04, 0.0] if action_time_s < 0.65 else [0.0, 0.0, 0.0],
-                dtype=np.float64,
-            )
+            action_time_s = float(default_action_time_s)
+            if setup_enabled and not kick_started and not setup_timed_out:
+                torso_xmat = data.site_xmat[self._torso_site].reshape(3, 3)
+                yaw = np.arctan2(torso_xmat[1, 0], torso_xmat[0, 0])
+                c, s = np.cos(yaw), np.sin(yaw)
+                world_to_yaw = np.array([[c, s], [-s, c]])
+                ball_local_xy = world_to_yaw @ (
+                    data.xpos[self._ball_body, :2]
+                    - data.site_xpos[self._torso_site, :2]
+                )
+                desired_ball_local_xy = np.array(
+                    [
+                        0.32 + float(setup_ball_x_offset_m),
+                        float(setup_ball_y_offset_m),
+                    ]
+                )
+                setup_error = ball_local_xy - desired_ball_local_xy
+                setup_position_error_m = float(np.linalg.norm(setup_error))
+                if control_index == 0:
+                    setup_initial_position_error_m = setup_position_error_m
+                minimum_setup_position_error_m = min(
+                    minimum_setup_position_error_m, setup_position_error_m
+                )
+                velocity_command = np.array(
+                    [
+                        np.clip(8.0 * setup_error[0], -0.50, 1.00),
+                        np.clip(8.0 * setup_error[1], -0.50, 0.50),
+                        np.clip(-2.0 * yaw, -0.50, 0.50),
+                    ],
+                    dtype=np.float64,
+                )
+                if np.max(np.abs(setup_error)) <= setup_tolerance_m:
+                    setup_aligned_cycles += 1
+                    setup_max_aligned_cycles = max(
+                        setup_max_aligned_cycles, setup_aligned_cycles
+                    )
+                else:
+                    setup_aligned_cycles = 0
+                action_time_s = 0.0
+                if setup_aligned_cycles >= setup_confirmation_cycles:
+                    kick_started = True
+                    setup_succeeded = True
+                    setup_duration_s = float(elapsed)
+                    kick_start_index = control_index
+                    setup_kick_start_yaw_deg = float(np.rad2deg(yaw))
+                    previous_action.fill(0.0)
+                    previous_kick_action.fill(0.0)
+                    velocity_command = np.array([0.50, -0.04, 0.0])
+                elif elapsed >= setup_timeout_s:
+                    setup_timed_out = True
+                    setup_duration_s = float(elapsed)
+                    velocity_command = np.zeros(3, dtype=np.float64)
+            elif setup_enabled and setup_timed_out:
+                action_time_s = 0.0
+                velocity_command = np.zeros(3, dtype=np.float64)
+            else:
+                if setup_enabled:
+                    action_time_s = float(
+                        (control_index - kick_start_index) * self.spec.control_dt_s
+                    )
+                velocity_command = np.array(
+                    ([0.50, -0.04, 0.0] if action_time_s < 0.65 else [0.0, 0.0, 0.0]),
+                    dtype=np.float64,
+                )
+            residual_target = np.zeros(self.contract.action_size, dtype=np.float64)
+            if parameters is not None and kick_started:
+                raw_residual_target = build_joint_delta_trajectory(
+                    parameters,
+                    self.contract,
+                    np.asarray([action_time_s], dtype=np.float64),
+                )[0]
+                residual_target = (
+                    np.clip(
+                        self._default_pose + raw_residual_target,
+                        self._lowers,
+                        self._uppers,
+                    )
+                    - self._default_pose
+                )
             kick_observation = self._kick_actor_observation(
                 data, previous_kick_action, float(action_time_s)
             )
@@ -539,7 +653,18 @@ class KickTeacherEvaluator:
                 data, previous_action, velocity_command
             )
             teacher_action = residual_target / KICK_ACTION_SCALE
-            if kick_policy_session is not None:
+            correction_action = None
+            if kick_correction_session is not None and kick_started:
+                correction_action = kick_correction_session.run(
+                    None,
+                    {kick_correction_input: kick_observation[None, :]},
+                )[0][0].astype(np.float64)
+                correction_action = np.nan_to_num(
+                    correction_action, nan=0.0, posinf=1.0, neginf=-1.0
+                )
+                raw_kick_action = correction_action
+                label_action = correction_action
+            elif kick_policy_session is not None and kick_started:
                 policy_action = kick_policy_session.run(
                     None,
                     {kick_policy_input: kick_observation[None, :]},
@@ -559,11 +684,20 @@ class KickTeacherEvaluator:
             )
             action_value_count += raw_kick_action.size
             kick_action = np.clip(raw_kick_action, -1.0, 1.0)
-            target = np.clip(
-                stable_target + kick_action * KICK_ACTION_SCALE,
-                self._lowers,
-                self._uppers,
-            )
+            if correction_action is not None:
+                target = np.clip(
+                    stable_target
+                    + residual_target
+                    + kick_action * (kick_correction_scale * KICK_ACTION_SCALE),
+                    self._lowers,
+                    self._uppers,
+                )
+            else:
+                target = np.clip(
+                    stable_target + kick_action * KICK_ACTION_SCALE,
+                    self._lowers,
+                    self._uppers,
+                )
             if capture_targets:
                 captured_observations.append(kick_observation)
                 captured_actions.append(
@@ -594,11 +728,9 @@ class KickTeacherEvaluator:
                 torso_upright = float(data.xmat[self._torso_body].reshape(3, 3)[2, 2])
                 minimum_torso_height = min(minimum_torso_height, torso_height)
                 minimum_upright = min(minimum_upright, torso_upright)
-            if kick_policy_session is not None and (
-                minimum_torso_height < 0.35 or minimum_upright < 0.0
-            ):
-                break
-            if control_index + 1 >= targets.shape[0]:
+            if (
+                kick_policy_session is not None or kick_correction_session is not None
+            ) and (minimum_torso_height < 0.35 or minimum_upright < 0.0):
                 break
 
         if capture_targets:
@@ -612,6 +744,9 @@ class KickTeacherEvaluator:
         speed_error = abs(
             maximum_directional_speed - self.spec.requested_ball_speed_mps
         )
+        arrival_speed_error = abs(
+            closest_directional_speed - self.spec.desired_arrival_speed_mps
+        )
         fell = minimum_torso_height < 0.35 or minimum_upright < 0.0
         contact = maximum_directional_speed >= 0.15 or maximum_progress >= 0.08
         parameter_cost = (
@@ -622,8 +757,9 @@ class KickTeacherEvaluator:
         score = (
             3.0 * min(max(maximum_progress, 0.0), self.spec.target_distance_m)
             - 2.0 * closest_range_error
-            - 2.0 * speed_error
-            - 3.0 * closest_lateral_error
+            - 4.0 * speed_error
+            - 2.0 * arrival_speed_error
+            - 6.0 * closest_lateral_error
             + (1.0 if contact else -2.0)
             - (12.0 if fell else 0.0)
             - 0.05 * parameter_cost
@@ -641,10 +777,22 @@ class KickTeacherEvaluator:
             "maximum_directional_speed_mps": maximum_directional_speed,
             "closest_target_speed_mps": closest_directional_speed,
             "speed_error_mps": speed_error,
+            "arrival_speed_error_mps": arrival_speed_error,
             "minimum_torso_height_m": minimum_torso_height,
             "minimum_upright": minimum_upright,
             "contact": contact,
             "fell": fell,
+            "setup_enabled": setup_enabled,
+            "setup_succeeded": setup_succeeded,
+            "setup_timed_out": setup_timed_out,
+            "setup_duration_s": setup_duration_s,
+            "setup_position_error_m": setup_position_error_m,
+            "setup_initial_position_error_m": setup_initial_position_error_m,
+            "minimum_setup_position_error_m": (
+                minimum_setup_position_error_m if setup_enabled else 0.0
+            ),
+            "setup_max_aligned_cycles": setup_max_aligned_cycles,
+            "setup_kick_start_yaw_deg": setup_kick_start_yaw_deg,
             "action_saturation_fraction": (
                 saturated_action_values / action_value_count
                 if action_value_count
@@ -710,18 +858,48 @@ class KickTeacherEvaluator:
         ball_x_offset_m: float = 0.0,
         ball_y_offset_m: float = 0.0,
         initial_parameters: np.ndarray | None = None,
+        ball_x_range_m: tuple[float, float] | None = None,
+        ball_y_range_m: tuple[float, float] | None = None,
+        setup_ball_x_offset_m: float | None = None,
+        setup_ball_y_offset_m: float | None = None,
+        setup_timeout_s: float = 1.2,
+        setup_tolerance_m: float = 0.015,
+        setup_confirmation_cycles: int = 5,
     ) -> CEMResult:
         if robust_samples < 1:
             raise ValueError("robust_samples must be positive")
+        if (ball_x_range_m is None) != (ball_y_range_m is None):
+            raise ValueError("robust ball x/y ranges must be provided together")
+        if ball_x_range_m is not None:
+            if (
+                len(ball_x_range_m) != 2
+                or len(ball_y_range_m) != 2
+                or ball_x_range_m[0] > ball_x_range_m[1]
+                or ball_y_range_m[0] > ball_y_range_m[1]
+            ):
+                raise ValueError("robust ball ranges must be ordered pairs")
         perturbation_rng = np.random.default_rng(seed + 1_000_003)
         perturbations = [(ball_x_offset_m, ball_y_offset_m)]
-        perturbations.extend(
-            (
-                float(ball_x_offset_m + perturbation_rng.uniform(-0.02, 0.02)),
-                float(ball_y_offset_m + perturbation_rng.uniform(-0.03, 0.03)),
+        if ball_x_range_m is None:
+            perturbations.extend(
+                (
+                    float(ball_x_offset_m + perturbation_rng.uniform(-0.02, 0.02)),
+                    float(ball_y_offset_m + perturbation_rng.uniform(-0.03, 0.03)),
+                )
+                for _ in range(robust_samples - 1)
             )
-            for _ in range(robust_samples - 1)
-        )
+        else:
+            perturbations.extend(
+                (
+                    float(
+                        perturbation_rng.uniform(ball_x_range_m[0], ball_x_range_m[1])
+                    ),
+                    float(
+                        perturbation_rng.uniform(ball_y_range_m[0], ball_y_range_m[1])
+                    ),
+                )
+                for _ in range(robust_samples - 1)
+            )
 
         def robust_objective(parameters: np.ndarray) -> float:
             scores = np.asarray(
@@ -730,6 +908,11 @@ class KickTeacherEvaluator:
                         parameters,
                         ball_x_offset_m=ball_x,
                         ball_y_offset_m=ball_y,
+                        setup_ball_x_offset_m=setup_ball_x_offset_m,
+                        setup_ball_y_offset_m=setup_ball_y_offset_m,
+                        setup_timeout_s=setup_timeout_s,
+                        setup_tolerance_m=setup_tolerance_m,
+                        setup_confirmation_cycles=setup_confirmation_cycles,
                     )["score"]
                     for ball_x, ball_y in perturbations
                 ],

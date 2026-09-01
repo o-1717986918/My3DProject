@@ -35,6 +35,7 @@ private:
     WorldSnapshot snapshot_;
     Vec3 last_known_ball_position_m_{0.0, 0.0, 0.0};
     double last_known_ball_time_{-1.0};
+    double near_contact_ball_track_until_s_{-1.0};
     BallKalman ball_kalman_;
 
     // Per-opponent motion-gate + smoothing state (indexed by player_number - 1).

@@ -66,7 +66,12 @@ CandidateGenerationResult PassCandidateGenerator::generate(
             PassType::None, 0, {0.0, 0.0}, RejectionReason::NotOpenPlay});
         return result;
     }
-    if (!snapshot.ball.visible) {
+    // Planning runs every control cycle, while direct camera observations are
+    // intermittent and the ball is commonly occluded by the torso at contact.
+    // WorldState owns freshness, play-mode invalidation, and the bounded
+    // near-contact track; consume that validated state instead of requiring a
+    // same-cycle camera frame.
+    if (!snapshot.ball.position_valid) {
         result.rejections.push_back({
             PassType::None, 0, {0.0, 0.0}, RejectionReason::BallNotVisible});
         return result;

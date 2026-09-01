@@ -12,6 +12,10 @@ world::WorldSnapshot make_snapshot() {
     world::WorldSnapshot snapshot;
     snapshot.self.position_m = {1.0, 2.0, 0.8};
     snapshot.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
+    snapshot.ball.visible = true;
+    snapshot.ball.position_valid = true;
+    snapshot.ball.position_age_s = 0.0;
+    snapshot.ball.position_m = {1.0, 2.0, 0.11};
     return snapshot;
 }
 

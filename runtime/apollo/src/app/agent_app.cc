@@ -10,6 +10,7 @@
 #include "src/world/frame_normalizer.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <limits>
@@ -136,6 +137,7 @@ std::string AgentApp::process_perception_message(const std::string& message) {
 
     const world::WorldSnapshot& snapshot = world_state_.snapshot();
     const auto command = decision_manager_.decide(snapshot);
+    const auto* kick_command = std::get_if<decision::KickCommand>(&command);
     const auto* selected_action =
         decision_manager_.selected_cooperative_action();
     const auto* strategy_plan = decision_manager_.strategy_plan();
@@ -186,6 +188,25 @@ std::string AgentApp::process_perception_message(const std::string& message) {
 
     if (config_.status_interval_cycles > 0U && frame.server_cycle >= 0 &&
         static_cast<std::size_t>(frame.server_cycle) % config_.status_interval_cycles == 0U) {
+        const double self_yaw_deg =
+            world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+                snapshot.self.orientation_wxyz);
+        const std::array<double, 2> ball_delta_world{
+            snapshot.ball.position_m[0] - snapshot.self.position_m[0],
+            snapshot.ball.position_m[1] - snapshot.self.position_m[1],
+        };
+        const auto ball_local = math::rotate_2d(ball_delta_world, -self_yaw_deg);
+        double kick_target_distance_m = 0.0;
+        double kick_relative_angle_deg = 0.0;
+        if (kick_command != nullptr && kick_command->target_point_m.has_value()) {
+            const auto target_delta = math::vec2_sub(
+                *kick_command->target_point_m,
+                std::array<double, 2>{
+                    snapshot.ball.position_m[0], snapshot.ball.position_m[1]});
+            kick_target_distance_m = math::norm2(target_delta);
+            kick_relative_angle_deg = math::normalize_deg(
+                math::vector_angle_deg(target_delta) - self_yaw_deg);
+        }
         std::cerr
             << "MY3D_STATUS"
             << " team=" << config_.team_name
@@ -195,13 +216,44 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << " motion=" << last_active_motion_
             << " kick_mode=" << kick_mode_name(command)
             << " ball_visible=" << (snapshot.ball.visible ? 1 : 0)
+            << " ball_position_valid=" << (snapshot.ball.position_valid ? 1 : 0)
+            << " ball_near_contact_track="
+            << (snapshot.ball.near_contact_track ? 1 : 0)
+            << " ball_position_age=" << snapshot.ball.position_age_s
             << " ball_velocity_valid=" << (snapshot.ball.velocity_valid ? 1 : 0)
             << " ball_x=" << snapshot.ball.position_m[0]
             << " ball_y=" << snapshot.ball.position_m[1]
+            << " ball_local_x=" << ball_local[0]
+            << " ball_local_y=" << ball_local[1]
             << " ball_vx=" << snapshot.ball.velocity_mps[0]
             << " ball_vy=" << snapshot.ball.velocity_mps[1]
             << " x=" << snapshot.self.position_m[0]
             << " y=" << snapshot.self.position_m[1]
+            << " self_yaw=" << self_yaw_deg
+            << " kick_speed=" << (kick_command != nullptr
+                    ? kick_command->requested_ball_speed_mps
+                    : 0.0)
+            << " kick_target_x=" << (kick_command != nullptr &&
+                    kick_command->target_point_m.has_value()
+                    ? (*kick_command->target_point_m)[0]
+                    : 0.0)
+            << " kick_target_y=" << (kick_command != nullptr &&
+                    kick_command->target_point_m.has_value()
+                    ? (*kick_command->target_point_m)[1]
+                    : 0.0)
+            << " kick_target_distance=" << kick_target_distance_m
+            << " kick_relative_angle=" << kick_relative_angle_deg
+            << " kick_action_id=" << (kick_command != nullptr
+                    ? kick_command->action_id
+                    : 0U)
+            << " kick_sequence_id=" << (kick_command != nullptr
+                    ? static_cast<unsigned int>(kick_command->sequence_id)
+                    : 0U)
+            << " kick_receiver=" << (kick_command != nullptr
+                    ? kick_command->receiver_player_number.value_or(0)
+                    : 0)
+            << " kick_condition="
+            << motion_manager_.active_kick_condition_index()
             << " own_score=" << snapshot.own_score
             << " opponent_score=" << snapshot.opponent_score
             << " strategy=" << (selected_action != nullptr

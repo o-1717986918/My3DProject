@@ -31,6 +31,24 @@ constexpr std::array<double, 23> kActionScaleRad{
     0.20, 0.35, 0.25, 0.25, 0.45, 0.25, 0.20,
 };
 
+constexpr std::array<double, 23> kDefaultPoseRad{
+    0.0, 0.0, 0.0, -1.4, 0.0, -0.4, 0.0, 1.4,
+    0.0, 0.4, 0.0, -0.2, 0.0, 0.0, 0.4, -0.2,
+    0.0, -0.2, 0.0, 0.0, 0.4, -0.2, 0.0,
+};
+
+constexpr std::array<double, 23> kJointLowerRad{
+    -1.57, -0.35, -3.31, -1.74, -2.27, -2.44, -3.31, -1.57,
+    -2.27, 0.0, -1.57, -1.8, -0.2, -1.0, 0.0, -0.87,
+    -0.44, -1.8, -1.57, -1.0, 0.0, -0.87, -0.44,
+};
+
+constexpr std::array<double, 23> kJointUpperRad{
+    1.57, 1.22, 1.22, 1.57, 2.27, 0.0, 1.22, 1.74,
+    2.27, 2.44, 1.57, 1.57, 1.57, 1.0, 2.34, 0.35,
+    0.44, 1.57, 0.2, 1.0, 2.34, 0.35, 0.44,
+};
+
 double smoothstep(double value) {
     const double bounded = std::clamp(value, 0.0, 1.0);
     return bounded * bounded * (3.0 - 2.0 * bounded);
@@ -75,7 +93,14 @@ bool KickResidualRunner::begin(
     const world::WorldSnapshot& snapshot,
     const KickExecutionProfile& profile) {
     selected_ = nullptr;
-    if (!snapshot.ball.visible ||
+    const bool ball_track_usable =
+        snapshot.ball.visible ||
+        snapshot.ball.position_age_s <= world::kBallPositionFreshLifetimeS ||
+        (snapshot.ball.near_contact_track &&
+         snapshot.ball.position_age_s <=
+             world::kNearContactBallTrackLifetimeS);
+    if (!snapshot.ball.position_valid ||
+        !ball_track_usable ||
         profile.kind != KickProfileKind::ParameterizedContact ||
         profile.mode != decision::KickMode::TargetedPass ||
         !std::isfinite(profile.target_distance_m) ||
@@ -182,8 +207,15 @@ KickResidualRunner::residual_at(double elapsed_s) const {
     for (std::size_t joint = 0; joint < kJointCount; ++joint) {
         const double raw =
             keys[left][joint] * (1.0 - fraction) + keys[right][joint] * fraction;
+        const double joint_limited =
+            std::clamp(
+                kDefaultPoseRad[joint] + raw,
+                kJointLowerRad[joint],
+                kJointUpperRad[joint]) -
+            kDefaultPoseRad[joint];
         residual[joint] = std::clamp(
-            raw / kActionScaleRad[joint], -1.0, 1.0) * kActionScaleRad[joint];
+            joint_limited / kActionScaleRad[joint], -1.0, 1.0) *
+            kActionScaleRad[joint];
     }
     return residual;
 }

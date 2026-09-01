@@ -31,6 +31,10 @@ def main() -> None:
     parser.add_argument("--ball-y-min", type=float, default=-0.08)
     parser.add_argument("--ball-y-max", type=float, default=0.08)
     parser.add_argument("--phase-alignment-s-per-m", type=float, default=0.0)
+    parser.add_argument("--setup-condition-index", type=int)
+    parser.add_argument("--setup-timeout", type=float, default=1.2)
+    parser.add_argument("--setup-tolerance", type=float, default=0.015)
+    parser.add_argument("--setup-confirmation-cycles", type=int, default=5)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.trials < 1:
@@ -44,6 +48,18 @@ def main() -> None:
     ]
     if not records:
         raise ValueError("manifest contains no accepted records for the requested mode")
+    setup_record = None
+    if args.setup_condition_index is not None:
+        setup_matches = [
+            record
+            for record in records
+            if int(record["condition_index"]) == args.setup_condition_index
+        ]
+        if len(setup_matches) != 1:
+            raise ValueError(
+                "--setup-condition-index must select exactly one accepted record"
+            )
+        setup_record = setup_matches[0]
 
     spec = KickTeacherSpec(
         target_distance_m=args.target_distance,
@@ -51,6 +67,9 @@ def main() -> None:
         requested_ball_speed_mps=args.requested_speed,
         desired_arrival_speed_mps=args.arrival_speed,
         action_mode=args.mode,
+        evaluation_duration_s=(
+            args.setup_timeout + 3.0 if setup_record is not None else 3.0
+        ),
     )
     evaluator = KickTeacherEvaluator(spec)
     rng = np.random.default_rng(args.seed)
@@ -69,13 +88,27 @@ def main() -> None:
                 ** 2
             )
 
-        selected = min(records, key=distance)
+        selected = (
+            setup_record if setup_record is not None else min(records, key=distance)
+        )
         metrics = evaluator.rollout(
             np.asarray(selected["parameters"], dtype=np.float64),
             ball_x_offset_m=ball_x,
             ball_y_offset_m=ball_y,
             phase_reference_ball_x_offset_m=float(selected["ball_x_offset_m"]),
             phase_alignment_s_per_m=args.phase_alignment_s_per_m,
+            setup_ball_x_offset_m=(
+                float(selected["ball_x_offset_m"]) if setup_record is not None else None
+            ),
+            setup_ball_y_offset_m=(
+                float(selected["ball_y_offset_m"]) if setup_record is not None else None
+            ),
+            setup_timeout_s=args.setup_timeout,
+            setup_tolerance_m=args.setup_tolerance,
+            setup_confirmation_cycles=args.setup_confirmation_cycles,
+        )
+        success = kick_trial_success(metrics) and (
+            setup_record is None or bool(metrics["setup_succeeded"])
         )
         trials.append(
             {
@@ -83,7 +116,7 @@ def main() -> None:
                 "ball_x_offset_m": ball_x,
                 "ball_y_offset_m": ball_y,
                 "selected_condition_index": selected["condition_index"],
-                "success": kick_trial_success(metrics),
+                "success": success,
                 "metrics": metrics,
             }
         )
@@ -99,6 +132,16 @@ def main() -> None:
         "success_rate": successful / args.trials,
         "promotable": successful >= required,
         "phase_alignment_s_per_m": args.phase_alignment_s_per_m,
+        "setup_condition_index": args.setup_condition_index,
+        "setup_timeout_s": args.setup_timeout,
+        "setup_tolerance_m": args.setup_tolerance,
+        "setup_confirmation_cycles": args.setup_confirmation_cycles,
+        "setup_successful_trials": sum(
+            bool(trial["metrics"]["setup_succeeded"]) for trial in trials
+        ),
+        "setup_timed_out_trials": sum(
+            bool(trial["metrics"]["setup_timed_out"]) for trial in trials
+        ),
         "gate": {"required_successes": required, "passed": successful >= required},
         "trials": trials,
     }

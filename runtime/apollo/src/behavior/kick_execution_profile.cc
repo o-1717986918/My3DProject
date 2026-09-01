@@ -38,6 +38,7 @@ KickExecutionProfile make_kick_execution_profile(
     if (!parameterized_enabled ||
         command.mode == decision::KickMode::ForwardContact ||
         !command.target_point_m.has_value() ||
+        !snapshot.ball.position_valid ||
         !std::isfinite(command.requested_ball_speed_mps) ||
         command.requested_ball_speed_mps < kMinimumRequestedSpeedMps ||
         command.requested_ball_speed_mps > kMaximumRequestedSpeedMps ||
@@ -48,8 +49,8 @@ KickExecutionProfile make_kick_execution_profile(
     }
 
     const std::array<double, 2> target_delta{
-        (*command.target_point_m)[0] - snapshot.self.position_m[0],
-        (*command.target_point_m)[1] - snapshot.self.position_m[1],
+        (*command.target_point_m)[0] - snapshot.ball.position_m[0],
+        (*command.target_point_m)[1] - snapshot.ball.position_m[1],
     };
     const double target_distance_m = math::norm2(target_delta);
     if (target_distance_m < kMinimumTargetDistanceM) {
