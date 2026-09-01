@@ -102,6 +102,33 @@ def test_validate_bc_data_manifest_accepts_bound_dagger_aggregate(tmp_path):
     assert payload["status"] == "complete"
 
 
+def test_validate_bc_data_manifest_accepts_cross_fitted_dagger(tmp_path):
+    dataset = tmp_path / "dagger.npz"
+    dataset.write_bytes(b"dataset")
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    manifest = tmp_path / "run-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "purpose": "k1_d_cross_fitted_soccer_motion_dagger_collection",
+                "output_dataset_sha256": hashlib.sha256(b"dataset").hexdigest(),
+                "student_checkpoint": str(checkpoint),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    kind, unused_path, unused_payload = validate_bc_data_manifest(
+        dataset,
+        base_checkpoint=checkpoint,
+        dagger_manifest=manifest,
+    )
+
+    assert kind == "dagger_aggregate"
+
+
 def test_validate_bc_data_manifest_rejects_wrong_dagger_checkpoint(tmp_path):
     dataset = tmp_path / "dagger.npz"
     dataset.write_bytes(b"dataset")
@@ -145,3 +172,19 @@ def test_dagger_row_mask_binds_motion_and_start_and_frame_count():
     )
 
     np.testing.assert_array_equal(mask, [False, True, True, True, False])
+
+
+def test_cross_fitted_dagger_row_mask_uses_appended_frame_boundary():
+    manifest = {
+        "purpose": "k1_d_cross_fitted_soccer_motion_dagger_collection",
+        "source_frames": 3,
+        "dagger_frames": 2,
+    }
+
+    mask = dagger_row_mask(
+        np.array([0, 0, 1, 0, 1]),
+        np.array([5, 8, 7, 5, 7]),
+        manifest,
+    )
+
+    np.testing.assert_array_equal(mask, [False, False, False, True, True])

@@ -10,6 +10,12 @@ from typing import Any
 import numpy as np
 
 
+SOCCER_MOTION_DAGGER_PURPOSES = {
+    "k1_b_exact_cpu_soccer_motion_dagger_collection",
+    "k1_d_cross_fitted_soccer_motion_dagger_collection",
+}
+
+
 def validate_bc_data_manifest(
     dataset: Path,
     *,
@@ -35,8 +41,7 @@ def validate_bc_data_manifest(
         return "selected_teacher_corpus", manifest_path, manifest
     if (
         manifest.get("status") != "complete"
-        or manifest.get("purpose")
-        != "k1_b_exact_cpu_soccer_motion_dagger_collection"
+        or manifest.get("purpose") not in SOCCER_MOTION_DAGGER_PURPOSES
         or manifest.get("output_dataset_sha256") != dataset_sha256
         or Path(manifest.get("student_checkpoint", "")).resolve()
         != base_checkpoint.resolve()
@@ -55,8 +60,19 @@ def dagger_row_mask(
     start_frame = np.asarray(start_frame)
     if motion.ndim != 1 or motion.shape != start_frame.shape:
         raise ValueError("DAgger row keys must be equal one-dimensional arrays")
-    if manifest.get("purpose") != "k1_b_exact_cpu_soccer_motion_dagger_collection":
+    purpose = manifest.get("purpose")
+    if purpose not in SOCCER_MOTION_DAGGER_PURPOSES:
         raise ValueError("manifest is not a soccer-motion DAgger collection")
+    if purpose == "k1_d_cross_fitted_soccer_motion_dagger_collection":
+        source_frames = int(manifest.get("source_frames", -1))
+        dagger_frames = int(manifest.get("dagger_frames", -1))
+        if min(source_frames, dagger_frames) < 0 or (
+            source_frames + dagger_frames != motion.shape[0]
+        ):
+            raise ValueError("cross-fitted DAgger frame counts are invalid")
+        result = np.zeros(motion.shape, dtype=bool)
+        result[source_frames:] = True
+        return result
     result = np.zeros(motion.shape, dtype=bool)
     nodes = manifest.get("per_motion")
     if not isinstance(nodes, list) or not nodes:
