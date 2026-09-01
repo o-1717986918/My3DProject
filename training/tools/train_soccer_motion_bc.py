@@ -108,9 +108,6 @@ def main() -> None:
         observation_size=contract.observation_size,
         action_size=contract.action_size,
     )
-    anchored_base_action = np.clip(
-        data["base_action"], *contract.action_clip
-    ).astype(np.float32)
     base_params = ppo_checkpoint.load(args.base_checkpoint)
     checkpoint_config = ppo_checkpoint.load_config(args.base_checkpoint)
     preprocess = (
@@ -137,6 +134,16 @@ def main() -> None:
             {"state": observations},
         )
         return mean
+
+    anchored_base_action = np.clip(
+        np.asarray(
+            actor_mean(
+                initial_actor_params,
+                jp.asarray(data["observation"]),
+            )
+        ),
+        *contract.action_clip,
+    ).astype(np.float32)
 
     @jax.jit
     def train_step(
@@ -199,7 +206,10 @@ def main() -> None:
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "base_anchor_weight": args.base_anchor_weight,
-        "base_anchor_target": "base_actor_action_clipped_to_policy_contract",
+        "base_anchor_target": (
+            "current_base_checkpoint_actor_recomputed_on_every_dataset_observation_"
+            "and_clipped_to_policy_contract"
+        ),
         "action_bound_weight": args.action_bound_weight,
         "seed": args.seed,
         "train_samples": int(np.sum(data["split"] == 0)),

@@ -6,7 +6,9 @@ import pytest
 from my3d_rl.soccer_motion_teacher import (
     decode_phase_correction,
     robust_teacher_objective,
+    select_dagger_action,
 )
+from my3d_rl.soccer_motion_dagger import load_selected_teacher_corrections
 
 
 def test_phase_correction_is_bounded_smooth_and_sparse():
@@ -42,3 +44,43 @@ def test_phase_correction_rejects_bound_violation():
 
 def test_robust_teacher_objective_protects_minimum():
     assert robust_teacher_objective(np.array([10.0, 20.0]), minimum_weight=0.5) == 12.5
+
+
+def test_selected_teacher_loader_rejects_incomplete_manifest(tmp_path):
+    manifest = tmp_path / "selection.json"
+    manifest.write_text('{"status": "incomplete"}', encoding="utf-8")
+
+    class Corpus:
+        motion_count = 1
+
+    with pytest.raises(ValueError, match="incomplete"):
+        load_selected_teacher_corrections(
+            manifest,
+            corpus=Corpus(),  # type: ignore[arg-type]
+            contract=object(),  # type: ignore[arg-type]
+            contract_sha256="0" * 64,
+        )
+
+
+def test_dagger_action_can_query_teacher_without_executing_it():
+    selected, used_teacher = select_dagger_action(
+        np.array([1.2, -0.3]),
+        np.array([0.4, -0.8]),
+        teacher_probability=0.0,
+        action_clip=(-1.0, 1.0),
+    )
+
+    np.testing.assert_allclose(selected, [1.0, -0.3])
+    assert not used_teacher
+
+
+def test_dagger_action_executes_teacher_at_beta_one():
+    selected, used_teacher = select_dagger_action(
+        np.array([0.1, 0.2]),
+        np.array([0.4, -0.8]),
+        teacher_probability=1.0,
+        action_clip=(-1.0, 1.0),
+    )
+
+    np.testing.assert_allclose(selected, [0.4, -0.8])
+    assert used_teacher

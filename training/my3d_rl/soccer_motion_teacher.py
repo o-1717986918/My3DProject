@@ -94,6 +94,32 @@ def robust_teacher_objective(
     )
 
 
+def select_dagger_action(
+    base_action: np.ndarray,
+    teacher_action: np.ndarray,
+    *,
+    teacher_probability: float,
+    action_clip: tuple[float, float],
+    rng: np.random.Generator | None = None,
+) -> tuple[np.ndarray, bool]:
+    """Choose the executed action while retaining an expert label."""
+    base_action = np.asarray(base_action, dtype=np.float64)
+    teacher_action = np.asarray(teacher_action, dtype=np.float64)
+    if base_action.shape != teacher_action.shape or base_action.ndim != 1:
+        raise ValueError("DAgger actions must be equal one-dimensional vectors")
+    if not 0.0 <= teacher_probability <= 1.0:
+        raise ValueError("teacher probability must lie in [0, 1]")
+    if 0.0 < teacher_probability < 1.0 and rng is None:
+        raise ValueError("mixed teacher execution requires a random generator")
+    use_teacher = teacher_probability == 1.0 or (
+        0.0 < teacher_probability < 1.0
+        and rng is not None
+        and bool(rng.random() < teacher_probability)
+    )
+    selected = teacher_action if use_teacher else base_action
+    return np.clip(selected, *action_clip), use_teacher
+
+
 class SoccerMotionCorrectionEvaluator:
     """Evaluate a base actor plus an open-loop phase correction in MuJoCo."""
 
@@ -185,6 +211,8 @@ class SoccerMotionCorrectionEvaluator:
         correction: np.ndarray | None = None,
         *,
         capture: bool = False,
+        teacher_execution_probability: float = 1.0,
+        rng: np.random.Generator | None = None,
     ) -> dict[str, Any]:
         """Run one deterministic exact-state restart to the finite endpoint."""
         if not 0 <= motion < self.corpus.motion_count:
@@ -240,6 +268,8 @@ class SoccerMotionCorrectionEvaluator:
         observations: list[np.ndarray] = []
         base_actions: list[np.ndarray] = []
         teacher_actions: list[np.ndarray] = []
+        executed_actions: list[np.ndarray] = []
+        teacher_interventions: list[bool] = []
         qpos_states: list[np.ndarray] = []
 
         for frame in range(start_frame + 1, length):
@@ -266,8 +296,15 @@ class SoccerMotionCorrectionEvaluator:
             base_action = np.asarray(self.base_policy(observation), dtype=np.float64)
             if base_action.shape != (self.contract.action_size,):
                 raise ValueError("base policy returned an incompatible action")
-            action = np.clip(
+            teacher_action = np.clip(
                 base_action + correction[current], *self.contract.action_clip
+            )
+            action, use_teacher = select_dagger_action(
+                base_action,
+                teacher_action,
+                teacher_probability=teacher_execution_probability,
+                action_clip=self.contract.action_clip,
+                rng=rng,
             )
             target = np.clip(
                 self.corpus.joint_position[motion, frame]
@@ -313,7 +350,9 @@ class SoccerMotionCorrectionEvaluator:
             if capture:
                 observations.append(observation)
                 base_actions.append(base_action)
-                teacher_actions.append(action.copy())
+                teacher_actions.append(teacher_action.copy())
+                executed_actions.append(action.copy())
+                teacher_interventions.append(use_teacher)
                 qpos_states.append(data.qpos.copy())
             if not np.isfinite(data.qpos).all() or not np.isfinite(data.qvel).all():
                 terminal_frame = frame
@@ -360,6 +399,12 @@ class SoccerMotionCorrectionEvaluator:
             "minimum_upright": minimum_upright,
             "mean_action_energy": float(np.mean(action_energy)),
             "mean_correction_energy": mean_correction_energy,
+            "teacher_execution_probability": teacher_execution_probability,
+            "teacher_intervention_fraction": (
+                float(np.mean(teacher_interventions))
+                if teacher_interventions
+                else teacher_execution_probability
+            ),
             "teacher_score": float(score),
         }
         if capture:
@@ -367,6 +412,10 @@ class SoccerMotionCorrectionEvaluator:
                 "observations": np.asarray(observations, dtype=np.float32),
                 "base_actions": np.asarray(base_actions, dtype=np.float32),
                 "teacher_actions": np.asarray(teacher_actions, dtype=np.float32),
+                "executed_actions": np.asarray(executed_actions, dtype=np.float32),
+                "teacher_interventions": np.asarray(
+                    teacher_interventions, dtype=bool
+                ),
                 "qpos": np.asarray(qpos_states, dtype=np.float64),
             }
         return result
