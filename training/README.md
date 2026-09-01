@@ -349,6 +349,23 @@ still uses held-out exact-CPU, Warp/ONNX parity, three seeds and RCSSServer
 replay. The MuJoCo viewer is deliberately separate from accelerated training
 so rendering cannot reduce rollout throughput or alter timings.
 
+After a single-motion K1-A gate passes, generate independent teachers for the
+entire locked corpus with the resumable batch orchestrator:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/optimize_soccer_motion_teacher_corpus.py \
+  /home/win98/rl_runs/paid-k0/corpus-semantic-v4 \
+  --checkpoint /path/to/checkpoint --population 64 --generations 8 \
+  --max-workers 2 --run-dir /home/win98/rl_runs/paid-k1/k1a-corpus-<name>
+```
+
+Each motion retains its own report, dataset, console log and TensorBoard run.
+Compatible completed motions are reused after interruption; an incomplete
+motion directory is preserved with an `incomplete-*` suffix before retry. The
+combined `teacher-corpus.npz` is created only when all 13 per-motion teacher
+gates pass, so behavior cloning cannot silently mix rejected demonstrations.
+
 ## Release rule
 
 A checkpoint cannot be integrated until its model manifest, source revisions,
