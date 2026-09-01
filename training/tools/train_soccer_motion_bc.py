@@ -26,11 +26,13 @@ from my3d_rl.soccer_motion_bc import (
     load_soccer_motion_teacher_dataset,
     motion_balanced_indices,
 )
-from my3d_rl.soccer_motion_env import DEFAULT_CONTRACT
 from my3d_rl.training_dashboard import TrainingDashboard
 
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
+DEFAULT_CONTRACT = (
+    REPOSITORY_ROOT / "training" / "contracts" / "soccer_motion_policy_v2.yaml"
+)
 
 
 def _sha256(path: Path) -> str:

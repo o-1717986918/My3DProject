@@ -8,6 +8,8 @@ from my3d_rl.soccer_motion_bc import (
     load_soccer_motion_teacher_dataset,
     motion_balanced_indices,
 )
+from my3d_rl.contract import load_policy_contract
+from tools.train_soccer_motion_bc import DEFAULT_CONTRACT
 
 
 def _dataset(path):
@@ -60,3 +62,7 @@ def test_action_error_metrics_are_reported_per_motion():
     assert metrics["teacher_mse"] == pytest.approx(0.125)
     assert metrics["base_mse"] == pytest.approx(0.125)
     assert len(metrics["per_motion"]) == 2
+
+
+def test_bc_default_contract_matches_residual_v3_profile():
+    assert load_policy_contract(DEFAULT_CONTRACT).policy_name == "soccer_motion_policy_v2"
