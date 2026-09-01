@@ -120,6 +120,52 @@ def select_dagger_action(
     return np.clip(selected, *action_clip), use_teacher
 
 
+def state_feedback_action_candidates(
+    student_action: np.ndarray,
+    nominal_teacher_action: np.ndarray,
+    position_error: np.ndarray,
+    velocity_error: np.ndarray,
+    *,
+    active_joint_indices: Sequence[int],
+    action_scale: float,
+    control_period: float,
+    action_clip: tuple[float, float],
+) -> np.ndarray:
+    """Build bounded, deterministic actions for short-horizon teacher search."""
+    student_action = np.asarray(student_action, dtype=np.float64)
+    nominal_teacher_action = np.asarray(nominal_teacher_action, dtype=np.float64)
+    position_error = np.asarray(position_error, dtype=np.float64)
+    velocity_error = np.asarray(velocity_error, dtype=np.float64)
+    if (
+        student_action.ndim != 1
+        or nominal_teacher_action.shape != student_action.shape
+        or position_error.shape != student_action.shape
+        or velocity_error.shape != student_action.shape
+    ):
+        raise ValueError("state-feedback teacher vectors are incompatible")
+    if action_scale <= 0.0 or control_period <= 0.0:
+        raise ValueError("state-feedback decoder scales must be positive")
+    active = np.asarray(active_joint_indices, dtype=np.int64)
+    if active.ndim != 1 or active.size < 1 or np.any(active < 0) or np.any(
+        active >= student_action.size
+    ):
+        raise ValueError("state-feedback active joints are invalid")
+    feedback = np.zeros(student_action.shape, dtype=np.float64)
+    feedback[active] = (
+        position_error[active] + control_period * velocity_error[active]
+    ) / action_scale
+    feedback = np.clip(feedback, -0.5, 0.5)
+    nodes = [
+        student_action,
+        nominal_teacher_action,
+        0.5 * (student_action + nominal_teacher_action),
+        nominal_teacher_action + 0.25 * feedback,
+        nominal_teacher_action + 0.5 * feedback,
+        nominal_teacher_action + feedback,
+    ]
+    return np.stack([np.clip(node, *action_clip) for node in nodes])
+
+
 class SoccerMotionCorrectionEvaluator:
     """Evaluate a base actor plus an open-loop phase correction in MuJoCo."""
 
@@ -204,6 +250,135 @@ class SoccerMotionCorrectionEvaluator:
             dtype=bool,
         )
 
+    def short_horizon_teacher_action(
+        self,
+        data: mujoco.MjData,
+        *,
+        motion: int,
+        current_frame: int,
+        previous_action: np.ndarray,
+        student_action: np.ndarray,
+        nominal_teacher_action: np.ndarray,
+        correction: np.ndarray,
+        teacher_base_policy: SoccerMotionPolicy,
+        horizon: int,
+    ) -> tuple[np.ndarray, dict[str, float]]:
+        """Select a state-feedback label using exact copied MuJoCo states."""
+        length = int(self.corpus.lengths[motion])
+        if horizon < 1 or not 0 <= current_frame < length - 1:
+            raise ValueError("short-horizon teacher request is invalid")
+        if self.contract.action_scale is None:
+            raise ValueError("short-horizon teacher requires residual action scale")
+        active = np.flatnonzero(np.any(np.abs(correction) > 1.0e-12, axis=0))
+        candidates = state_feedback_action_candidates(
+            student_action,
+            nominal_teacher_action,
+            self.corpus.joint_position[motion, current_frame]
+            - data.qpos[self._joint_qpos],
+            self.corpus.joint_velocity[motion, current_frame]
+            - data.qvel[self._joint_dof],
+            active_joint_indices=active,
+            action_scale=self.contract.action_scale,
+            control_period=1.0 / self.contract.frequency_hz,
+            action_clip=self.contract.action_clip,
+        )
+        costs: list[float] = []
+        for first_action in candidates:
+            trial = mujoco.MjData(self.model)
+            mujoco.mj_copyData(trial, self.model, data)
+            trial_previous_action = np.asarray(previous_action, dtype=np.float64)
+            cost = 0.0
+            for offset in range(min(horizon, length - 1 - current_frame)):
+                frame = current_frame + offset
+                if offset == 0:
+                    action = first_action
+                else:
+                    observation = soccer_motion_actor_observation(
+                        trial,
+                        joint_qpos=self._joint_qpos,
+                        joint_dof=self._joint_dof,
+                        gyro_slice=self._gyro_slice,
+                        torso_site=self._torso_site,
+                        reference_joint_position=(
+                            self.corpus.joint_position[motion, frame]
+                        ),
+                        reference_joint_velocity=(
+                            self.corpus.joint_velocity[motion, frame]
+                        ),
+                        reference_root_linear_velocity=(
+                            self.corpus.root_linear_velocity[motion, frame]
+                        ),
+                        reference_root_angular_velocity=(
+                            self.corpus.root_angular_velocity[motion, frame]
+                        ),
+                        reference_contact=self.corpus.foot_contact[motion, frame],
+                        previous_action=trial_previous_action,
+                        progress=frame / max(length - 1, 1),
+                        kick_leg_one_hot=self.corpus.kick_leg_one_hot[motion],
+                    )
+                    action = np.clip(
+                        np.asarray(teacher_base_policy(observation), dtype=np.float64)
+                        + correction[frame],
+                        *self.contract.action_clip,
+                    )
+                target = np.clip(
+                    self.corpus.joint_position[motion, frame + 1]
+                    + self.contract.action_scale * action,
+                    self._lower,
+                    self._upper,
+                )
+                trial.ctrl[self._pos_actuator] = target
+                for _ in range(self._substeps):
+                    mujoco.mj_step(self.model, trial)
+                trial_previous_action = action
+                joint_error = (
+                    trial.qpos[self._joint_qpos]
+                    - self.corpus.joint_position[motion, frame + 1]
+                )
+                velocity_error = (
+                    trial.qvel[self._joint_dof]
+                    - self.corpus.joint_velocity[motion, frame + 1]
+                )
+                rotation = trial.site_xmat[self._torso_site].reshape(3, 3)
+                upright = float(rotation[2, 2])
+                height = float(trial.xpos[self._torso_body, 2])
+                contact_error = float(
+                    np.mean(
+                        self._contacts(trial)
+                        != self.corpus.foot_contact[motion, frame + 1]
+                    )
+                )
+                stage_cost = (
+                    10.0 * float(np.mean(np.square(joint_error)))
+                    + 0.02 * float(np.mean(np.square(velocity_error)))
+                    + 2.0 * (1.0 - np.clip(upright, -1.0, 1.0)) ** 2
+                    + 20.0 * max(0.45 - height, 0.0) ** 2
+                    + 0.1 * contact_error
+                )
+                if (
+                    not np.isfinite(trial.qpos).all()
+                    or not np.isfinite(trial.qvel).all()
+                    or height < 0.35
+                    or upright < 0.20
+                ):
+                    stage_cost += 100.0
+                    cost += (0.9**offset) * stage_cost
+                    break
+                cost += (0.9**offset) * stage_cost
+            cost += 0.01 * float(
+                np.mean(np.square(first_action - nominal_teacher_action))
+            )
+            costs.append(cost)
+        best_index = int(np.argmin(costs))
+        return candidates[best_index], {
+            "student_cost": costs[0],
+            "nominal_teacher_cost": costs[1],
+            "selected_cost": costs[best_index],
+            "improvement_over_student": costs[0] - costs[best_index],
+            "improvement_over_nominal_teacher": costs[1] - costs[best_index],
+            "candidate_count": float(len(candidates)),
+        }
+
     def rollout(
         self,
         motion: int,
@@ -213,6 +388,8 @@ class SoccerMotionCorrectionEvaluator:
         capture: bool = False,
         teacher_execution_probability: float = 1.0,
         teacher_base_policy: SoccerMotionPolicy | None = None,
+        state_feedback_horizon: int = 0,
+        minimum_state_feedback_improvement: float = 0.0,
         rng: np.random.Generator | None = None,
     ) -> dict[str, Any]:
         """Run one deterministic exact-state restart to the finite endpoint."""
@@ -228,6 +405,8 @@ class SoccerMotionCorrectionEvaluator:
             raise ValueError("correction must have one action per finite frame")
         if not np.isfinite(correction).all():
             raise ValueError("correction contains non-finite values")
+        if state_feedback_horizon < 0 or minimum_state_feedback_improvement < 0.0:
+            raise ValueError("state-feedback teacher settings are invalid")
 
         data = mujoco.MjData(self.model)
         data.qpos[:] = self.model.qpos0
@@ -272,6 +451,9 @@ class SoccerMotionCorrectionEvaluator:
         teacher_actions: list[np.ndarray] = []
         executed_actions: list[np.ndarray] = []
         teacher_interventions: list[bool] = []
+        teacher_label_selected: list[bool] = []
+        teacher_cost_improvement: list[float] = []
+        reference_frames: list[int] = []
         qpos_states: list[np.ndarray] = []
 
         for frame in range(start_frame + 1, length):
@@ -311,6 +493,29 @@ class SoccerMotionCorrectionEvaluator:
             teacher_action = np.clip(
                 teacher_base_action + correction[current], *self.contract.action_clip
             )
+            cost_improvement = float("nan")
+            label_selected = True
+            if state_feedback_horizon:
+                if teacher_base_policy is None:
+                    raise ValueError(
+                        "state-feedback teacher requires a separate teacher base"
+                    )
+                teacher_action, feedback = self.short_horizon_teacher_action(
+                    data,
+                    motion=motion,
+                    current_frame=current,
+                    previous_action=previous_action,
+                    student_action=base_action,
+                    nominal_teacher_action=teacher_action,
+                    correction=correction,
+                    teacher_base_policy=teacher_base_policy,
+                    horizon=state_feedback_horizon,
+                )
+                cost_improvement = feedback["improvement_over_student"]
+                label_selected = (
+                    cost_improvement >= minimum_state_feedback_improvement
+                    and not np.allclose(teacher_action, base_action, atol=1.0e-6)
+                )
             action, use_teacher = select_dagger_action(
                 base_action,
                 teacher_action,
@@ -366,6 +571,9 @@ class SoccerMotionCorrectionEvaluator:
                 teacher_actions.append(teacher_action.copy())
                 executed_actions.append(action.copy())
                 teacher_interventions.append(use_teacher)
+                teacher_label_selected.append(label_selected)
+                teacher_cost_improvement.append(cost_improvement)
+                reference_frames.append(current)
                 qpos_states.append(data.qpos.copy())
             if not np.isfinite(data.qpos).all() or not np.isfinite(data.qvel).all():
                 terminal_frame = frame
@@ -418,6 +626,11 @@ class SoccerMotionCorrectionEvaluator:
                 if teacher_interventions
                 else teacher_execution_probability
             ),
+            "selected_teacher_label_fraction": (
+                float(np.mean(teacher_label_selected))
+                if teacher_label_selected
+                else 1.0
+            ),
             "teacher_score": float(score),
         }
         if capture:
@@ -433,6 +646,13 @@ class SoccerMotionCorrectionEvaluator:
                 "teacher_interventions": np.asarray(
                     teacher_interventions, dtype=bool
                 ),
+                "teacher_label_selected": np.asarray(
+                    teacher_label_selected, dtype=bool
+                ),
+                "teacher_cost_improvement": np.asarray(
+                    teacher_cost_improvement, dtype=np.float32
+                ),
+                "reference_frames": np.asarray(reference_frames, dtype=np.int32),
                 "qpos": np.asarray(qpos_states, dtype=np.float64),
             }
         return result

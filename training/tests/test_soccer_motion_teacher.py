@@ -7,6 +7,7 @@ from my3d_rl.soccer_motion_teacher import (
     decode_phase_correction,
     robust_teacher_objective,
     select_dagger_action,
+    state_feedback_action_candidates,
 )
 from my3d_rl.soccer_motion_dagger import load_selected_teacher_corrections
 
@@ -84,3 +85,24 @@ def test_dagger_action_executes_teacher_at_beta_one():
 
     np.testing.assert_allclose(selected, [0.4, -0.8])
     assert used_teacher
+
+
+def test_state_feedback_candidates_are_bounded_and_keep_student_and_teacher():
+    student = np.array([0.1, -0.2, 0.3])
+    teacher = np.array([0.2, -0.1, 0.4])
+    candidates = state_feedback_action_candidates(
+        student,
+        teacher,
+        position_error=np.array([0.0, 0.5, -0.5]),
+        velocity_error=np.array([0.0, 1.0, -1.0]),
+        active_joint_indices=[1, 2],
+        action_scale=0.35,
+        control_period=0.02,
+        action_clip=(-1.0, 1.0),
+    )
+
+    assert candidates.shape == (6, 3)
+    np.testing.assert_allclose(candidates[0], student)
+    np.testing.assert_allclose(candidates[1], teacher)
+    assert np.max(np.abs(candidates)) <= 1.0
+    np.testing.assert_allclose(candidates[3:, 0], teacher[0])

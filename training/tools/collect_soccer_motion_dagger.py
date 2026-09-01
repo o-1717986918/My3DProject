@@ -110,6 +110,10 @@ def main() -> None:
     parser.add_argument("--minimum-remaining-frames", type=int, default=10)
     parser.add_argument("--minimum-evaluated-starts", type=int, default=24)
     parser.add_argument("--teacher-beta", type=float, default=0.0)
+    parser.add_argument("--state-feedback-horizon", type=int, default=0)
+    parser.add_argument(
+        "--minimum-state-feedback-improvement", type=float, default=0.0
+    )
     parser.add_argument("--seed", type=int, default=20260952)
     args = parser.parse_args()
     if (
@@ -117,6 +121,8 @@ def main() -> None:
         or args.minimum_remaining_frames < 2
         or args.minimum_evaluated_starts < 1
         or not 0.0 <= args.teacher_beta <= 1.0
+        or args.state_feedback_horizon < 0
+        or args.minimum_state_feedback_improvement < 0.0
     ):
         raise ValueError("DAgger collection settings are invalid")
     output_dir = _external_new_directory(args.output_dir)
@@ -196,6 +202,10 @@ def main() -> None:
                     capture=True,
                     teacher_execution_probability=args.teacher_beta,
                     teacher_base_policy=teacher_base,
+                    state_feedback_horizon=args.state_feedback_horizon,
+                    minimum_state_feedback_improvement=(
+                        args.minimum_state_feedback_improvement
+                    ),
                     rng=rng,
                 )
                 captures.append((motion, start, result["trajectory"], result))
@@ -206,6 +216,12 @@ def main() -> None:
             students = np.concatenate(
                 [node["trajectory"]["base_actions"] for node in results]
             )
+            selected_labels = np.concatenate(
+                [
+                    node["trajectory"]["teacher_label_selected"]
+                    for node in results
+                ]
+            )
             metrics = {
                 "dagger/completion_rate": float(
                     np.mean([node["completed"] for node in results])
@@ -215,6 +231,20 @@ def main() -> None:
                 ),
                 "dagger/student_teacher_mse": float(
                     np.mean(np.square(students - labels))
+                ),
+                "dagger/selected_label_fraction": float(
+                    np.mean(selected_labels)
+                ),
+                "dagger/selected_student_teacher_mse": (
+                    float(
+                        np.mean(
+                            np.square(
+                                students[selected_labels] - labels[selected_labels]
+                            )
+                        )
+                    )
+                    if np.any(selected_labels)
+                    else 0.0
                 ),
                 "dagger/intervention_fraction": float(
                     np.mean(
@@ -238,42 +268,61 @@ def main() -> None:
     finally:
         dashboard.close()
 
+    selected_captures: list[tuple[int, int, dict[str, np.ndarray]]] = []
+    for motion, start, trajectory, unused_result in captures:
+        mask = trajectory["teacher_label_selected"]
+        if np.any(mask):
+            selected_captures.append(
+                (
+                    motion,
+                    start,
+                    {
+                        name: trajectory[name][mask]
+                        for name in (
+                            "observations",
+                            "base_actions",
+                            "teacher_actions",
+                            "reference_frames",
+                            "qpos",
+                        )
+                    },
+                )
+            )
+    if not selected_captures:
+        raise RuntimeError("state-feedback teacher selected no useful labels")
     new_arrays = {
         "observation": np.concatenate(
-            [node[2]["observations"] for node in captures], axis=0
+            [node[2]["observations"] for node in selected_captures], axis=0
         ),
         "base_action": np.concatenate(
-            [node[2]["base_actions"] for node in captures], axis=0
+            [node[2]["base_actions"] for node in selected_captures], axis=0
         ),
         "teacher_action": np.concatenate(
-            [node[2]["teacher_actions"] for node in captures], axis=0
+            [node[2]["teacher_actions"] for node in selected_captures], axis=0
         ),
-        "qpos": np.concatenate([node[2]["qpos"] for node in captures], axis=0),
+        "qpos": np.concatenate(
+            [node[2]["qpos"] for node in selected_captures], axis=0
+        ),
         "split": np.zeros(
-            sum(node[2]["observations"].shape[0] for node in captures),
+            sum(
+                node[2]["observations"].shape[0] for node in selected_captures
+            ),
             dtype=np.int8,
         ),
         "motion": np.concatenate(
             [
                 np.full(node[2]["observations"].shape[0], node[0], dtype=np.int16)
-                for node in captures
+                for node in selected_captures
             ]
         ),
         "start_frame": np.concatenate(
             [
                 np.full(node[2]["observations"].shape[0], node[1], dtype=np.int32)
-                for node in captures
+                for node in selected_captures
             ]
         ),
         "reference_frame": np.concatenate(
-            [
-                np.arange(
-                    node[1],
-                    node[1] + node[2]["observations"].shape[0],
-                    dtype=np.int32,
-                )
-                for node in captures
-            ]
+            [node[2]["reference_frames"] for node in selected_captures]
         ),
     }
     aggregate = {
@@ -308,8 +357,15 @@ def main() -> None:
         "dagger_frames": new_frame_count,
         "aggregate_frames": int(aggregate["observation"].shape[0]),
         "teacher_beta": args.teacher_beta,
+        "state_feedback_horizon": args.state_feedback_horizon,
+        "minimum_state_feedback_improvement": (
+            args.minimum_state_feedback_improvement
+        ),
         "teacher_query": (
-            "fixed selected teacher-base actor plus motion-specific phase "
+            "short-horizon exact-CPU state-feedback action search around the "
+            "fixed teacher evaluated on every student-visited observation"
+            if args.state_feedback_horizon
+            else "fixed selected teacher-base actor plus motion-specific phase "
             "correction evaluated on every student-visited observation"
         ),
         "phase_samples": args.phase_samples,
