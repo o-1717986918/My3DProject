@@ -23,6 +23,7 @@ from my3d_rl.contract import load_policy_contract
 from my3d_rl.ppo_profile import get_ppo_profile
 from my3d_rl.soccer_motion_bc import (
     action_error_metrics,
+    dagger_row_mask,
     load_soccer_motion_teacher_dataset,
     motion_balanced_indices,
     validate_bc_data_manifest,
@@ -99,7 +100,7 @@ def main() -> None:
     profile = get_ppo_profile(args.profile)
     if profile.policy_contract != contract.policy_name:
         raise ValueError("PPO profile and policy contract differ")
-    data_manifest_type, data_manifest_path, _ = validate_bc_data_manifest(
+    data_manifest_type, data_manifest_path, data_manifest = validate_bc_data_manifest(
         args.dataset,
         base_checkpoint=args.base_checkpoint,
         selection_manifest=args.selection_manifest,
@@ -242,6 +243,16 @@ def main() -> None:
     report_interval = max(1, args.steps // 50)
     validation_mask = data["split"] == 1
     train_mask = data["split"] == 0
+    dagger_mask = (
+        dagger_row_mask(data["motion"], data["start_frame"], data_manifest)
+        if data_manifest_type == "dagger_aggregate"
+        else np.zeros(data["split"].shape, dtype=bool)
+    )
+    dagger_monitor_indices = np.flatnonzero(dagger_mask)
+    if dagger_monitor_indices.size > 4096:
+        dagger_monitor_indices = np.random.default_rng(args.seed + 1).choice(
+            dagger_monitor_indices, size=4096, replace=False
+        )
     started = time.monotonic()
     try:
         for step in range(1, args.steps + 1):
@@ -282,6 +293,21 @@ def main() -> None:
                     "validation/teacher_mse": validation_loss,
                     "validation/best_teacher_mse": best_validation_loss,
                 }
+                if dagger_monitor_indices.size:
+                    dagger_prediction = np.asarray(
+                        actor_mean(
+                            actor_params,
+                            jp.asarray(data["observation"][dagger_monitor_indices]),
+                        )
+                    )
+                    row["dagger/teacher_mse"] = float(
+                        np.mean(
+                            np.square(
+                                dagger_prediction
+                                - data["teacher_action"][dagger_monitor_indices]
+                            )
+                        )
+                    )
                 history.append(row)
                 with progress_path.open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps(row, sort_keys=True) + "\n")
@@ -303,19 +329,29 @@ def main() -> None:
     finally:
         dashboard.close()
 
+    selected_actor_params = (
+        actor_params
+        if data_manifest_type == "dagger_aggregate"
+        else best_actor_params
+    )
+    checkpoint_selection = (
+        "final_dagger_actor_pending_new_blind_exact_cpu_selection"
+        if data_manifest_type == "dagger_aggregate"
+        else "minimum_teacher_validation_mse"
+    )
     train_prediction = np.asarray(
-        actor_mean(best_actor_params, jp.asarray(data["observation"][train_mask]))
+        actor_mean(selected_actor_params, jp.asarray(data["observation"][train_mask]))
     )
     validation_prediction = np.asarray(
         actor_mean(
-            best_actor_params, jp.asarray(data["observation"][validation_mask])
+            selected_actor_params, jp.asarray(data["observation"][validation_mask])
         )
     )
     checkpoint_root = output_dir / "checkpoints"
     ppo_checkpoint.save(
         checkpoint_root,
         args.steps,
-        [normalizer_params, best_actor_params, critic_params],
+        [normalizer_params, selected_actor_params, critic_params],
         checkpoint_config,
     )
     checkpoint_path = checkpoint_root / f"{args.steps:012d}"
@@ -324,6 +360,8 @@ def main() -> None:
             "status": "complete",
             "elapsed_seconds": time.monotonic() - started,
             "best_validation_teacher_mse": best_validation_loss,
+            "checkpoint_selection": checkpoint_selection,
+            "dagger_train_samples": int(np.sum(dagger_mask)),
             "train": action_error_metrics(
                 train_prediction,
                 data["teacher_action"][train_mask],

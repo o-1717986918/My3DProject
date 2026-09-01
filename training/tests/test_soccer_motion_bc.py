@@ -8,6 +8,7 @@ import pytest
 
 from my3d_rl.soccer_motion_bc import (
     action_error_metrics,
+    dagger_row_mask,
     load_soccer_motion_teacher_dataset,
     motion_balanced_indices,
     validate_bc_data_manifest,
@@ -125,3 +126,22 @@ def test_validate_bc_data_manifest_rejects_wrong_dagger_checkpoint(tmp_path):
             base_checkpoint=checkpoint,
             dagger_manifest=manifest,
         )
+
+
+def test_dagger_row_mask_binds_motion_and_start_and_frame_count():
+    manifest = {
+        "purpose": "k1_b_exact_cpu_soccer_motion_dagger_collection",
+        "dagger_frames": 3,
+        "per_motion": [
+            {"motion": 0, "start_frames": [5]},
+            {"motion": 1, "start_frames": [7]},
+        ],
+    }
+
+    mask = dagger_row_mask(
+        np.array([0, 0, 1, 1, 1]),
+        np.array([1, 5, 7, 7, 9]),
+        manifest,
+    )
+
+    np.testing.assert_array_equal(mask, [False, True, True, True, False])

@@ -45,6 +45,35 @@ def validate_bc_data_manifest(
     return "dagger_aggregate", manifest_path, manifest
 
 
+def dagger_row_mask(
+    motion: np.ndarray,
+    start_frame: np.ndarray,
+    manifest: dict[str, Any],
+) -> np.ndarray:
+    """Identify the appended on-policy rows in a DAgger aggregate."""
+    motion = np.asarray(motion)
+    start_frame = np.asarray(start_frame)
+    if motion.ndim != 1 or motion.shape != start_frame.shape:
+        raise ValueError("DAgger row keys must be equal one-dimensional arrays")
+    if manifest.get("purpose") != "k1_b_exact_cpu_soccer_motion_dagger_collection":
+        raise ValueError("manifest is not a soccer-motion DAgger collection")
+    result = np.zeros(motion.shape, dtype=bool)
+    nodes = manifest.get("per_motion")
+    if not isinstance(nodes, list) or not nodes:
+        raise ValueError("DAgger manifest lacks per-motion start frames")
+    seen: set[int] = set()
+    for node in nodes:
+        value = int(node["motion"])
+        if value in seen:
+            raise ValueError("DAgger manifest repeats a motion")
+        seen.add(value)
+        starts = np.asarray(node["start_frames"], dtype=start_frame.dtype)
+        result |= (motion == value) & np.isin(start_frame, starts)
+    if int(np.sum(result)) != int(manifest.get("dagger_frames", -1)):
+        raise ValueError("DAgger manifest frame count differs from the aggregate")
+    return result
+
+
 def load_soccer_motion_teacher_dataset(
     path: Path, *, observation_size: int, action_size: int
 ) -> dict[str, np.ndarray]:
