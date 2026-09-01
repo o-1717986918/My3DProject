@@ -1,4 +1,4 @@
-# Generated from the verified Python 3.12 environment on 2026-08-30.
+# Generated from the verified Python 3.12 environment; updated 2026-09-01.
 # Install the Playground source at the recorded commit before applying this lock.
 absl-py==2.5.0
 aiofiles==25.1.0
@@ -17,6 +17,7 @@ flax==0.11.2
 fonttools==4.63.0
 fsspec==2026.7.0
 glfw==2.10.2
+grpcio==1.83.1
 humanize==4.16.0
 iniconfig==2.3.0
 ipython==9.17.0
@@ -32,6 +33,7 @@ Jinja2==3.1.6
 kiwisolver==1.5.1
 lxml==6.1.2
 markdown-it-py==4.2.0
+Markdown==3.10.3
 MarkupSafe==3.0.3
 matplotlib==3.11.1
 matplotlib-inline==0.2.2
@@ -84,6 +86,8 @@ setuptools==83.0.0
 simplejson==4.1.2
 six==1.17.0
 stack-data==0.6.3
+tensorboard==2.21.0
+tensorboard-data-server==0.7.2
 tensorboardX==2.6.5
 tensorstore==0.1.85
 tqdm==4.70.0

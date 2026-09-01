@@ -193,6 +193,7 @@ def cem_optimize(
     generations: int,
     elite_fraction: float = 0.2,
     smoothing: float = 0.25,
+    progress: Callable[[int, dict[str, float]], None] | None = None,
 ) -> CEMResult:
     """Maximize a deterministic objective with bounded CEM sampling."""
     mean = np.asarray(initial_mean, dtype=np.float64).copy()
@@ -232,15 +233,16 @@ def cem_optimize(
         elite_std = np.std(elites, axis=0)
         mean = smoothing * mean + (1.0 - smoothing) * elite_mean
         std = smoothing * std + (1.0 - smoothing) * np.maximum(elite_std, 1.0e-3)
-        history.append(
-            {
-                "generation": float(generation),
-                "best_score": best_score,
-                "generation_best_score": float(elite_scores[0]),
-                "elite_mean_score": float(np.mean(elite_scores)),
-                "mean_std": float(np.mean(std)),
-            }
-        )
+        metrics = {
+            "generation": float(generation),
+            "best_score": best_score,
+            "generation_best_score": float(elite_scores[0]),
+            "elite_mean_score": float(np.mean(elite_scores)),
+            "mean_std": float(np.mean(std)),
+        }
+        history.append(metrics)
+        if progress is not None:
+            progress(generation, metrics.copy())
 
     return CEMResult(best_parameters, best_score, tuple(history))
 

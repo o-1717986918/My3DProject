@@ -321,6 +321,34 @@ PYTHONPATH=training python training/tools/train_kick_smoke.py \
 The generated smoke checkpoint is deliberately marked non-releasable.  A
 successful optimizer update proves pipeline integrity, not soccer performance.
 
+## Live training visualization
+
+Finite soccer-motion PPO runs now write TensorBoard events below each run's
+`tensorboard/` directory while preserving the authoritative JSONL metrics and
+run manifest. Start the local dashboard in WSL and open the printed localhost
+address from Windows:
+
+```bash
+conda run -n my3d-rl tensorboard \
+  --logdir /home/win98/rl_runs --port 6006 --bind_all
+```
+
+The active K1-A phase teacher accepts `--tensorboard-log-dir`; it publishes
+best score, generation score, elite mean and search variance as each CEM
+generation completes. When `--dataset-output` is supplied, the dataset also
+contains the exact CPU `qpos` trace for visual inspection:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/view_soccer_motion_teacher.py /path/to/teacher-dataset.npz \
+  --split validation --hold
+```
+
+TensorBoard is a measurement surface, not a promotion gate. Candidate choice
+still uses held-out exact-CPU, Warp/ONNX parity, three seeds and RCSSServer
+replay. The MuJoCo viewer is deliberately separate from accelerated training
+so rendering cannot reduce rollout throughput or alter timings.
+
 ## Release rule
 
 A checkpoint cannot be integrated until its model manifest, source revisions,

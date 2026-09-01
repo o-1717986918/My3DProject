@@ -24,6 +24,7 @@ from my3d_rl.soccer_motion_env import (
     DEFAULT_CONTRACT,
     FiniteSoccerMotionTracking,
 )
+from my3d_rl.training_dashboard import TrainingDashboard
 
 
 STAGES: dict[str, dict[str, Any]] = {
@@ -139,6 +140,7 @@ def main() -> None:
     args.run_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = args.run_dir / "checkpoints"
     progress_path = args.run_dir / "progress.jsonl"
+    dashboard_path = args.run_dir / "tensorboard"
     manifest_path = args.run_dir / "run-manifest.json"
     manifest: dict[str, Any] = {
         "schema_version": 1,
@@ -173,19 +175,28 @@ def main() -> None:
             if args.restore_checkpoint
             else None
         ),
+        "visualization": {
+            "format": "tensorboard_event",
+            "log_dir": str(dashboard_path.resolve()),
+            "launch": f"tensorboard --logdir {dashboard_path.resolve()} --port 6006",
+        },
     }
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
+    dashboard = TrainingDashboard(dashboard_path)
+
     def progress(num_steps: int, metrics: Mapping[str, Any]) -> None:
+        wall_time_unix = time.time()
         row = {
             "num_steps": num_steps,
-            "wall_time_unix": time.time(),
+            "wall_time_unix": wall_time_unix,
             **{key: _json_value(value) for key, value in metrics.items()},
         }
         with progress_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
+        dashboard.write(num_steps, metrics, wall_time_unix=wall_time_unix)
         print(json.dumps(row, sort_keys=True), flush=True)
 
     started = time.monotonic()
@@ -243,6 +254,8 @@ def main() -> None:
             encoding="utf-8",
         )
         raise
+    finally:
+        dashboard.close()
     manifest.update(
         {
             "status": "complete",

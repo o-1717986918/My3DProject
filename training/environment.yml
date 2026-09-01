@@ -9,3 +9,5 @@ dependencies:
       - pyyaml>=6.0,<7
       - onnx>=1.19,<2
       - onnxruntime>=1.23,<2
+      - tensorboard>=2.20,<3
+      - tensorboardX>=2.6,<3

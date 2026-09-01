@@ -21,7 +21,9 @@ training/checkpoints/
 training/runs/
 training/videos/
 training/wandb/
+training/tensorboard/
 training/vendor/
 training/**/*.onnx
 training/**/*.npz
 training/**/*.pkl
+events.out.tfevents.*

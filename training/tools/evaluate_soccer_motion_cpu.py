@@ -7,14 +7,8 @@ import argparse
 from collections import defaultdict
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from brax.training import types as brax_types
-from brax.training.acme import running_statistics
-from brax.training.agents.ppo import checkpoint as ppo_checkpoint
-from brax.training.agents.ppo import networks as ppo_networks
-import jax
-import jax.numpy as jp
 import mujoco
 import numpy as np
 
@@ -23,6 +17,10 @@ from my3d_rl.ppo_profile import get_ppo_profile
 from my3d_rl.rcss_scene import build_single_t1_soccer_model
 from my3d_rl.reference_dynamics import configure_pd_actuators
 from my3d_rl.soccer_motion_corpus import load_soccer_motion_corpus
+from my3d_rl.soccer_motion_policy import (
+    load_soccer_motion_policy,
+    soccer_motion_actor_observation,
+)
 from my3d_rl.t1_control import apollo_joint_gains
 
 
@@ -59,86 +57,6 @@ def _foot_contacts(
     )
 
 
-def _actor_observation(
-    data: mujoco.MjData,
-    *,
-    joint_qpos: np.ndarray,
-    joint_dof: np.ndarray,
-    gyro_slice: slice,
-    torso_site: int,
-    reference_joint_position: np.ndarray,
-    reference_joint_velocity: np.ndarray,
-    reference_root_linear_velocity: np.ndarray,
-    reference_root_angular_velocity: np.ndarray,
-    reference_contact: np.ndarray,
-    previous_action: np.ndarray,
-    progress: float,
-    kick_leg_one_hot: np.ndarray,
-) -> np.ndarray:
-    triplets = np.stack(
-        [
-            (data.qpos[joint_qpos] - reference_joint_position) / 4.6,
-            (data.qvel[joint_dof] - reference_joint_velocity) / 110.0,
-            previous_action / 10.0,
-        ],
-        axis=1,
-    ).reshape(-1)
-    angular_velocity = data.sensordata[gyro_slice] / 50.0
-    gravity = data.site_xmat[torso_site].reshape(3, 3).T @ np.array(
-        [0.0, 0.0, -1.0]
-    )
-    angle = 2.0 * np.pi * progress
-    actor = np.concatenate(
-        [
-            triplets,
-            angular_velocity,
-            gravity,
-            reference_joint_position / 4.6,
-            reference_root_linear_velocity / 5.0,
-            reference_root_angular_velocity / 10.0,
-            reference_contact.astype(np.float64),
-            np.array([np.cos(angle), np.sin(angle)]),
-            kick_leg_one_hot,
-        ]
-    )
-    if actor.shape != (110,):
-        raise ValueError(f"CPU actor observation shape {actor.shape} != (110,)")
-    return np.clip(np.nan_to_num(actor), -10.0, 10.0).astype(np.float32)
-
-
-def _make_policy(
-    *,
-    zero_policy: bool,
-    checkpoint: Path | None,
-    profile_name: str,
-    observation_size: int,
-    action_size: int,
-) -> Callable[[np.ndarray], np.ndarray]:
-    if zero_policy:
-        return lambda unused: np.zeros(action_size, dtype=np.float32)
-    profile = get_ppo_profile(profile_name)
-    preprocess = (
-        running_statistics.normalize
-        if profile.normalize_observations
-        else brax_types.identity_observation_preprocessor
-    )
-    networks = profile.network_factory()(
-        {"state": observation_size, "privileged_state": 118},
-        action_size,
-        preprocess_observations_fn=preprocess,
-    )
-    params = ppo_checkpoint.load(checkpoint)
-    inference = ppo_networks.make_inference_fn(networks)(params, deterministic=True)
-
-    @jax.jit
-    def infer(actor: jax.Array) -> jax.Array:
-        return inference(
-            {"state": actor}, jax.random.PRNGKey(0)
-        )[0]
-
-    return lambda actor: np.asarray(infer(jp.asarray(actor)), dtype=np.float64)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("corpus_root", type=Path)
@@ -163,10 +81,11 @@ def main() -> None:
     if profile.policy_contract != contract.policy_name:
         raise ValueError("PPO profile and policy contract differ")
     corpus = load_soccer_motion_corpus(args.corpus_root)
-    policy = _make_policy(
+    policy = load_soccer_motion_policy(
         zero_policy=args.zero_policy,
         checkpoint=args.checkpoint,
         profile_name=args.profile,
+        policy_contract_name=contract.policy_name,
         observation_size=contract.observation_size,
         action_size=contract.action_size,
     )
@@ -241,7 +160,7 @@ def main() -> None:
 
             for frame in range(start + 1, length):
                 current = frame - 1
-                observation = _actor_observation(
+                observation = soccer_motion_actor_observation(
                     data,
                     joint_qpos=joint_qpos,
                     joint_dof=joint_dof,
