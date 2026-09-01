@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import platform
 import subprocess
@@ -145,6 +146,28 @@ def _json_value(value: Any) -> Any:
     return array.tolist()
 
 
+def _effective_timesteps(
+    requested_timesteps: int,
+    *,
+    optimizer_step_timesteps: int,
+    num_evals: int,
+) -> tuple[int, int, int]:
+    """Mirror Brax PPO's full-evaluation-interval step rounding."""
+    if min(requested_timesteps, optimizer_step_timesteps, num_evals) < 1:
+        raise ValueError("timestep rounding inputs must be positive")
+    evaluation_intervals = max(num_evals - 1, 1)
+    optimizer_steps_per_interval = math.ceil(
+        requested_timesteps
+        / (evaluation_intervals * optimizer_step_timesteps)
+    )
+    effective = (
+        evaluation_intervals
+        * optimizer_steps_per_interval
+        * optimizer_step_timesteps
+    )
+    return effective, evaluation_intervals, optimizer_steps_per_interval
+
+
 def _corpus_manifest(corpus) -> dict[str, Any]:
     return {
         "motion_count": corpus.motion_count,
@@ -221,10 +244,18 @@ def main() -> None:
             "num_envs must divide batch_size * num_minibatches "
             f"({profile.batch_size * profile.num_minibatches})"
         )
-    minimum_epoch_timesteps = (
+    optimizer_step_timesteps = (
         profile.batch_size * profile.num_minibatches * profile.unroll_length
     )
-    effective_timesteps = max(args.num_timesteps, minimum_epoch_timesteps)
+    (
+        effective_timesteps,
+        evaluation_intervals,
+        optimizer_steps_per_interval,
+    ) = _effective_timesteps(
+        args.num_timesteps,
+        optimizer_step_timesteps=optimizer_step_timesteps,
+        num_evals=args.num_evals,
+    )
 
     train_corpus = load_soccer_motion_corpus(
         args.corpus_root, failure_report=args.failure_report
@@ -265,7 +296,9 @@ def main() -> None:
         "git_revision": revision,
         "seed": args.seed,
         "requested_timesteps": args.num_timesteps,
-        "minimum_epoch_timesteps": minimum_epoch_timesteps,
+        "optimizer_step_timesteps": optimizer_step_timesteps,
+        "evaluation_intervals": evaluation_intervals,
+        "optimizer_steps_per_evaluation_interval": optimizer_steps_per_interval,
         "effective_timesteps": effective_timesteps,
         "num_envs": args.num_envs,
         "num_eval_envs": args.num_eval_envs,
@@ -300,7 +333,11 @@ def main() -> None:
 
     dashboard = TrainingDashboard(dashboard_path)
 
+    last_num_steps = 0
+
     def progress(num_steps: int, metrics: Mapping[str, Any]) -> None:
+        nonlocal last_num_steps
+        last_num_steps = num_steps
         wall_time_unix = time.time()
         row = {
             "num_steps": num_steps,
@@ -358,6 +395,7 @@ def main() -> None:
             {
                 "status": "failed",
                 "elapsed_seconds": time.monotonic() - started,
+                "observed_final_timesteps": last_num_steps,
                 "error_type": type(exc).__name__,
                 "error": str(exc),
             }
@@ -373,6 +411,8 @@ def main() -> None:
         {
             "status": "complete",
             "elapsed_seconds": time.monotonic() - started,
+            "observed_final_timesteps": last_num_steps,
+            "timestep_accounting_passed": last_num_steps == effective_timesteps,
             "final_metrics": {
                 key: _json_value(value) for key, value in final_metrics.items()
             },

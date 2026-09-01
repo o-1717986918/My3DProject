@@ -427,6 +427,11 @@ PYTHONPATH=training conda run -n my3d-rl python \
   --run-dir /home/win98/rl_runs/paid-k1/ppo-reference-<name>
 ```
 
+Brax rounds work to complete optimizer steps and evaluation intervals. The
+trainer mirrors that calculation before launch and records requested, effective
+and observed final timesteps; `timestep_accounting_passed` must be true before
+an experiment can be treated as reproducible evidence.
+
 ## Release rule
 
 A checkpoint cannot be integrated until its model manifest, source revisions,

@@ -1076,3 +1076,15 @@ refuses dirty/in-repository runs. TensorBoard stays live at
 closed-loop replays at evaluation boundaries. All evidence hashes and the
 remaining three-seed, ball-outcome and server-replay gates are locked in
 `training/locks/paid_k1b_2026_09_01.yaml`.
+
+The first visual PPO resume from clean revision `8e08412` is an integration
+diagnostic, not a retained model. Its deterministic 64-environment Warp
+completion starts at 25/64, falls to 23/64 after one optimizer step and returns
+to 25/64 after the second, while average episode length declines from 55.64 to
+53.61. The request was 262,144 environment steps, but Brax correctly executed
+two complete 196,608-step optimizer/evaluation intervals (393,216 total); the
+initial manifest predicted only the request. Formal evidence use of this run is
+therefore rejected. The trainer now mirrors Brax interval rounding in advance
+and records observed final steps plus an equality check. The diagnostic still
+proved that live TensorBoard, hash-bound restoration, checkpoint saving and
+exact-CPU policy replay operate end to end.

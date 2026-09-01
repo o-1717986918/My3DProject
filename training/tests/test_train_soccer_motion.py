@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from tools.train_soccer_motion import _load_curriculum_gate, _tree_sha256
+from tools.train_soccer_motion import (
+    _effective_timesteps,
+    _load_curriculum_gate,
+    _tree_sha256,
+)
 
 
 def _write_gate(tmp_path: Path, checkpoint: Path, *, passed: bool = True) -> Path:
@@ -76,3 +80,23 @@ def test_curriculum_gate_rejects_modified_candidate_report(tmp_path):
 
     with pytest.raises(ValueError, match="hash differs"):
         _load_curriculum_gate(comparison, checkpoint)
+
+
+@pytest.mark.parametrize(
+    ("requested", "num_evals", "expected", "intervals", "steps_per_interval"),
+    (
+        (262_144, 3, 393_216, 2, 1),
+        (2_359_296, 5, 2_359_296, 4, 3),
+        (1, 1, 196_608, 1, 1),
+    ),
+)
+def test_effective_timesteps_mirrors_brax_rounding(
+    requested, num_evals, expected, intervals, steps_per_interval
+):
+    result = _effective_timesteps(
+        requested,
+        optimizer_step_timesteps=196_608,
+        num_evals=num_evals,
+    )
+
+    assert result == (expected, intervals, steps_per_interval)
