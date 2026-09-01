@@ -469,6 +469,14 @@ perturbation seeds included in the paired key, preserving untouched grids after
 the finite phase-start set has been used repeatedly. Protocol and hashes are in
 `training/locks/paid_k1c_2026_09_01.yaml`.
 
+The predeclared v4 selection run passes: on 518 perturbed exact-CPU pairs it
+changes completion from 177 to 186 (12 improvements, three regressions,
+`p=0.01758`) and raises survival by 0.01031 with 161 improvements versus 97
+regressions. The result selects the conservative optimizer protocol only. Two
+additional locked training seeds, a common disjoint final perturbation grid,
+a median-seed rule and a second confirmation perturbation grid are required
+before the checkpoint can advance to ball-contact work.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

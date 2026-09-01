@@ -1107,3 +1107,20 @@ their comparison pairs all 26 cases exactly. Different seeds therefore provide
 disjoint reproducible selection and final grids without relaxing phase
 coverage. The v3 evidence and v4 protocol are locked in
 `training/locks/paid_k1c_2026_09_01.yaml`.
+
+The predeclared v4 seed `20260966` completes one audited 196,608-step update.
+Its same-run Warp evaluation rises from 16/64 to 27/64, but selection uses the
+locked perturbation grid instead. Across 518 exact-CPU pairs completion rises
+from 177 to 186 with 12 improvements and three regressions (`p=0.0175781`).
+Mean survival rises by 0.010314 with 161 improvements and 97 regressions
+(`p=4.06e-5`); tracking tolerances pass. The ordinary promotion gate passes,
+so v4 advances as a training protocol, not as a runtime checkpoint.
+
+Before starting more seeds, the family gate is fixed. Seeds `20260966`,
+`20260969` and `20260970` start from the same state-feedback checkpoint and
+run the same single update. All are evaluated once with perturbation seed
+`20260968`. Acceptance requires correct timestep accounting and tracking for
+all, no seed with a net completion loss, median completion delta at least 0.01,
+and at least two exact-grid promotion passes. The median seed is then confirmed
+once on disjoint perturbation seed `20260971`. This prevents selecting the best
+of three noisy runs and reporting it as an untouched result.

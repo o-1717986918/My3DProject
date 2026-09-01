@@ -1,7 +1,7 @@
 schema_version: 1
 recorded_at: 2026-09-01
 stage: paid_k1c_evidence_bound_ppo_resume
-status: aggressive_resume_rejected_conservative_resume_predeclared
+status: conservative_resume_selected_multiseed_final_predeclared
 
 source:
   retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
@@ -104,9 +104,77 @@ conservative_v4_predeclared_protocol:
     three_independent_training_seeds_required: true
   runtime_promotion: false
 
+conservative_v4_selection_result:
+  training_seed: 20260966
+  git_revision: 8aa2faa4a5e547ec21537e54b54ea272592776e6
+  run_manifest_sha256: b663b26da9f5960715ff33f3702ceefe04858541f8b17512ef9ccf5eecc5bb9d
+  progress_jsonl_sha256: 210702f22c330335d7eed4e7417231a7992bc2e2f9af59cd80d6cfd29f2af575
+  tensorboard_event_sha256: ad561a40a12c0e2b49231adf1b60982af034a0b6ad76b0cae8f61a6d1b1dceb5
+  checkpoint: /home/win98/rl_runs/paid-k1/k1c-ppo-reference-v4-s20260966-v1/checkpoints/000000196608
+  checkpoint_tree_sha256: e5fe43cecfd4ce732fc05bb8b7842326cd5441fd67b5105d22b3e9d9f3d32477
+  timestep_accounting_passed: true
+  online_warp_evaluation:
+    baseline_completions: 16_of_64
+    candidate_completions: 27_of_64
+    baseline_average_episode_length: 55.625
+    candidate_average_episode_length: 59.78125
+  exact_cpu_selection_grid:
+    paired_trials: 518
+    perturbation_seed: 20260967
+    baseline_report_sha256: 53822716f4f96bbbb86121423af0224ed2c87409d847e66e7b67a6834cb251a5
+    candidate_report_sha256: 6cdca744c2225955907f8c3e1a9eaa47bf2b54c3011326bd78222d47f78a7eac
+    comparison_sha256: 030d8460fb06ce79243b4e6821eb9985d3ff90fb0bee8e383c89cb4b812e3e70
+    baseline_completions: 177
+    candidate_completions: 186
+    candidate_only: 12
+    baseline_only: 3
+    one_sided_exact_mcnemar_p: 0.017578125
+    mean_survival_fraction_delta: 0.0103137243
+    survival_improvements: 161
+    survival_regressions: 97
+    one_sided_survival_sign_p: 0.0000405992
+    tracking_tolerance_passed: true
+    promotion_passed: true
+    curriculum_advance_passed: false
+  decision: select_profile_for_three_seed_final_not_runtime_promoted
+
+multiseed_final_predeclaration:
+  training_seeds:
+    - 20260966
+    - 20260969
+    - 20260970
+  each_seed_starts_from_same_retained_checkpoint: true
+  each_seed_uses_same_v4_training_protocol: true
+  final_grid:
+    phase_samples: 2000
+    expected_trials_per_seed: 518
+    minimum_per_motion: 17
+    perturbation_seed: 20260968
+    reset_joint_noise: 0.002
+    reset_root_velocity_noise: 0.005
+    reset_yaw_range: 0.01
+    seed_disjoint_from_selection_grid: true
+  family_acceptance_gate:
+    all_three_timestep_accounting_pass: true
+    all_three_tracking_tolerance_pass: true
+    no_seed_has_net_completion_loss: true
+    median_completion_rate_delta_at_least: 0.01
+    at_least_two_of_three_pass_exact_grid_promotion: true
+  representative_selection:
+    rule: median_completion_delta_then_mean_survival_delta_then_training_seed
+    uses_final_grid_only_after_family_gate: true
+  representative_confirmation_grid:
+    perturbation_seed: 20260971
+    same_phase_and_noise_envelope: true
+    seed_disjoint_from_selection_and_family_final: true
+    require_exact_grid_promotion_or_curriculum_advance: true
+  runtime_promotion: false
+
 decision:
   current_retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
   next:
-    - run_the_predeclared_single_step_conservative_v4_resume
-    - reject_without_using_the_final_perturbation_seed_if_selection_gate_fails
-    - if_selected_repeat_three_training_seeds_before_ball_and_server_gates
+    - train_seeds_20260969_and_20260970_from_the_same_retained_checkpoint
+    - evaluate_all_three_once_on_perturbation_seed_20260968
+    - apply_the_predeclared_family_gate_and_representative_rule
+    - confirm_the_representative_once_on_perturbation_seed_20260971
+    - keep_all_models_out_of_apollo_until_ball_and_server_gates_pass
