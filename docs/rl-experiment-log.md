@@ -1149,3 +1149,18 @@ not directly JSON serializable. That `v1` directory is invalidated and never
 evaluated. The signature writer now recursively converts only the selected
 shape/dtype metadata to plain JSON data, with a regression test; the clean
 retry uses a new `v2` directory so no partial artifact is overwritten.
+
+The valid equal average is evaluated once on perturbation seed `20260972`.
+Completion changes from 178 to 184 with eight improvements and two regressions,
+but the exact McNemar result is `p=0.0546875`. Mean survival rises by only
+0.00442 despite 166 improvements versus 74 regressions. Tracking passes, while
+both the ordinary promotion gate and the stricter curriculum gate fail. The
+reserved confirmation seed `20260973` is not opened.
+
+K1-C therefore closes without a PPO promotion. Aggressive v3, conservative v4
+as a three-seed family, and its variance-reduced parameter average all fail
+their respective predeclared reliability gates. The retained K1 actor remains
+the state-feedback clone. The next authorized improvement is longer-horizon
+exact-CPU state feedback under deterministic reset perturbations, with only
+cross-fitted locally advantageous student-state labels admitted to DAgger. More
+reward-only PPO steps are not supported by the evidence.

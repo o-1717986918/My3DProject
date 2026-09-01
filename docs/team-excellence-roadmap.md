@@ -484,6 +484,14 @@ average of the three aligned one-step parameter deltas is now the bounded
 variance-reduction experiment, with separate selection and confirmation
 perturbation seeds. Failure leaves the state-feedback clone unchanged.
 
+The equal average also fails its selection gate: 178 to 184 completions with
+eight improvements and two regressions gives `p=0.05469`; mean survival gains
+only 0.00442. Its confirmation seed is left untouched. K1-C closes with no PPO
+promotion, and further reward-only continuation is stopped. K1-D returns to
+longer-horizon exact-CPU state feedback under reset perturbations and admits
+only cross-fitted, locally advantageous student-state labels before any new
+policy evaluation.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

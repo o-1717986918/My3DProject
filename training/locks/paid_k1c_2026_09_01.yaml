@@ -1,7 +1,7 @@
 schema_version: 1
 recorded_at: 2026-09-01
 stage: paid_k1c_evidence_bound_ppo_resume
-status: multiseed_family_rejected_equal_average_predeclared
+status: all_ppo_resume_candidates_rejected_state_feedback_clone_retained
 
 source:
   retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
@@ -265,10 +265,39 @@ invalidated_average_attempt:
   use_for_evaluation_training_or_selection: false
   retry_directory: /home/win98/rl_runs/paid-k1/k1c-ppo-reference-v4-average-s20260972-v2
 
+equal_parameter_average_result:
+  git_revision: 29ec8100bed23bc98af36dc5ac463a8c79f2c803
+  run_manifest: /home/win98/rl_runs/paid-k1/k1c-ppo-reference-v4-average-s20260972-v2/run-manifest.json
+  run_manifest_sha256: f8ea7cdd2e4d9876cc2662a4b322509d4e24a285806538cca6e45cf475695779
+  checkpoint: /home/win98/rl_runs/paid-k1/k1c-ppo-reference-v4-average-s20260972-v2/checkpoints/000000196608
+  checkpoint_tree_sha256: 11cb4f3ec8f9a5f6def60c5e2962b624bcca2114f92e2f0588273a8f4adf98c1
+  normalizer: disabled_copied_from_retained_base
+  selection_grid:
+    perturbation_seed: 20260972
+    paired_trials: 518
+    baseline_report_sha256: 36046931b5a38ec4920c75001147e6a3674325fbe800d3f839916c04c9d4bd86
+    candidate_report_sha256: 98eaacd6a4cf042a846d0cee7ed308fa801933530f2e2203ee837d480f9519bb
+    comparison_sha256: e91f0a7ff900e640f6f37648a61e35c15f8407278f1e091431a4e4a5bd57128d
+    baseline_completions: 178
+    candidate_completions: 184
+    candidate_only: 8
+    baseline_only: 2
+    one_sided_exact_mcnemar_p: 0.0546875
+    mean_survival_fraction_delta: 0.0044198894
+    survival_improvements: 166
+    survival_regressions: 74
+    one_sided_survival_sign_p: 0.0000000013723
+    tracking_tolerance_passed: true
+    promotion_passed: false
+    curriculum_advance_passed: false
+  confirmation_seed_20260973_used: false
+  decision: reject_average_keep_state_feedback_clone
+
 decision:
   current_retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
   next:
-    - create_the_predeclared_equal_parameter_average_from_all_three_v4_runs
-    - evaluate_once_on_perturbation_seed_20260972
-    - confirm_once_on_perturbation_seed_20260973_only_if_selected
+    - stop_reward_only_ppo_resume_after_v3_v4_and_average_fail_reliability_gates
+    - extend_exact_cpu_state_feedback_to_longer_horizon_and_reset_perturbations
+    - collect_only_cross_fitted_student_state_labels_with_local_advantage
+    - retain_the_current_state_feedback_clone_as_fallback_and_ablation
     - keep_all_models_out_of_apollo_until_ball_and_server_gates_pass
