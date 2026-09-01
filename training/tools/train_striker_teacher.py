@@ -113,6 +113,7 @@ def _load_kick_prior(
     if records is None:
         parameters = source.get("parameters")
         selected_condition = None
+        target_distance = float(source.get("spec", {}).get("target_distance_m", 2.0))
     else:
         eligible = [
             record
@@ -137,6 +138,7 @@ def _load_kick_prior(
         )
         parameters = selected.get("parameters")
         selected_condition = int(selected["condition_index"])
+        target_distance = float(selected["distance_m"])
     parameters = np.asarray(parameters, dtype=np.float64)
     if parameters.shape != (14,) or not np.isfinite(parameters).all():
         raise ValueError("kick-prior parameters must be 14 finite values")
@@ -152,16 +154,73 @@ def _load_kick_prior(
         "manifest_sha256": _sha256(path),
         "purpose": source.get("purpose"),
         "condition_index": selected_condition,
+        "target_distance_m": target_distance,
         "duration_s": duration_s,
         "steps": int(trajectory.shape[0]),
         "parameters": parameters.tolist(),
     }
 
 
+def _load_kick_prior_bank(
+    primary_path: Path,
+    additional_paths: list[Path],
+    contract,
+    *,
+    primary_condition_index: int | None,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Load, sort and hash a distance-conditioned trajectory bank."""
+    loaded = [
+        _load_kick_prior(
+            primary_path,
+            contract,
+            condition_index=primary_condition_index,
+        )
+    ]
+    loaded.extend(
+        _load_kick_prior(path, contract, condition_index=None)
+        for path in additional_paths
+    )
+    loaded.sort(key=lambda item: float(item[1]["target_distance_m"]))
+    trajectories = [item[0] for item in loaded]
+    metadata = [item[1] for item in loaded]
+    distances = np.asarray(
+        [item["target_distance_m"] for item in metadata], dtype=np.float32
+    )
+    if np.any(np.diff(distances) < 0.0):
+        raise ValueError("kick-prior bank distances must be sorted")
+    shapes = {trajectory.shape for trajectory in trajectories}
+    if len(shapes) != 1:
+        raise ValueError("kick-prior bank trajectories must have equal duration")
+    return (
+        np.stack(trajectories),
+        distances,
+        {
+            "selection": "nearest_remaining_target_distance_first_tie",
+            "entries": metadata,
+        },
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("kick_prior_manifest", type=Path)
     parser.add_argument("--kick-prior-condition-index", type=int, default=1)
+    parser.add_argument(
+        "--kick-prior-bank-manifest",
+        action="append",
+        type=Path,
+        default=[],
+        help="additional range-conditioned prior; target distance is read from it",
+    )
+    parser.add_argument(
+        "--fixed-kick-prior-index",
+        type=int,
+        default=-1,
+        help=(
+            "fix one sorted bank entry while learning target-conditioned residuals; "
+            "-1 retains nearest-distance selection"
+        ),
+    )
     parser.add_argument(
         "--stage", choices=tuple(STAGES), default="near_ball"
     )
@@ -181,6 +240,7 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
     parser.add_argument("--entropy-cost", type=float, default=1.0e-4)
     parser.add_argument("--init-noise-std", type=float, default=0.05)
+    parser.add_argument("--residual-scale", type=float, default=0.10)
     parser.add_argument("--restore-checkpoint", type=Path)
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
@@ -205,6 +265,7 @@ def main() -> None:
         or args.learning_rate <= 0.0
         or args.entropy_cost < 0.0
         or not 0.0 < args.init_noise_std <= 0.2
+        or not 0.0 < args.residual_scale <= 1.0
     ):
         raise ValueError("invalid PPO optimization configuration")
 
@@ -219,10 +280,11 @@ def main() -> None:
     contract = load_policy_contract(args.contract)
     if contract.policy_name != "striker_policy_v1":
         raise ValueError("teacher training requires striker_policy_v1")
-    kick_prior, kick_prior_metadata = _load_kick_prior(
+    kick_prior, kick_prior_distances, kick_prior_metadata = _load_kick_prior_bank(
         args.kick_prior_manifest,
+        args.kick_prior_bank_manifest,
         contract,
-        condition_index=args.kick_prior_condition_index,
+        primary_condition_index=args.kick_prior_condition_index,
     )
     environment_overrides = {
         **STAGES[args.stage],
@@ -230,11 +292,14 @@ def main() -> None:
         "naconmax": max(2048, 16 * args.num_envs),
         "fixed_action_mode": 0,
         "fixed_desired_arrival_speed": 0.8,
+        "fixed_kick_prior_index": args.fixed_kick_prior_index,
+        "residual_scale": args.residual_scale,
     }
     env = LongHorizonStriker(
         config_overrides=environment_overrides,
         contract=contract,
         kick_prior_joint_residuals=kick_prior,
+        kick_prior_target_distances=kick_prior_distances,
     )
     eval_overrides = {
         **environment_overrides,
@@ -250,6 +315,7 @@ def main() -> None:
         config_overrides=eval_overrides,
         contract=contract,
         kick_prior_joint_residuals=kick_prior,
+        kick_prior_target_distances=kick_prior_distances,
     )
     network_factory = functools.partial(
         ppo_networks.make_ppo_networks,
@@ -302,6 +368,7 @@ def main() -> None:
             "learning_rate": args.learning_rate,
             "entropy_cost": args.entropy_cost,
             "init_noise_std": args.init_noise_std,
+            "residual_scale": args.residual_scale,
             "batch_size": batch_size,
             "num_minibatches": num_minibatches,
             "unroll_length": unroll_length,

@@ -10,6 +10,7 @@ import numpy as np
 
 from .contract import PolicyContract
 from .kick_teacher import KickTeacherEvaluator, KickTeacherSpec
+from .kick_transition import estimate_locomotion_phase
 
 
 def closed_loop_approach_control_numpy(
@@ -93,6 +94,11 @@ class StrikerCpuResult:
     succeeded: bool
     fallen: bool
     trigger_count: int
+    kick_prior_indices: tuple[int, ...]
+    trigger_observation: tuple[float, ...]
+    trigger_walk_last_action: tuple[float, ...]
+    trigger_privileged_observation: tuple[float, ...]
+    trigger_actor_history: tuple[tuple[float, ...], ...]
     first_trigger_step: int
     first_contact_step: int
     episode_steps: int
@@ -111,21 +117,37 @@ class StrikerCpuEvaluator:
         kick_prior_joint_residuals: np.ndarray,
         config: Mapping[str, Any],
         *,
+        kick_prior_target_distances: np.ndarray | None = None,
         prefix: str = "striker_cpu_",
     ) -> None:
         if contract.policy_name != "striker_policy_v1":
             raise ValueError("CPU striker requires striker_policy_v1")
         prior = np.asarray(kick_prior_joint_residuals, dtype=np.float64)
+        if prior.ndim == 2:
+            prior = prior[None, ...]
         if (
-            prior.ndim != 2
-            or prior.shape[0] < 2
-            or prior.shape[1] != contract.action_size
+            prior.ndim != 3
+            or prior.shape[1] < 2
+            or prior.shape[2] != contract.action_size
             or not np.isfinite(prior).all()
         ):
-            raise ValueError("kick prior must be a finite [T, 23] trajectory")
+            raise ValueError("kick prior must be a finite [K, T, 23] bank")
+        if kick_prior_target_distances is None:
+            if prior.shape[0] != 1:
+                raise ValueError("a multi-entry kick prior requires distances")
+            kick_prior_target_distances = np.array([2.0])
+        distances = np.asarray(kick_prior_target_distances, dtype=np.float64)
+        if (
+            distances.shape != (prior.shape[0],)
+            or not np.isfinite(distances).all()
+            or np.any(distances <= 0.0)
+            or np.any(np.diff(distances) < 0.0)
+        ):
+            raise ValueError("kick-prior distances must be sorted")
         self.contract = contract
         self.config = dict(config)
         self.prior = prior
+        self.prior_target_distances = distances
         self._teacher = KickTeacherEvaluator(
             KickTeacherSpec(
                 target_distance_m=2.0,
@@ -158,11 +180,16 @@ class StrikerCpuEvaluator:
         world_to_yaw = np.array([[c, s], [-s, c]])
         torso_pos = data.xpos[teacher._torso_body]
         ball_pos = data.xpos[teacher._ball_body]
+        ball_world_vel = data.qvel[teacher._ball_dof : teacher._ball_dof + 3]
+        torso_world_vel = data.qvel[teacher._root_dof : teacher._root_dof + 3]
         goal_delta = goal_world - ball_pos[:2]
         goal_distance = float(np.linalg.norm(goal_delta))
         target_world = goal_delta / max(goal_distance, 1.0e-6)
         target_local = world_to_yaw @ target_world
         ball_local_xy = world_to_yaw @ (ball_pos[:2] - torso_pos[:2])
+        ball_local_vel_xy = world_to_yaw @ (
+            ball_world_vel[:2] - torso_world_vel[:2]
+        )
         command, activation, contact_error, heading_error = (
             closed_loop_approach_control_numpy(
                 ball_local_xy,
@@ -187,16 +214,110 @@ class StrikerCpuEvaluator:
         return {
             "torso_xmat": torso_xmat,
             "torso_pos": torso_pos,
+            "torso_world_vel": torso_world_vel,
             "ball_pos": ball_pos,
+            "ball_world_vel": ball_world_vel,
+            "ball_local_xy": ball_local_xy,
+            "ball_local_vel_xy": ball_local_vel_xy,
             "target_world": target_world,
+            "target_local": target_local,
             "goal_distance": goal_distance,
             "command": command,
             "activation": activation,
             "contact_distance": float(np.linalg.norm(contact_error)),
+            "contact_error": contact_error,
             "heading_error": heading_error,
         }
 
-    def rollout(self, seed: int) -> StrikerCpuResult:
+    def _actor_observation(
+        self,
+        data: mujoco.MjData,
+        features: Mapping[str, Any],
+        previous_correction: np.ndarray,
+        kick_step: int,
+    ) -> np.ndarray:
+        """Build the exact 102-value deployable observation at a CPU state."""
+        teacher = self._teacher
+        torso_xmat = np.asarray(features["torso_xmat"])
+        gravity = torso_xmat.T @ np.array([0.0, 0.0, -1.0])
+        joint_position_offset = (
+            data.qpos[teacher._joint_qpos] - teacher._default_pose
+        )
+        joint_velocity = data.qvel[teacher._joint_dof]
+        locomotion = estimate_locomotion_phase(
+            joint_position_offset,
+            joint_velocity,
+            self.contract.joint_order,
+        )
+        requested_ball_speed = np.sqrt(
+            float(self.config["fixed_desired_arrival_speed"]) ** 2
+            + 2.0
+            * float(self.config["rolling_deceleration_mps2"])
+            * float(features["goal_distance"])
+        )
+        kick_active = kick_step >= 0
+        kick_progress = (
+            np.clip(kick_step / max(self.prior.shape[1] - 1, 1), 0.0, 1.0)
+            if kick_active
+            else 0.0
+        )
+        kick_phase = (
+            np.array([np.sin(np.pi * kick_progress), np.cos(np.pi * kick_progress)])
+            if kick_active
+            else np.array([0.0, 1.0])
+        )
+        command = (
+            np.asarray(self.config["kick_walk_command"], dtype=np.float64)
+            if kick_active and kick_step < int(self.config["kick_walk_duration_steps"])
+            else np.zeros(3)
+            if kick_active
+            else np.asarray(features["command"], dtype=np.float64)
+        )
+        ball_pos = np.asarray(features["ball_pos"])
+        torso_pos = np.asarray(features["torso_pos"])
+        ball_world_vel = np.asarray(features["ball_world_vel"])
+        ball_local_xy = np.asarray(features["ball_local_xy"])
+        ball_local_vel_xy = np.asarray(features["ball_local_vel_xy"])
+        actor = np.concatenate(
+            [
+                data.sensordata[teacher._gyro_slice],
+                gravity,
+                joint_position_offset,
+                joint_velocity,
+                previous_correction,
+                np.array(
+                    [ball_local_xy[0], ball_local_xy[1], ball_pos[2] - torso_pos[2]]
+                ),
+                np.array(
+                    [
+                        ball_local_vel_xy[0],
+                        ball_local_vel_xy[1],
+                        ball_world_vel[2],
+                    ]
+                ),
+                np.asarray(features["target_local"]),
+                np.array([features["goal_distance"]]),
+                np.array([requested_ball_speed]),
+                np.array([self.config["fixed_desired_arrival_speed"]]),
+                np.array([1.0, 0.0, 0.0]),
+                np.array([0.0, 1.0]),
+                command,
+                np.array([features["activation"]]),
+                kick_phase,
+                locomotion.sin_cos,
+                locomotion.support_hint,
+            ]
+        ).astype(np.float32)
+        if actor.shape != (self.contract.observation_size,):
+            raise RuntimeError(
+                f"CPU striker observation is {actor.shape}, expected "
+                f"({self.contract.observation_size},)"
+            )
+        return actor
+
+    def rollout(
+        self, seed: int, *, capture_trigger_history: bool = False
+    ) -> StrikerCpuResult:
         cfg = self.config
         teacher = self._teacher
         rng = np.random.default_rng(seed)
@@ -236,12 +357,20 @@ class StrikerCpuEvaluator:
         goal_world = initial_ball_xy + target_world * target_distance
         walk_last_action = np.zeros(self.contract.action_size)
         kick_step = -1
+        kick_prior_index = 0
         kick_cooldown = 0
         settled_steps = 0
         trigger_count = 0
+        selected_prior_indices: list[int] = []
+        trigger_observation = np.empty(0, dtype=np.float32)
+        trigger_walk_last_action = np.empty(0, dtype=np.float32)
+        trigger_privileged_observation = np.empty(0, dtype=np.float32)
+        actor_history: list[np.ndarray] = []
+        trigger_actor_history = np.empty((0, 102), dtype=np.float32)
         first_trigger_step = int(cfg["episode_length"])
         first_contact_step = int(cfg["episode_length"])
         contacted = False
+        post_contact_steps = 0
         succeeded = False
         fallen = False
         maximum_directional_speed = 0.0
@@ -269,13 +398,81 @@ class StrikerCpuEvaluator:
                     or settled_steps >= int(cfg["kick_settled_confirmation_steps"])
                 )
             )
+            current_actor_observation = None
+            if capture_trigger_history and kick_step < 0:
+                current_actor_observation = self._actor_observation(
+                    data,
+                    features,
+                    np.zeros(self.contract.action_size),
+                    -1,
+                )
+                actor_history.append(current_actor_observation)
+                actor_history = actor_history[-50:]
             if trigger:
+                if trigger_observation.size == 0:
+                    trigger_observation = (
+                        current_actor_observation
+                        if current_actor_observation is not None
+                        else self._actor_observation(
+                            data,
+                            features,
+                            np.zeros(self.contract.action_size),
+                            -1,
+                        )
+                    )
+                    if capture_trigger_history:
+                        if not actor_history:
+                            raise RuntimeError("trigger history is unexpectedly empty")
+                        padded_history = [actor_history[0]] * (
+                            50 - len(actor_history)
+                        ) + actor_history
+                        trigger_actor_history = np.asarray(
+                            padded_history, dtype=np.float32
+                        )
+                    trigger_walk_last_action = walk_last_action.astype(
+                        np.float32, copy=True
+                    )
+                    trigger_privileged_observation = np.concatenate(
+                        [
+                            trigger_observation,
+                            trigger_walk_last_action,
+                            np.asarray(features["torso_world_vel"]),
+                            np.asarray(features["ball_pos"]),
+                            np.asarray(features["ball_world_vel"]),
+                            np.array([np.asarray(features["torso_pos"])[2]]),
+                            np.asarray(features["contact_error"]),
+                            np.array([features["heading_error"]]),
+                        ]
+                    ).astype(np.float32)
+                    if trigger_privileged_observation.shape != (138,):
+                        raise RuntimeError(
+                            "CPU privileged striker observation must contain 138 values"
+                        )
                 kick_step = 0
+                fixed_prior = int(cfg.get("fixed_kick_prior_index", -1))
+                if not -1 <= fixed_prior < self.prior.shape[0]:
+                    raise ValueError("fixed_kick_prior_index is outside the bank")
+                kick_prior_index = (
+                    fixed_prior
+                    if fixed_prior >= 0
+                    else int(
+                        np.argmin(
+                            np.abs(
+                                self.prior_target_distances
+                                - float(features["goal_distance"])
+                            )
+                        )
+                    )
+                )
+                selected_prior_indices.append(kick_prior_index)
                 trigger_count += 1
                 if first_trigger_step == int(cfg["episode_length"]):
                     first_trigger_step = control_step
             kick_active = kick_step >= 0
-            prior = self.prior[min(max(kick_step, 0), self.prior.shape[0] - 1)]
+            prior = self.prior[
+                kick_prior_index,
+                min(max(kick_step, 0), self.prior.shape[1] - 1),
+            ]
             if not kick_active:
                 prior = np.zeros(self.contract.action_size)
             if kick_active:
@@ -316,6 +513,7 @@ class StrikerCpuEvaluator:
             if contact_now and not contacted:
                 first_contact_step = control_step
             contacted = contacted or bool(contact_now)
+            post_contact_steps = post_contact_steps + 1 if contacted else 0
             torso_xmat = np.asarray(final_features["torso_xmat"])
             torso_height = float(np.asarray(final_features["torso_pos"])[2])
             fallen = bool(torso_height < 0.35 or torso_xmat[2, 2] < 0.0)
@@ -326,17 +524,24 @@ class StrikerCpuEvaluator:
                 contacted
                 and float(final_features["goal_distance"])
                 <= float(cfg["success_radius"])
+                and abs(
+                    directional_speed - float(cfg["fixed_desired_arrival_speed"])
+                )
+                <= float(cfg["arrival_speed_tolerance"])
             )
 
             if kick_active:
                 kick_step += 1
-                if kick_step >= self.prior.shape[0]:
+                if kick_step >= self.prior.shape[1]:
                     kick_step = -1
                     kick_cooldown = int(cfg["kick_rearm_steps"])
             else:
                 kick_cooldown = max(kick_cooldown - 1, 0)
             settled_steps = 0 if trigger or kick_active else settled_steps
-            if succeeded or fallen or invalid:
+            contact_time_out = post_contact_steps >= int(
+                cfg["post_contact_timeout_steps"]
+            )
+            if succeeded or fallen or invalid or contact_time_out:
                 episode_steps = control_step + 1
                 break
 
@@ -352,6 +557,18 @@ class StrikerCpuEvaluator:
             succeeded=succeeded,
             fallen=fallen,
             trigger_count=trigger_count,
+            kick_prior_indices=tuple(selected_prior_indices),
+            trigger_observation=tuple(float(value) for value in trigger_observation),
+            trigger_walk_last_action=tuple(
+                float(value) for value in trigger_walk_last_action
+            ),
+            trigger_privileged_observation=tuple(
+                float(value) for value in trigger_privileged_observation
+            ),
+            trigger_actor_history=tuple(
+                tuple(float(value) for value in row)
+                for row in trigger_actor_history
+            ),
             first_trigger_step=first_trigger_step,
             first_contact_step=first_contact_step,
             episode_steps=episode_steps,

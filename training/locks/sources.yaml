@@ -124,8 +124,19 @@ reference_only:
   - name: PAiD HumanoidSoccer
     repository: https://github.com/TeleHuman/HumanoidSoccer
     commit: e72e470230047dedaf66df0983f1d0ab746faeb5
-    license: non-commercial restrictions reported by upstream
-    reuse_policy: paper/method reference only; no source or asset copying
+    license: CC-BY-NC-4.0
+    robot_contract: Unitree-G1-29DoF-LSTM-160-observation
+    released_assets: 13 labeled motion NPZ files and a G1 ONNX checkpoint
+    compatibility_note: direct weights are incompatible with the Booster T1 23-DoF striker_policy_v1 contract
+    reuse_policy: clean-room method reference; local non-commercial motion-retargeting research only with attribution; do not vendor source, motions, or weights
+  - name: wbc_fsm
+    repository: https://github.com/ccrpRepo/wbc_fsm
+    commit: b352409d73bed469169334040ee9ea70bc28a5f1
+    license: no top-level license identified during audit
+    robot_contract: Unitree-G1-29DoF-SDK2-ONNX
+    implementation_scope: manual FSM, locomotion, AMP/MJAmp and whole-body motion tracking
+    compatibility_note: no ball perception, target-conditioned kick, pass lifecycle, or team strategy
+    reuse_policy: architecture and safety-transition reference only; no source, model, or configuration copying
 
 motion_datasets:
   - name: Ubisoft La Forge Animation Dataset LAFAN1

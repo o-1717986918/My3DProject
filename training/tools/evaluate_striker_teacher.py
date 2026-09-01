@@ -16,7 +16,7 @@ import numpy as np
 
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.striker_env import DEFAULT_CONTRACT, LongHorizonStriker
-from tools.train_striker_teacher import STAGES, _load_kick_prior
+from tools.train_striker_teacher import STAGES, _load_kick_prior_bank
 
 
 def _sha256(path: Path) -> str:
@@ -58,6 +58,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("kick_prior_manifest", type=Path)
     parser.add_argument("--kick-prior-condition-index", type=int, default=1)
+    parser.add_argument(
+        "--kick-prior-bank-manifest",
+        action="append",
+        type=Path,
+        default=[],
+    )
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument(
         "--stage", choices=tuple(STAGES), default="closed_loop"
@@ -68,6 +74,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=11_203)
     parser.add_argument("--episode-length", type=int, default=1000)
     parser.add_argument("--kick-trigger-threshold", type=float, default=1.0)
+    parser.add_argument("--fixed-kick-prior-index", type=int, default=-1)
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="write the complete report but print only its summary",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.num_rollouts < 1 or args.episode_length < 1:
@@ -78,10 +90,11 @@ def main() -> None:
         raise ValueError("output must be an absolute path outside the repository")
 
     contract = load_policy_contract(args.contract)
-    prior, prior_metadata = _load_kick_prior(
+    prior, prior_distances, prior_metadata = _load_kick_prior_bank(
         args.kick_prior_manifest,
+        args.kick_prior_bank_manifest,
         contract,
-        condition_index=args.kick_prior_condition_index,
+        primary_condition_index=args.kick_prior_condition_index,
     )
     overrides = {
         **STAGES[args.stage],
@@ -91,11 +104,13 @@ def main() -> None:
         "fixed_action_mode": 0,
         "fixed_desired_arrival_speed": 0.8,
         "kick_trigger_threshold": args.kick_trigger_threshold,
+        "fixed_kick_prior_index": args.fixed_kick_prior_index,
     }
     env = LongHorizonStriker(
         config_overrides=overrides,
         contract=contract,
         kick_prior_joint_residuals=prior,
+        kick_prior_target_distances=prior_distances,
     )
     policy = (
         ppo_checkpoint.load_policy(args.checkpoint)
@@ -256,13 +271,29 @@ def main() -> None:
             else None
         ),
         "environment_config": env._config.to_dict(),
+        "success_definition": {
+            "goal_radius_m": float(env._config.success_radius),
+            "arrival_speed_tolerance_mps": float(
+                env._config.arrival_speed_tolerance
+            ),
+            "requires_contact": True,
+        },
         "summary": summary,
         "rollouts": rollout_records,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     args.output.write_text(rendered, encoding="utf-8")
-    print(rendered, end="")
+    if args.summary_only:
+        print(
+            json.dumps(
+                {"output": str(args.output.resolve()), "summary": summary},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        print(rendered, end="")
 
 
 if __name__ == "__main__":

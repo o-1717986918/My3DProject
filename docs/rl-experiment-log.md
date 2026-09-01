@@ -763,7 +763,7 @@ competition runtime.
 
 ## Long-horizon striker task and settled contact gate — 2026-09-01
 
-`striker_policy_v1` now defines a 102-value student observation, 115-value
+`striker_policy_v1` now defines a 102-value student observation, 138-value
 privileged teacher/value state and 23 residual actions. The task lasts 1,000
 50 Hz cycles and composes Apollo's accepted walk target, a frozen 60-frame
 kick prior and a distance-gated 0.10-scale learned correction. Reset
@@ -818,3 +818,49 @@ This is a safe closed-loop baseline, not a promoted kick. The next experiment
 must train target-range-conditioned physical outcome corrections and exceed
 the deterministic 23/64 exact-CPU baseline before history distillation. More
 steps on the rejected PPO objective are not authorized by current evidence.
+
+## Frozen selector, outcome and fixed-5 m audit — 2026-09-01
+
+The exact-CPU striker was extended with a distance-indexed kick bank, exact
+102-value trigger observations, walk-state and 138-value privileged capture,
+50-frame causal history, continuous action-outcome labels and an independent
+Warp/CPU parity driver. Success is now strict: contact, target distance at most
+0.5 m and directional arrival-speed error at most 0.5 m/s. Position-only
+results earlier in this log are not comparable to this gate.
+
+| Frozen experiment | Exact result | Decision |
+|---|---:|---|
+| five-action oracle, all corpus rollouts | 928/1023 (`90.71%`) | action bank is expressive but not deployable by oracle |
+| current-state selector | 153/205 (`74.63%`), 0 falls | reject |
+| privileged trigger selector | 146/205 (`71.22%`), 0 falls | reject; privileged values do not resolve sensitivity |
+| 50-frame history selector | 147/205 (`71.71%`), 0 falls | reject; history alone is not the missing motion skill |
+| continuous outcome-regression selector | 128/205 (`62.44%`), 0 falls | reject despite about 90% fit-set rollout success |
+| fixed 5 m prior, zero residual | 172/256 (`67.19%`), 0 falls | frozen baseline only |
+| residual PPO scale 0.1, 65,536 steps | 171/256 (`66.80%`), 0 falls | reject |
+| residual PPO scale 0.5, 262,144 steps | 171/256 (`66.80%`), 0 falls | reject |
+
+Online 64/128-rollout evaluations had appeared as high as 75--77%, but the
+predeclared frozen 256 set shows those changes were evaluation variance rather
+than learning. No model was promoted.
+
+The formal sine-action parity run covers 100 identical cycles and passes every
+declared Warp/exact-CPU threshold. Maximum deviations are 0.0135 rad joint
+position, 0.8528 rad/s joint velocity, 0.00777 m root position, 0.0143 rad
+torso orientation, 0.00414 m ball position and 0.2319 m/s ball velocity. This
+preserves the simulator gate while ruling out backend divergence as the primary
+cause of the frozen policy failures.
+
+The PAiD and `wbc_fsm` audit changes the next authorized experiment. The
+current fixed-prior reward is also corrected from monotonically rewarding ball
+speed to commanded speed tracking, explicit miss/timeout cost and controlled
+arrival-speed penalty; this change must pass tests but is not itself a reason to
+resume formal training. The new order is PAiD-informed T1 motion retargeting,
+motion-skill tracking, perception-action adaptation, then physics robustness.
+See [`paid-wbc-fsm-audit-2026-09-01.md`](paid-wbc-fsm-audit-2026-09-01.md).
+
+Checkpoint verification: Python compilation passed for all changed/new striker
+modules and tools; 11/11 targeted striker tests, 111/111 training tests and
+50/50 root regression tests passed in WSL using the `my3d-rl` conda
+environment. `git diff --check` also passed. The repository environment does
+not currently include Black, so no formatting claim beyond the existing test
+and diff gates is made.

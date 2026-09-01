@@ -80,6 +80,35 @@ so DOI and publisher metadata were used instead of Semantic Scholar IDs.
 
 ## Thematic synthesis
 
+### Focused source update: PAiD and `wbc_fsm` (2026-09-01)
+
+The PAiD evidence level has changed since the initial survey. Its
+[official repository](https://github.com/TeleHuman/HumanoidSoccer) now releases
+the three-stage training implementation, thirteen labeled G1 kick motions and
+a recurrent G1 checkpoint under CC BY-NC 4.0. The
+[preprint](https://arxiv.org/abs/2602.05310) and
+[project page](https://soccer-humanoid.github.io/) support this sequence:
+unified motion tracking with adaptive motion/phase failure sampling; resume
+while retaining motion objectives and adding lightweight ball/target rewards;
+then physics-aware identification/randomization. Its author-reported 91.3%
+real-world result is not treated as T1/RCSS evidence.
+
+This is now the strongest directly implementable method reference for the
+current striker bottleneck, but not a deployable artifact. PAiD is G1 29-DoF,
+its ONNX consumes a 160-value observation plus recurrent state, and its licence
+is non-commercial. The immediate adoption is a clean-room T1 motion-skill
+stage, followed by target/arrival-speed adaptation; source, motions and weights
+are not copied into this repository.
+
+[`wbc_fsm`](https://github.com/ccrpRepo/wbc_fsm) is a G1/Unitree SDK2 C++
+deployment example with Passive/FixedStand/Loco/AMP/MJAmp/WBC transitions,
+ONNX inference, state history and projected-gravity safety termination. No
+top-level licence was found, and it supplies neither ball/goal perception nor
+football tactics. It is useful only for independently implementing stronger
+Apollo skill lifecycle, shape checks and fallbacks. It is not a replacement
+team base. The pinned evidence and corrected R1 route are detailed in
+[`paid-wbc-fsm-audit-2026-09-01.md`](paid-wbc-fsm-audit-2026-09-01.md).
+
 ### The direct algorithm reference
 
 The closest published method is Xu et al., [Learning Agile Striker Skills for

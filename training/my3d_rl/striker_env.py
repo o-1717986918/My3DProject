@@ -60,11 +60,15 @@ def default_config() -> config_dict.ConfigDict:
     config.kick_rearm_steps = 25
     config.kick_walk_command = [0.50, -0.04, 0.0]
     config.kick_walk_duration_steps = 33
+    config.fixed_kick_prior_index = -1
     config.residual_scale = 0.10
     config.success_radius = 0.50
+    config.arrival_speed_tolerance = 0.50
     config.contact_event_reward = 5.0
     config.gate_success_reward = 30.0
     config.fall_penalty = 100.0
+    config.miss_penalty = 20.0
+    config.post_contact_timeout_steps = 250
     config.action_magnitude_cost = 0.002
     return config
 
@@ -152,6 +156,7 @@ class LongHorizonStriker(DirectionalKick):
         resource_root: Path = DEFAULT_RESOURCE_ROOT,
         prefix: str = "train_",
         kick_prior_joint_residuals: np.ndarray | None = None,
+        kick_prior_target_distances: np.ndarray | None = None,
     ) -> None:
         contract = contract or load_policy_contract(DEFAULT_CONTRACT)
         if contract.policy_name != "striker_policy_v1":
@@ -173,6 +178,8 @@ class LongHorizonStriker(DirectionalKick):
             raise ValueError("kick activation thresholds must be strictly nested")
         if not 0.0 < self._config.residual_scale <= 1.0:
             raise ValueError("residual_scale must be in (0, 1]")
+        if self._config.arrival_speed_tolerance <= 0.0:
+            raise ValueError("arrival_speed_tolerance must be positive")
         if self.contract.observation_size != 102 or self.action_size != 23:
             raise ValueError("striker-v1 must preserve the 102 -> 23 boundary")
         if not 0.0 < self._config.kick_trigger_threshold <= 1.0:
@@ -196,22 +203,51 @@ class LongHorizonStriker(DirectionalKick):
             raise ValueError("kick walk baseline configuration is invalid")
         if kick_prior_joint_residuals is None:
             kick_prior_joint_residuals = np.zeros(
-                (1, self.action_size), dtype=np.float32
+                (1, 1, self.action_size), dtype=np.float32
             )
+            kick_prior_target_distances = np.array([2.0], dtype=np.float32)
             self._uses_kick_prior = False
         else:
             kick_prior_joint_residuals = np.asarray(
                 kick_prior_joint_residuals, dtype=np.float32
             )
+            if kick_prior_joint_residuals.ndim == 2:
+                kick_prior_joint_residuals = kick_prior_joint_residuals[None, ...]
             if (
-                kick_prior_joint_residuals.ndim != 2
-                or kick_prior_joint_residuals.shape[0] < 2
-                or kick_prior_joint_residuals.shape[1] != self.action_size
+                kick_prior_joint_residuals.ndim != 3
+                or kick_prior_joint_residuals.shape[1] < 2
+                or kick_prior_joint_residuals.shape[2] != self.action_size
                 or not np.isfinite(kick_prior_joint_residuals).all()
             ):
-                raise ValueError("kick prior must be a finite [T, 23] trajectory")
+                raise ValueError(
+                    "kick prior must be a finite [K, T, 23] trajectory bank"
+                )
+            if kick_prior_target_distances is None:
+                if kick_prior_joint_residuals.shape[0] != 1:
+                    raise ValueError("a multi-entry kick prior requires distances")
+                kick_prior_target_distances = np.array([2.0], dtype=np.float32)
+            kick_prior_target_distances = np.asarray(
+                kick_prior_target_distances, dtype=np.float32
+            )
+            if (
+                kick_prior_target_distances.shape
+                != (kick_prior_joint_residuals.shape[0],)
+                or not np.isfinite(kick_prior_target_distances).all()
+                or np.any(kick_prior_target_distances <= 0.0)
+                or np.any(np.diff(kick_prior_target_distances) < 0.0)
+            ):
+                raise ValueError(
+                    "kick-prior target distances must be finite, positive and sorted"
+                )
             self._uses_kick_prior = True
         self._kick_prior_joint_residuals = jp.asarray(kick_prior_joint_residuals)
+        self._kick_prior_target_distances = jp.asarray(
+            kick_prior_target_distances
+        )
+        if not -1 <= self._config.fixed_kick_prior_index < len(
+            kick_prior_target_distances
+        ):
+            raise ValueError("fixed_kick_prior_index is outside the prior bank")
         self._root_qpos = self._mj_model.joint(prefix + "root").qposadr[0]
         self._left_hip_pitch, self._right_hip_pitch = hip_pitch_indices(
             self.contract.joint_order
@@ -384,6 +420,7 @@ class LongHorizonStriker(DirectionalKick):
             "last_action": jp.zeros(self.action_size),
             "walk_last_action": jp.zeros(self.action_size),
             "kick_step": jp.array(-1, dtype=jp.int32),
+            "kick_prior_index": jp.array(0, dtype=jp.int32),
             "kick_cooldown": jp.array(0, dtype=jp.int32),
             "kick_settled_steps": jp.array(0, dtype=jp.int32),
             "goal_world": goal_world,
@@ -401,19 +438,22 @@ class LongHorizonStriker(DirectionalKick):
             "contacted": jp.array(False),
             "succeeded": jp.array(False),
             "maximum_directional_speed": jp.array(0.0),
+            "post_contact_steps": jp.array(0, dtype=jp.int32),
         }
         metrics = {
             "reward/approach_progress": jp.array(0.0),
             "reward/approach_velocity": jp.array(0.0),
             "reward/heading": jp.array(0.0),
             "reward/ready": jp.array(0.0),
-            "reward/ball_directional_velocity": jp.array(0.0),
+            "reward/ball_speed_tracking": jp.array(0.0),
             "reward/ball_progress": jp.array(0.0),
             "reward/upright": jp.array(0.0),
             "cost/action_rate": jp.array(0.0),
             "cost/action_magnitude": jp.array(0.0),
             "cost/far_action": jp.array(0.0),
             "cost/fall": jp.array(0.0),
+            "cost/arrival_speed": jp.array(0.0),
+            "cost/miss": jp.array(0.0),
             "event/contact": jp.array(0.0),
             "event/kick_trigger": jp.array(0.0),
             "event/success": jp.array(0.0),
@@ -421,6 +461,7 @@ class LongHorizonStriker(DirectionalKick):
             "diagnostic/goal_distance": features["goal_distance"],
             "diagnostic/contact_distance": features["contact_distance"],
             "diagnostic/heading_error": features["heading_error"],
+            "diagnostic/arrival_speed_error": jp.array(0.0),
         }
         obs = self._get_obs(data, info)
         return mjx_env.State(
@@ -462,14 +503,27 @@ class LongHorizonStriker(DirectionalKick):
                 | settled_trigger
             )
         )
+        selected_prior_index = jp.argmin(
+            jp.abs(
+                self._kick_prior_target_distances - features["goal_distance"]
+            )
+        )
+        selected_prior_index = jp.where(
+            self._config.fixed_kick_prior_index >= 0,
+            self._config.fixed_kick_prior_index,
+            selected_prior_index,
+        )
+        kick_prior_index = jp.where(
+            kick_trigger, selected_prior_index, state.info["kick_prior_index"]
+        )
         kick_step = jp.where(kick_trigger, 0, state.info["kick_step"])
         kick_active = kick_step >= 0
         prior_index = jp.clip(
-            kick_step, 0, self._kick_prior_joint_residuals.shape[0] - 1
+            kick_step, 0, self._kick_prior_joint_residuals.shape[1] - 1
         )
         prior_joint_residual = jp.where(
             kick_active,
-            self._kick_prior_joint_residuals[prior_index],
+            self._kick_prior_joint_residuals[kick_prior_index, prior_index],
             jp.zeros(self.action_size),
         )
         kick_walk_active = kick_active & (
@@ -537,8 +591,33 @@ class LongHorizonStriker(DirectionalKick):
         )
         contact = (ball_speed >= 0.15) | (jp.linalg.norm(ball_displacement) >= 0.08)
         contact_event = contact & ~state.info["contacted"]
-        success = contact & (
-            next_features["goal_distance"] <= self._config.success_radius
+        arrival_speed_error = jp.abs(
+            directional_speed - state.info["desired_arrival_speed"]
+        )
+        requested_ball_speed = jp.sqrt(
+            jp.square(state.info["desired_arrival_speed"])
+            + 2.0
+            * self._config.rolling_deceleration_mps2
+            * next_features["goal_distance"]
+        )
+        ball_speed_tracking_error = jp.abs(
+            directional_speed - requested_ball_speed
+        )
+        ball_speed_tracking = (
+            jp.exp(-2.0 * jp.square(ball_speed_tracking_error))
+            * contact.astype(jp.float32)
+        )
+        arrival_zone = (
+            jp.clip(1.5 - next_features["goal_distance"], 0.0, 1.0)
+            * contact.astype(jp.float32)
+        )
+        excess_arrival_speed_error = jp.maximum(
+            arrival_speed_error - self._config.arrival_speed_tolerance, 0.0
+        )
+        success = (
+            contact
+            & (next_features["goal_distance"] <= self._config.success_radius)
+            & (arrival_speed_error <= self._config.arrival_speed_tolerance)
         )
         success_event = success & ~state.info["succeeded"]
         fall = (torso_height < 0.35) | (torso_xmat[2, 2] < 0.0)
@@ -571,13 +650,22 @@ class LongHorizonStriker(DirectionalKick):
         action_rate = jp.sum(jp.square(action - state.info["last_action"]))
         action_magnitude = jp.sum(jp.square(action))
         far_action = (1.0 - correction_gate) * action_magnitude
+        post_contact_steps = jp.where(
+            state.info["contacted"] | contact,
+            state.info["post_contact_steps"] + 1,
+            0,
+        )
+        contact_time_out = (
+            post_contact_steps >= self._config.post_contact_timeout_steps
+        )
+        miss_event = contact_time_out & ~success
 
         reward_terms = {
             "approach_progress": 3.0 * approach_progress_rate * approach_active,
             "approach_velocity": 1.0 * approach_velocity * approach_active,
             "heading": 0.5 * heading_reward,
             "ready": 0.5 * next_features["activation"],
-            "ball_directional_velocity": 2.0 * directional_speed,
+            "ball_speed_tracking": 2.0 * ball_speed_tracking,
             "ball_progress": 4.0 * goal_progress_rate * contact.astype(jp.float32),
             "upright": 0.2 * upright,
             "action_rate": -0.01 * action_rate * correction_gate,
@@ -591,6 +679,12 @@ class LongHorizonStriker(DirectionalKick):
             "success": self._config.gate_success_reward
             / self.dt
             * success_event.astype(jp.float32),
+            "arrival_speed": -4.0
+            * excess_arrival_speed_error
+            * arrival_zone,
+            "miss": -self._config.miss_penalty
+            / self.dt
+            * miss_event.astype(jp.float32),
             "fall": -self._config.fall_penalty
             / self.dt
             * fall.astype(jp.float32),
@@ -598,11 +692,15 @@ class LongHorizonStriker(DirectionalKick):
         reward = sum(reward_terms.values()) * self.dt
 
         state.info["step"] += 1
-        time_out = state.info["step"] >= self._config.episode_length
+        time_out = (
+            (state.info["step"] >= self._config.episode_length)
+            | contact_time_out
+        )
         state.info["time_out"] = time_out
         next_kick_step = jp.where(kick_active, kick_step + 1, kick_step)
-        kick_finished = next_kick_step >= self._kick_prior_joint_residuals.shape[0]
+        kick_finished = next_kick_step >= self._kick_prior_joint_residuals.shape[1]
         state.info["kick_step"] = jp.where(kick_finished, -1, next_kick_step)
+        state.info["kick_prior_index"] = kick_prior_index
         state.info["kick_cooldown"] = jp.where(
             kick_finished,
             self._config.kick_rearm_steps,
@@ -618,6 +716,7 @@ class LongHorizonStriker(DirectionalKick):
         state.info["contacted"] = state.info["contacted"] | contact
         state.info["succeeded"] = state.info["succeeded"] | success
         state.info["maximum_directional_speed"] = maximum_directional_speed
+        state.info["post_contact_steps"] = post_contact_steps
         done = fall | invalid | success | time_out
         obs = self._get_obs(data, state.info)
         state.metrics.update(
@@ -626,13 +725,15 @@ class LongHorizonStriker(DirectionalKick):
                 "reward/approach_velocity": approach_velocity,
                 "reward/heading": heading_reward,
                 "reward/ready": next_features["activation"],
-                "reward/ball_directional_velocity": directional_speed,
+                "reward/ball_speed_tracking": ball_speed_tracking,
                 "reward/ball_progress": goal_progress_rate,
                 "reward/upright": upright,
                 "cost/action_rate": action_rate,
                 "cost/action_magnitude": action_magnitude,
                 "cost/far_action": far_action,
                 "cost/fall": fall.astype(jp.float32),
+                "cost/arrival_speed": excess_arrival_speed_error * arrival_zone,
+                "cost/miss": miss_event.astype(jp.float32),
                 "event/contact": contact_event.astype(jp.float32),
                 "event/kick_trigger": kick_trigger.astype(jp.float32),
                 "event/success": success_event.astype(jp.float32),
@@ -640,6 +741,7 @@ class LongHorizonStriker(DirectionalKick):
                 "diagnostic/goal_distance": next_features["goal_distance"],
                 "diagnostic/contact_distance": next_features["contact_distance"],
                 "diagnostic/heading_error": next_features["heading_error"],
+                "diagnostic/arrival_speed_error": arrival_speed_error,
             }
         )
         return state.replace(
@@ -672,7 +774,7 @@ class LongHorizonStriker(DirectionalKick):
             kick_active,
             jp.clip(
                 info["kick_step"]
-                / jp.maximum(self._kick_prior_joint_residuals.shape[0] - 1, 1),
+                / jp.maximum(self._kick_prior_joint_residuals.shape[1] - 1, 1),
                 0.0,
                 1.0,
             ),
@@ -734,6 +836,7 @@ class LongHorizonStriker(DirectionalKick):
         teacher = jp.concatenate(
             [
                 actor,
+                info["walk_last_action"],
                 features["torso_world_vel"],
                 features["ball_pos"],
                 features["ball_world_vel"],

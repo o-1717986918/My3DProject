@@ -312,7 +312,7 @@ the default-off table remains only a regression fallback.
 
 Long-horizon striker checkpoint (2026-09-01): the official T1 curriculum
 structure is now represented by a versioned 20-second MuJoCo/Warp task, a
-102-to-23 deployable actor contract, a 115-value privileged teacher boundary,
+102-to-23 deployable actor contract, a 138-value privileged teacher boundary,
 the preserved exact-CPU kick prior, and an independent exact CPU evaluator.
 The deterministic settled controller contacts in 64/64 with zero falls, but
 passes only 29/64 in Warp and 23/64 in exact CPU. A 32,768-step residual PPO
@@ -322,6 +322,39 @@ R1 therefore remains open. The next gate is a target-range-conditioned
 teacher that beats 23/64 on untouched exact-CPU rollouts, followed by history
 distillation, three seeds, source/ONNX parity and server replay. No long-
 horizon model is enabled in the competition runtime.
+
+PAiD/source-audit correction (2026-09-01): later exact-CPU evidence supersedes
+the preceding next-experiment sentence. A five-action bank covers 928/1023
+rollouts by oracle (`90.71%`), but its best current-state selector realizes only
+153/205 (`74.63%`) frozen-validation successes; privileged and 50-frame-history
+variants reach 146/205 and 147/205. A continuous outcome regressor reaches only
+128/205. On an independent frozen 256-rollout set, the fixed 5 m prior reaches
+172/256 (`67.19%`), while 0.1- and 0.5-scale residual PPO candidates each reach
+171/256 (`66.80%`). All have zero falls, but no learned model improves the
+baseline and none is promoted.
+
+The official PAiD release now provides thirteen G1 motions, training code and a
+G1 recurrent checkpoint. Its progressive motion-tracking then perception-action
+design exposes the current route's invalid assumption: a short fixed keyframe
+bank on top of walking is not a stable kick-motion prior. R1 therefore stops
+formal training on the current fixed-prior objective and executes four gates:
+
+1. `K0`: licence/provenance-locked local PAiD motion audit and G1-29 to T1-23
+   retargeting against exact RCSS geometry;
+2. `K1`: phase-conditioned T1 whole-body motion tracking with adaptive
+   motion-by-phase failure sampling and safety termination;
+3. `K2`: resume that skill with egocentric ball/target input, rolling-ball
+   starts, correct-foot contact, post-contact stability and commanded
+   direction/arrival-speed rewards;
+4. `K3`: RCSS-calibrated physics/noise randomization, Warp/CPU/ONNX parity,
+   three seeds and server replay.
+
+PAiD is CC BY-NC 4.0 and its released 29-DoF/160-input G1 ONNX is incompatible
+with the T1 contract. Assets remain local, attributed and non-commercial; no
+source, motion or weight is vendored. `wbc_fsm` contributes only lifecycle,
+model-contract, projected-gravity termination and fallback patterns to the
+existing Apollo executor. The full evidence and stop rules are in
+[`paid-wbc-fsm-audit-2026-09-01.md`](paid-wbc-fsm-audit-2026-09-01.md).
 
 ### R2: complete individual football actions
 

@@ -1,6 +1,6 @@
 # Robot-soccer action research and adoption record
 
-Last source refresh: 2026-08-31
+Last source refresh: 2026-09-01
 
 Rule: refresh repository HEADs and primary papers before every training
 milestone; do not turn remembered hyperparameters into project facts.
@@ -43,7 +43,8 @@ policy airborne.
 | Booster Gym | T1 foot-edge height contact and sim-to-sim deployment pipeline | oriented foot-box lowest-point proxy and CPU contact calibration | reference settings only; do not transplant an unverified policy |
 | Holosoma / Fast humanoid locomotion | Apache-2.0, T1 support, MJWarp, velocity and whole-body tracking, LAFAN retargeting pipeline | implemented as the T1 retargeting source with a pinned local patch | upstream robot-only qpos, LAFAN order and MuJoCo 3.12 Jacobian defects required an audited patch; derived LAFAN data stays local |
 | RoboNaldo | motion tracking prior followed by staged task adaptation; recommends small noise on resume | prior → task training boundary, immutable stage checkpoints, small exploration | released motion is a G1 kick, not a T1 run; reuse method, not motion |
-| PAiD HumanoidSoccer | progressive motion tracking then soccer action learning | corroborates the progressive design | non-commercial restrictions: method reference only |
+| PAiD HumanoidSoccer | released 13-motion G1 dataset, motion/phase failure sampling, retained motion rewards during perception-action adaptation, recurrent policy and physics-aware transfer | immediate clean-room K0--K2 design reference and local attributed non-commercial retargeting candidate | CC BY-NC 4.0; G1 29-DoF/160-input checkpoint is not T1-compatible; do not vendor source/assets |
+| `wbc_fsm` | G1 C++ FSM, ONNX runtime, state history, projected-gravity termination and deterministic transitions | strengthen Apollo skill lifecycle, contract validation and fallback concepts | no top-level licence found; no ball perception or team strategy; no source/model copying |
 | ApolloCodebase | GPL C++ behavior-tree and strategy-network runtime with the familiar 78→23 walk boundary | isolated architecture and inference reference | GPL separation; no code copied into the permissive trainer |
 
 Current pinned commits and reuse restrictions are machine-readable in

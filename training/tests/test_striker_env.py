@@ -96,8 +96,8 @@ def test_striker_environment_preserves_student_and_teacher_boundaries():
     state = env.reset(jax.random.PRNGKey(19))
 
     assert state.obs["state"].shape == (102,)
-    assert state.obs["teacher_state"].shape == (115,)
-    assert state.obs["privileged_state"].shape == (115,)
+    assert state.obs["teacher_state"].shape == (138,)
+    assert state.obs["privileged_state"].shape == (138,)
     assert np.isfinite(np.asarray(state.obs["state"])).all()
     assert 0.45 < float(state.metrics["diagnostic/contact_distance"]) < 0.55
 
