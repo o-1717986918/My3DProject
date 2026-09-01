@@ -1,0 +1,89 @@
+schema_version: 1
+recorded_at: 2026-09-02
+stage: paid_k1d_cross_fitted_state_feedback
+status: implementation_complete_protocol_predeclared_not_run
+
+source:
+  retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
+  retained_checkpoint_tree_sha256: bcfb60f0f75bcd70ccd7faead5681c8b04983492aa084cf189a3a0a9119f2018
+  corpus_root: /home/win98/rl_runs/paid-k0/corpus-semantic-v4
+  selection_manifest: /home/win98/rl_runs/paid-k1/k1a-teacher-corpus-selected-v1/selection-manifest.json
+  selection_manifest_sha256: 9ec33391a6ebe7a849d1bd2b6c4184d3257c2b3c6394b76ba7a2e359b1381b4e
+  prior_dagger_dataset: /home/win98/rl_runs/paid-k1/k1b-state-feedback-r1-formal-s20260961-v1/dagger-corpus.npz
+  prior_dagger_dataset_sha256: 4578eaa8e1e9b7aad829fb4ede2ede03b7f15e7645a43649c1c767e86ef848a1
+  prior_dagger_manifest: /home/win98/rl_runs/paid-k1/k1b-state-feedback-r1-formal-s20260961-v1/run-manifest.json
+  prior_dagger_manifest_sha256: 2b25a6250f50afe2351d08476551b8775882bafaad5afa879cb4a1147e413960
+  reuse_rule: retain_prior_labels_only_through_hash_bound_complete_dagger_manifest
+
+collection_protocol:
+  implementation: exact_cpu_mujoco
+  student_execution_probability: 1.0
+  teacher_beta: 0.0
+  phase_samples: 32
+  minimum_remaining_frames: 10
+  minimum_evaluated_starts_per_motion: 24
+  source_start_reuse: allowed_only_under_nonzero_disjoint_reset_perturbation
+  reset_perturbation:
+    base_seed: 20260980
+    joint_noise_rad: 0.002
+    root_velocity_noise: 0.005
+    yaw_range_rad: 0.01
+    generator: numpy_seedsequence_uint63_v2
+  state_feedback_search:
+    horizon_frames: 4
+    minimum_improvement: 0.001
+    maximum_action_delta: 0.2
+  cross_fitted_validation:
+    horizon_frames: 6
+    minimum_improvement: 0.0005
+    base_seed: 20260981
+    joint_noise_rad: 0.001
+    joint_velocity_noise: 0.01
+    label_rule: search_and_independent_validation_must_both_pass
+  collection_seed: 20260982
+  dataset_split:
+    unit: whole_episode_motion_and_start
+    folds: 5
+    validation_fold_index: 0
+    leakage_policy: no_episode_may_span_train_and_validation
+
+clone_protocol:
+  base_checkpoint: retained_checkpoint
+  trainable_layers: output
+  steps: 1000
+  batch_size: 512
+  learning_rate: 0.000025
+  base_anchor_weight: 1.0
+  action_bound_weight: 5.0
+  training_seed: 20260982
+  retain_if: exact_cpu_selection_gate_passes
+
+selection_protocol:
+  baseline: retained_checkpoint
+  candidate: k1d_clone
+  phase_samples: 2000
+  minimum_evaluated_starts_per_motion: 17
+  perturbation_seed: 20260983
+  reset_joint_noise_rad: 0.002
+  reset_root_velocity_noise: 0.005
+  reset_yaw_range_rad: 0.01
+  paired_key_includes_perturbation_seed: true
+  nominal_phase_overlap_with_training: allowed
+  reason: reset_seed_is_disjoint_and_represents_unseen_states
+  acceptance_gate:
+    - tracking_tolerance_passed
+    - promotion_passed_or_curriculum_advance_passed
+  runtime_promotion: false
+
+confirmation_protocol:
+  run_only_if_selection_passes: true
+  perturbation_seed: 20260984
+  same_phase_and_noise_envelope: true
+  require_promotion_passed_or_curriculum_advance_passed: true
+
+failure_policy:
+  - reject_candidate_and_keep_retained_checkpoint
+  - preserve_all_manifests_and_hashes
+  - do_not_resume_reward_only_ppo
+  - inspect_label_yield_and_search_validation_disagreement_before_next_teacher_change
+  - do_not_start_ball_contact_or_apollo_runtime_integration

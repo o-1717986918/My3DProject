@@ -14,6 +14,12 @@ from .rcss_scene import DEFAULT_RESOURCE_ROOT, build_single_t1_soccer_model
 from .reference_dynamics import configure_pd_actuators
 from .soccer_motion_corpus import SoccerMotionCorpus
 from .soccer_motion_policy import SoccerMotionPolicy, soccer_motion_actor_observation
+from .soccer_motion_reset import (
+    derive_case_seed,
+    deterministic_reset_perturbation,
+    yaw_quaternion_rotate,
+    yaw_vector_rotate,
+)
 from .t1_control import apollo_joint_gains
 
 
@@ -173,6 +179,37 @@ def state_feedback_action_candidates(
     return np.stack([np.clip(node, lower, upper) for node in nodes])
 
 
+def cross_fitted_label_selected(
+    student_action: np.ndarray,
+    teacher_action: np.ndarray,
+    *,
+    search_improvement: float,
+    minimum_search_improvement: float,
+    validation_improvement: float | None = None,
+    minimum_validation_improvement: float = 0.0,
+) -> bool:
+    """Accept a label only when search and independent validation agree."""
+    student_action = np.asarray(student_action, dtype=np.float64)
+    teacher_action = np.asarray(teacher_action, dtype=np.float64)
+    if student_action.shape != teacher_action.shape or student_action.ndim != 1:
+        raise ValueError("cross-fitted actions are incompatible")
+    if min(minimum_search_improvement, minimum_validation_improvement) < 0.0:
+        raise ValueError("cross-fitted improvement thresholds must be non-negative")
+    if not np.isfinite(search_improvement) or (
+        validation_improvement is not None
+        and not np.isfinite(validation_improvement)
+    ):
+        raise ValueError("cross-fitted improvements must be finite")
+    return bool(
+        search_improvement >= minimum_search_improvement
+        and (
+            validation_improvement is None
+            or validation_improvement >= minimum_validation_improvement
+        )
+        and not np.allclose(teacher_action, student_action, atol=1.0e-6)
+    )
+
+
 class SoccerMotionCorrectionEvaluator:
     """Evaluate a base actor plus an open-loop phase correction in MuJoCo."""
 
@@ -257,6 +294,105 @@ class SoccerMotionCorrectionEvaluator:
             dtype=bool,
         )
 
+    def _candidate_rollout_cost(
+        self,
+        data: mujoco.MjData,
+        *,
+        first_action: np.ndarray,
+        nominal_teacher_action: np.ndarray,
+        previous_action: np.ndarray,
+        motion: int,
+        current_frame: int,
+        correction: np.ndarray,
+        teacher_base_policy: SoccerMotionPolicy,
+        horizon: int,
+    ) -> float:
+        length = int(self.corpus.lengths[motion])
+        trial = mujoco.MjData(self.model)
+        mujoco.mj_copyData(trial, self.model, data)
+        trial_previous_action = np.asarray(previous_action, dtype=np.float64)
+        cost = 0.0
+        for offset in range(min(horizon, length - 1 - current_frame)):
+            frame = current_frame + offset
+            if offset == 0:
+                action = first_action
+            else:
+                observation = soccer_motion_actor_observation(
+                    trial,
+                    joint_qpos=self._joint_qpos,
+                    joint_dof=self._joint_dof,
+                    gyro_slice=self._gyro_slice,
+                    torso_site=self._torso_site,
+                    reference_joint_position=(
+                        self.corpus.joint_position[motion, frame]
+                    ),
+                    reference_joint_velocity=(
+                        self.corpus.joint_velocity[motion, frame]
+                    ),
+                    reference_root_linear_velocity=(
+                        self.corpus.root_linear_velocity[motion, frame]
+                    ),
+                    reference_root_angular_velocity=(
+                        self.corpus.root_angular_velocity[motion, frame]
+                    ),
+                    reference_contact=self.corpus.foot_contact[motion, frame],
+                    previous_action=trial_previous_action,
+                    progress=frame / max(length - 1, 1),
+                    kick_leg_one_hot=self.corpus.kick_leg_one_hot[motion],
+                )
+                action = np.clip(
+                    np.asarray(teacher_base_policy(observation), dtype=np.float64)
+                    + correction[frame],
+                    *self.contract.action_clip,
+                )
+            target = np.clip(
+                self.corpus.joint_position[motion, frame + 1]
+                + self.contract.action_scale * action,
+                self._lower,
+                self._upper,
+            )
+            trial.ctrl[self._pos_actuator] = target
+            for _ in range(self._substeps):
+                mujoco.mj_step(self.model, trial)
+            trial_previous_action = action
+            joint_error = (
+                trial.qpos[self._joint_qpos]
+                - self.corpus.joint_position[motion, frame + 1]
+            )
+            velocity_error = (
+                trial.qvel[self._joint_dof]
+                - self.corpus.joint_velocity[motion, frame + 1]
+            )
+            rotation = trial.site_xmat[self._torso_site].reshape(3, 3)
+            upright = float(rotation[2, 2])
+            height = float(trial.xpos[self._torso_body, 2])
+            contact_error = float(
+                np.mean(
+                    self._contacts(trial)
+                    != self.corpus.foot_contact[motion, frame + 1]
+                )
+            )
+            stage_cost = (
+                10.0 * float(np.mean(np.square(joint_error)))
+                + 0.02 * float(np.mean(np.square(velocity_error)))
+                + 2.0 * (1.0 - np.clip(upright, -1.0, 1.0)) ** 2
+                + 20.0 * max(0.45 - height, 0.0) ** 2
+                + 0.1 * contact_error
+            )
+            if (
+                not np.isfinite(trial.qpos).all()
+                or not np.isfinite(trial.qvel).all()
+                or height < 0.35
+                or upright < 0.20
+            ):
+                stage_cost += 100.0
+                cost += (0.9**offset) * stage_cost
+                break
+            cost += (0.9**offset) * stage_cost
+        return cost + 0.01 * float(
+            np.mean(np.square(first_action - nominal_teacher_action))
+        )
+
     def short_horizon_teacher_action(
         self,
         data: mujoco.MjData,
@@ -270,11 +406,22 @@ class SoccerMotionCorrectionEvaluator:
         teacher_base_policy: SoccerMotionPolicy,
         horizon: int,
         maximum_action_delta: float,
+        validation_horizon: int = 0,
+        validation_seed: int | None = None,
+        validation_joint_noise: float = 0.0,
+        validation_joint_velocity_noise: float = 0.0,
     ) -> tuple[np.ndarray, dict[str, float]]:
         """Select a state-feedback label using exact copied MuJoCo states."""
         length = int(self.corpus.lengths[motion])
-        if horizon < 1 or not 0 <= current_frame < length - 1:
+        if (
+            horizon < 1
+            or validation_horizon < 0
+            or min(validation_joint_noise, validation_joint_velocity_noise) < 0.0
+            or not 0 <= current_frame < length - 1
+        ):
             raise ValueError("short-horizon teacher request is invalid")
+        if validation_horizon and validation_seed is None:
+            raise ValueError("cross-fitted validation requires a validation seed")
         if self.contract.action_scale is None:
             raise ValueError("short-horizon teacher requires residual action scale")
         active = np.flatnonzero(np.any(np.abs(correction) > 1.0e-12, axis=0))
@@ -291,100 +438,78 @@ class SoccerMotionCorrectionEvaluator:
             action_clip=self.contract.action_clip,
             maximum_delta_from_student=maximum_action_delta,
         )
-        costs: list[float] = []
-        for first_action in candidates:
-            trial = mujoco.MjData(self.model)
-            mujoco.mj_copyData(trial, self.model, data)
-            trial_previous_action = np.asarray(previous_action, dtype=np.float64)
-            cost = 0.0
-            for offset in range(min(horizon, length - 1 - current_frame)):
-                frame = current_frame + offset
-                if offset == 0:
-                    action = first_action
-                else:
-                    observation = soccer_motion_actor_observation(
-                        trial,
-                        joint_qpos=self._joint_qpos,
-                        joint_dof=self._joint_dof,
-                        gyro_slice=self._gyro_slice,
-                        torso_site=self._torso_site,
-                        reference_joint_position=(
-                            self.corpus.joint_position[motion, frame]
-                        ),
-                        reference_joint_velocity=(
-                            self.corpus.joint_velocity[motion, frame]
-                        ),
-                        reference_root_linear_velocity=(
-                            self.corpus.root_linear_velocity[motion, frame]
-                        ),
-                        reference_root_angular_velocity=(
-                            self.corpus.root_angular_velocity[motion, frame]
-                        ),
-                        reference_contact=self.corpus.foot_contact[motion, frame],
-                        previous_action=trial_previous_action,
-                        progress=frame / max(length - 1, 1),
-                        kick_leg_one_hot=self.corpus.kick_leg_one_hot[motion],
-                    )
-                    action = np.clip(
-                        np.asarray(teacher_base_policy(observation), dtype=np.float64)
-                        + correction[frame],
-                        *self.contract.action_clip,
-                    )
-                target = np.clip(
-                    self.corpus.joint_position[motion, frame + 1]
-                    + self.contract.action_scale * action,
-                    self._lower,
-                    self._upper,
-                )
-                trial.ctrl[self._pos_actuator] = target
-                for _ in range(self._substeps):
-                    mujoco.mj_step(self.model, trial)
-                trial_previous_action = action
-                joint_error = (
-                    trial.qpos[self._joint_qpos]
-                    - self.corpus.joint_position[motion, frame + 1]
-                )
-                velocity_error = (
-                    trial.qvel[self._joint_dof]
-                    - self.corpus.joint_velocity[motion, frame + 1]
-                )
-                rotation = trial.site_xmat[self._torso_site].reshape(3, 3)
-                upright = float(rotation[2, 2])
-                height = float(trial.xpos[self._torso_body, 2])
-                contact_error = float(
-                    np.mean(
-                        self._contacts(trial)
-                        != self.corpus.foot_contact[motion, frame + 1]
-                    )
-                )
-                stage_cost = (
-                    10.0 * float(np.mean(np.square(joint_error)))
-                    + 0.02 * float(np.mean(np.square(velocity_error)))
-                    + 2.0 * (1.0 - np.clip(upright, -1.0, 1.0)) ** 2
-                    + 20.0 * max(0.45 - height, 0.0) ** 2
-                    + 0.1 * contact_error
-                )
-                if (
-                    not np.isfinite(trial.qpos).all()
-                    or not np.isfinite(trial.qvel).all()
-                    or height < 0.35
-                    or upright < 0.20
-                ):
-                    stage_cost += 100.0
-                    cost += (0.9**offset) * stage_cost
-                    break
-                cost += (0.9**offset) * stage_cost
-            cost += 0.01 * float(
-                np.mean(np.square(first_action - nominal_teacher_action))
+        costs = [
+            self._candidate_rollout_cost(
+                data,
+                first_action=first_action,
+                nominal_teacher_action=nominal_teacher_action,
+                previous_action=previous_action,
+                motion=motion,
+                current_frame=current_frame,
+                correction=correction,
+                teacher_base_policy=teacher_base_policy,
+                horizon=horizon,
             )
-            costs.append(cost)
+            for first_action in candidates
+        ]
         best_index = int(np.argmin(costs))
+        validation_student_cost = float("nan")
+        validation_selected_cost = float("nan")
+        validation_improvement = float("nan")
+        if validation_horizon:
+            validation = mujoco.MjData(self.model)
+            mujoco.mj_copyData(validation, self.model, data)
+            validation_rng = np.random.default_rng(validation_seed)
+            validation.qpos[self._joint_qpos] = np.clip(
+                validation.qpos[self._joint_qpos]
+                + validation_rng.uniform(
+                    -validation_joint_noise,
+                    validation_joint_noise,
+                    size=self.contract.action_size,
+                ),
+                self._lower,
+                self._upper,
+            )
+            validation.qvel[self._joint_dof] += validation_rng.uniform(
+                -validation_joint_velocity_noise,
+                validation_joint_velocity_noise,
+                size=self.contract.action_size,
+            )
+            mujoco.mj_forward(self.model, validation)
+            validation_student_cost = self._candidate_rollout_cost(
+                validation,
+                first_action=candidates[0],
+                nominal_teacher_action=nominal_teacher_action,
+                previous_action=previous_action,
+                motion=motion,
+                current_frame=current_frame,
+                correction=correction,
+                teacher_base_policy=teacher_base_policy,
+                horizon=validation_horizon,
+            )
+            validation_selected_cost = self._candidate_rollout_cost(
+                validation,
+                first_action=candidates[best_index],
+                nominal_teacher_action=nominal_teacher_action,
+                previous_action=previous_action,
+                motion=motion,
+                current_frame=current_frame,
+                correction=correction,
+                teacher_base_policy=teacher_base_policy,
+                horizon=validation_horizon,
+            )
+            validation_improvement = (
+                validation_student_cost - validation_selected_cost
+            )
         return candidates[best_index], {
             "student_cost": costs[0],
             "nominal_teacher_cost": costs[1],
             "selected_cost": costs[best_index],
             "improvement_over_student": costs[0] - costs[best_index],
             "improvement_over_nominal_teacher": costs[1] - costs[best_index],
+            "validation_student_cost": validation_student_cost,
+            "validation_selected_cost": validation_selected_cost,
+            "validation_improvement_over_student": validation_improvement,
             "candidate_count": float(len(candidates)),
         }
 
@@ -400,6 +525,15 @@ class SoccerMotionCorrectionEvaluator:
         state_feedback_horizon: int = 0,
         minimum_state_feedback_improvement: float = 0.0,
         maximum_state_feedback_action_delta: float = 1.0,
+        state_feedback_validation_horizon: int = 0,
+        minimum_state_feedback_validation_improvement: float = 0.0,
+        state_feedback_validation_base_seed: int | None = None,
+        validation_joint_noise: float = 0.0,
+        validation_joint_velocity_noise: float = 0.0,
+        reset_perturbation_base_seed: int | None = None,
+        reset_joint_noise: float = 0.0,
+        reset_root_velocity_noise: float = 0.0,
+        reset_yaw_range: float = 0.0,
         rng: np.random.Generator | None = None,
     ) -> dict[str, Any]:
         """Run one deterministic exact-state restart to the finite endpoint."""
@@ -417,10 +551,70 @@ class SoccerMotionCorrectionEvaluator:
             raise ValueError("correction contains non-finite values")
         if (
             state_feedback_horizon < 0
+            or state_feedback_validation_horizon < 0
             or minimum_state_feedback_improvement < 0.0
+            or minimum_state_feedback_validation_improvement < 0.0
             or maximum_state_feedback_action_delta <= 0.0
+            or min(
+                validation_joint_noise,
+                validation_joint_velocity_noise,
+                reset_joint_noise,
+                reset_root_velocity_noise,
+                reset_yaw_range,
+            )
+            < 0.0
         ):
             raise ValueError("state-feedback teacher settings are invalid")
+        if state_feedback_validation_horizon and (
+            not state_feedback_horizon
+            or state_feedback_validation_base_seed is None
+        ):
+            raise ValueError(
+                "state-feedback cross-validation requires search and a base seed"
+            )
+        if not state_feedback_validation_horizon and (
+            minimum_state_feedback_validation_improvement > 0.0
+            or validation_joint_noise > 0.0
+            or validation_joint_velocity_noise > 0.0
+            or state_feedback_validation_base_seed is not None
+        ):
+            raise ValueError(
+                "state-feedback validation settings require a validation horizon"
+            )
+        if reset_perturbation_base_seed is None and any(
+            value > 0.0
+            for value in (
+                reset_joint_noise,
+                reset_root_velocity_noise,
+                reset_yaw_range,
+            )
+        ):
+            raise ValueError("reset noise requires a perturbation base seed")
+
+        reset_perturbation = (
+            deterministic_reset_perturbation(
+                base_seed=reset_perturbation_base_seed,
+                motion=motion,
+                start_frame=start_frame,
+                action_size=self.contract.action_size,
+                joint_noise=reset_joint_noise,
+                root_velocity_noise=reset_root_velocity_noise,
+                yaw_range=reset_yaw_range,
+            )
+            if reset_perturbation_base_seed is not None
+            else None
+        )
+        reset_yaw = reset_perturbation.yaw if reset_perturbation else 0.0
+        reset_joint_offset = (
+            reset_perturbation.joint_position_noise
+            if reset_perturbation
+            else np.zeros(self.contract.action_size, dtype=np.float64)
+        )
+        reset_velocity_offset = (
+            reset_perturbation.root_velocity_noise
+            if reset_perturbation
+            else np.zeros(6, dtype=np.float64)
+        )
 
         data = mujoco.MjData(self.model)
         data.qpos[:] = self.model.qpos0
@@ -430,14 +624,29 @@ class SoccerMotionCorrectionEvaluator:
             motion, start_frame, 2
         ]
         data.qpos[self._root_qpos + 3 : self._root_qpos + 7] = (
-            self.corpus.root_quaternion_wxyz[motion, start_frame]
+            yaw_quaternion_rotate(
+                self.corpus.root_quaternion_wxyz[motion, start_frame],
+                reset_yaw,
+            )
         )
-        data.qpos[self._joint_qpos] = self.corpus.joint_position[motion, start_frame]
+        data.qpos[self._joint_qpos] = np.clip(
+            self.corpus.joint_position[motion, start_frame] + reset_joint_offset,
+            self._lower,
+            self._upper,
+        )
         data.qvel[self._root_dof : self._root_dof + 3] = (
-            self.corpus.root_linear_velocity[motion, start_frame]
+            yaw_vector_rotate(
+                self.corpus.root_linear_velocity[motion, start_frame],
+                reset_yaw,
+            )
+            + reset_velocity_offset[:3]
         )
         data.qvel[self._root_dof + 3 : self._root_dof + 6] = (
-            self.corpus.root_angular_velocity[motion, start_frame]
+            yaw_vector_rotate(
+                self.corpus.root_angular_velocity[motion, start_frame],
+                reset_yaw,
+            )
+            + reset_velocity_offset[3:]
         )
         data.qvel[self._joint_dof] = self.corpus.joint_velocity[motion, start_frame]
         data.ctrl[self._tau_actuator] = 0.0
@@ -467,6 +676,8 @@ class SoccerMotionCorrectionEvaluator:
         teacher_interventions: list[bool] = []
         teacher_label_selected: list[bool] = []
         teacher_cost_improvement: list[float] = []
+        teacher_validation_cost_improvement: list[float] = []
+        teacher_validation_seeds: list[int] = []
         reference_frames: list[int] = []
         qpos_states: list[np.ndarray] = []
 
@@ -508,11 +719,20 @@ class SoccerMotionCorrectionEvaluator:
                 teacher_base_action + correction[current], *self.contract.action_clip
             )
             cost_improvement = float("nan")
+            validation_cost_improvement: float | None = None
+            validation_seed: int | None = None
             label_selected = True
             if state_feedback_horizon:
                 if teacher_base_policy is None:
                     raise ValueError(
                         "state-feedback teacher requires a separate teacher base"
+                    )
+                if state_feedback_validation_horizon:
+                    validation_seed = derive_case_seed(
+                        state_feedback_validation_base_seed,
+                        motion,
+                        start_frame,
+                        current,
                     )
                 teacher_action, feedback = self.short_horizon_teacher_action(
                     data,
@@ -525,11 +745,30 @@ class SoccerMotionCorrectionEvaluator:
                     teacher_base_policy=teacher_base_policy,
                     horizon=state_feedback_horizon,
                     maximum_action_delta=maximum_state_feedback_action_delta,
+                    validation_horizon=state_feedback_validation_horizon,
+                    validation_seed=validation_seed,
+                    validation_joint_noise=validation_joint_noise,
+                    validation_joint_velocity_noise=(
+                        validation_joint_velocity_noise
+                    ),
                 )
                 cost_improvement = feedback["improvement_over_student"]
-                label_selected = (
-                    cost_improvement >= minimum_state_feedback_improvement
-                    and not np.allclose(teacher_action, base_action, atol=1.0e-6)
+                validation_cost_improvement = (
+                    feedback["validation_improvement_over_student"]
+                    if state_feedback_validation_horizon
+                    else None
+                )
+                label_selected = cross_fitted_label_selected(
+                    base_action,
+                    teacher_action,
+                    search_improvement=cost_improvement,
+                    minimum_search_improvement=(
+                        minimum_state_feedback_improvement
+                    ),
+                    validation_improvement=validation_cost_improvement,
+                    minimum_validation_improvement=(
+                        minimum_state_feedback_validation_improvement
+                    ),
                 )
             action, use_teacher = select_dagger_action(
                 base_action,
@@ -554,10 +793,19 @@ class SoccerMotionCorrectionEvaluator:
             squared_error.extend(np.square(error).tolist())
             absolute_error_by_joint.append(np.abs(error))
             desired_root = self.corpus.root_position[motion, frame].copy()
+            desired_xy_displacement = np.asarray(
+                [
+                    *(
+                        self.corpus.root_position[motion, frame, :2]
+                        - self.corpus.root_position[motion, start_frame, :2]
+                    ),
+                    0.0,
+                ],
+                dtype=np.float64,
+            )
             desired_root[:2] = (
                 self._model_root_xy
-                + self.corpus.root_position[motion, frame, :2]
-                - self.corpus.root_position[motion, start_frame, :2]
+                + yaw_vector_rotate(desired_xy_displacement, reset_yaw)[:2]
             )
             root_position_error.append(
                 float(
@@ -588,6 +836,14 @@ class SoccerMotionCorrectionEvaluator:
                 teacher_interventions.append(use_teacher)
                 teacher_label_selected.append(label_selected)
                 teacher_cost_improvement.append(cost_improvement)
+                teacher_validation_cost_improvement.append(
+                    float("nan")
+                    if validation_cost_improvement is None
+                    else validation_cost_improvement
+                )
+                teacher_validation_seeds.append(
+                    -1 if validation_seed is None else validation_seed
+                )
                 reference_frames.append(current)
                 qpos_states.append(data.qpos.copy())
             if not np.isfinite(data.qpos).all() or not np.isfinite(data.qvel).all():
@@ -646,6 +902,9 @@ class SoccerMotionCorrectionEvaluator:
                 if teacher_label_selected
                 else 1.0
             ),
+            "reset_perturbation_seed": (
+                reset_perturbation.case_seed if reset_perturbation else None
+            ),
             "teacher_score": float(score),
         }
         if capture:
@@ -666,6 +925,12 @@ class SoccerMotionCorrectionEvaluator:
                 ),
                 "teacher_cost_improvement": np.asarray(
                     teacher_cost_improvement, dtype=np.float32
+                ),
+                "teacher_validation_cost_improvement": np.asarray(
+                    teacher_validation_cost_improvement, dtype=np.float32
+                ),
+                "teacher_validation_seed": np.asarray(
+                    teacher_validation_seeds, dtype=np.int64
                 ),
                 "reference_frames": np.asarray(reference_frames, dtype=np.int32),
                 "qpos": np.asarray(qpos_states, dtype=np.float64),

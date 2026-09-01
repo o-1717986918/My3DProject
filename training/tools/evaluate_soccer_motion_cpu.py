@@ -22,48 +22,16 @@ from my3d_rl.soccer_motion_policy import (
     load_soccer_motion_policy,
     soccer_motion_actor_observation,
 )
+from my3d_rl.soccer_motion_reset import (
+    derive_case_seed as _case_seed,
+    deterministic_reset_perturbation,
+    yaw_quaternion_rotate as _yaw_quaternion_rotate,
+    yaw_vector_rotate as _yaw_vector_rotate,
+)
 from my3d_rl.t1_control import apollo_joint_gains
 
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
-
-
-def _case_seed(base_seed: int, motion: int, start_frame: int) -> int:
-    if min(base_seed, motion, start_frame) < 0:
-        raise ValueError("perturbation seed inputs must be non-negative")
-    return int(
-        np.random.SeedSequence([base_seed, motion, start_frame]).generate_state(
-            1, dtype=np.uint64
-        )[0]
-    )
-
-
-def _yaw_quaternion_rotate(quaternion: np.ndarray, yaw: float) -> np.ndarray:
-    half = 0.5 * yaw
-    yaw_w = np.cos(half)
-    yaw_z = np.sin(half)
-    w, x, y, z = quaternion
-    return np.asarray(
-        [
-            yaw_w * w - yaw_z * z,
-            yaw_w * x - yaw_z * y,
-            yaw_w * y + yaw_z * x,
-            yaw_w * z + yaw_z * w,
-        ],
-        dtype=np.float64,
-    )
-
-
-def _yaw_vector_rotate(vector: np.ndarray, yaw: float) -> np.ndarray:
-    cosine, sine = np.cos(yaw), np.sin(yaw)
-    return np.asarray(
-        [
-            cosine * vector[0] - sine * vector[1],
-            sine * vector[0] + cosine * vector[1],
-            vector[2],
-        ],
-        dtype=np.float64,
-    )
 
 
 def _start_frames(
@@ -301,32 +269,28 @@ def main() -> None:
                 if args.perturbation_seed is not None
                 else None
             )
-            rng = (
-                np.random.default_rng(perturbation_case_seed)
-                if perturbation_case_seed is not None
+            perturbation = (
+                deterministic_reset_perturbation(
+                    base_seed=args.perturbation_seed,
+                    motion=motion,
+                    start_frame=start,
+                    action_size=contract.action_size,
+                    joint_noise=args.reset_joint_noise,
+                    root_velocity_noise=args.reset_root_velocity_noise,
+                    yaw_range=args.reset_yaw_range,
+                )
+                if args.perturbation_seed is not None
                 else None
             )
-            yaw = (
-                float(rng.uniform(-args.reset_yaw_range, args.reset_yaw_range))
-                if rng is not None
-                else 0.0
-            )
+            yaw = perturbation.yaw if perturbation is not None else 0.0
             joint_noise = (
-                rng.uniform(
-                    -args.reset_joint_noise,
-                    args.reset_joint_noise,
-                    size=contract.action_size,
-                )
-                if rng is not None
+                perturbation.joint_position_noise
+                if perturbation is not None
                 else np.zeros(contract.action_size, dtype=np.float64)
             )
             velocity_noise = (
-                rng.uniform(
-                    -args.reset_root_velocity_noise,
-                    args.reset_root_velocity_noise,
-                    size=6,
-                )
-                if rng is not None
+                perturbation.root_velocity_noise
+                if perturbation is not None
                 else np.zeros(6, dtype=np.float64)
             )
             data = mujoco.MjData(model)
@@ -484,7 +448,7 @@ def main() -> None:
             "joint_noise": args.reset_joint_noise,
             "root_velocity_noise": args.reset_root_velocity_noise,
             "yaw_range": args.reset_yaw_range,
-            "generator": "numpy_default_rng_seedsequence_v1",
+            "generator": "numpy_seedsequence_uint63_v2",
             "numpy_version": np.__version__,
         },
         "excluded_starts_dataset": (

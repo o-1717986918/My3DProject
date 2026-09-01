@@ -492,6 +492,19 @@ longer-horizon exact-CPU state feedback under reset perturbations and admits
 only cross-fitted, locally advantageous student-state labels before any new
 policy evaluation.
 
+K1-D is now implementation-complete and predeclared in
+`training/locks/paid_k1d_2026_09_02.yaml`. The shared reset generator derives a
+signed-64-bit case seed from motion/start coordinates, so collection and blind
+evaluation use identical perturbation semantics with hashable provenance. The
+teacher searches four frames from the actual student state, then independently
+perturbs a copied state and requires the chosen action to improve a six-frame
+validation rollout as well. DAgger may reuse a nominal phase only under a
+non-zero disjoint reset seed; whole episodes, rather than frames, are assigned
+to the five-fold validation split. A prior DAgger aggregate is accepted only
+when its completed manifest binds the exact dataset hash. Selection and a
+conditional confirmation use untouched perturbation seeds; neither authorizes
+runtime deployment or ball work by itself.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

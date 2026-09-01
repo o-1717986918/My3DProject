@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from my3d_rl.soccer_motion_teacher import (
+    cross_fitted_label_selected,
     decode_phase_correction,
     robust_teacher_objective,
     select_dagger_action,
@@ -108,3 +109,42 @@ def test_state_feedback_candidates_are_bounded_and_keep_student_and_teacher():
     assert np.max(np.abs(candidates)) <= 1.0
     np.testing.assert_allclose(candidates[3:, 0], teacher[0])
     assert np.max(np.abs(candidates - student)) <= 0.2 + 1.0e-12
+
+
+def test_cross_fitted_label_requires_search_validation_and_new_action():
+    student = np.array([0.0, 0.0])
+    teacher = np.array([0.1, 0.0])
+
+    assert cross_fitted_label_selected(
+        student,
+        teacher,
+        search_improvement=0.02,
+        minimum_search_improvement=0.01,
+        validation_improvement=0.03,
+        minimum_validation_improvement=0.01,
+    )
+    assert not cross_fitted_label_selected(
+        student,
+        teacher,
+        search_improvement=0.02,
+        minimum_search_improvement=0.01,
+        validation_improvement=-0.01,
+        minimum_validation_improvement=0.01,
+    )
+    assert not cross_fitted_label_selected(
+        student,
+        student,
+        search_improvement=0.02,
+        minimum_search_improvement=0.01,
+        validation_improvement=0.03,
+        minimum_validation_improvement=0.01,
+    )
+
+
+def test_cross_fitted_label_supports_search_only_legacy_mode():
+    assert cross_fitted_label_selected(
+        np.array([0.0]),
+        np.array([0.1]),
+        search_improvement=0.01,
+        minimum_search_improvement=0.01,
+    )

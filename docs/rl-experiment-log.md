@@ -1164,3 +1164,26 @@ the state-feedback clone. The next authorized improvement is longer-horizon
 exact-CPU state feedback under deterministic reset perturbations, with only
 cross-fitted locally advantageous student-state labels admitted to DAgger. More
 reward-only PPO steps are not supported by the evidence.
+
+## PAiD K1-D cross-fitted state-feedback predeclaration — 2026-09-02
+
+The next teacher iteration is implemented before opening its formal data. A
+shared deterministic reset module now supplies joint, root-velocity and yaw
+perturbations to both DAgger collection and exact-CPU evaluation. Derived case
+seeds stay inside signed 64-bit range, allowing every frame to carry explicit
+reset and validation provenance without overflow.
+
+The correction teacher now performs a four-frame candidate search from the
+student's exact MuJoCo state. Its selected action is tested again from an
+independently micro-perturbed copy for six frames; a label is retained only if
+search improves by at least `0.001`, validation improves by at least `0.0005`,
+and the action differs from the student. The collector accepts the previous
+19,551-frame aggregate only through its complete hash-bound manifest, permits
+reuse of nominal starts only under reset seed `20260980`, and assigns complete
+motion/start episodes to one five-fold split to prevent frame leakage.
+
+Collection seed `20260982`, validation seed `20260981`, the output-head clone
+configuration, selection perturbation seed `20260983`, conditional confirmation
+seed `20260984`, and all fail-closed rules are fixed in
+`training/locks/paid_k1d_2026_09_02.yaml`. The complete training test suite
+passes before this predeclaration. No new checkpoint is retained yet.
