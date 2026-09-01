@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import hashlib
 import json
 from pathlib import Path
 
@@ -18,9 +19,20 @@ import onnx
 from onnx import TensorProto, helper, numpy_helper
 import onnxruntime as ort
 
+from my3d_rl.contract import load_policy_contract
+from my3d_rl.kick_env import TRANSITION_CONTRACT
+
 
 def _tensor(name: str, value: np.ndarray) -> onnx.TensorProto:
     return numpy_helper.from_array(np.asarray(value, dtype=np.float32), name=name)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _network_factory():
@@ -42,10 +54,13 @@ def _network_factory():
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint", type=Path)
+    parser.add_argument("--contract", type=Path, default=TRANSITION_CONTRACT)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--parity-output", type=Path)
     parser.add_argument("--seed", type=int, default=6201)
     args = parser.parse_args()
+
+    contract = load_policy_contract(args.contract)
 
     params = ppo_checkpoint.load(args.checkpoint)
     normalizer_params, policy_params = params[0], params[1]
@@ -53,11 +68,17 @@ def main() -> None:
     if set(learned) != {"Dense_0", "MLP_0", "std_logparam"}:
         raise ValueError("checkpoint is not the formal kick-correction network")
     actor_size = int(learned["MLP_0"]["hidden_0"]["kernel"].shape[0])
-    if actor_size != 96 or learned["Dense_0"]["bias"].shape != (23,):
-        raise ValueError("checkpoint differs from the 96 -> 23 correction contract")
+    if (
+        actor_size != contract.observation_size
+        or learned["Dense_0"]["bias"].shape != (contract.action_size,)
+    ):
+        raise ValueError("checkpoint differs from the selected kick contract")
     observation_mean = np.asarray(normalizer_params.mean["state"])
     observation_std = np.asarray(normalizer_params.std["state"])
-    if observation_mean.shape != (96,) or observation_std.shape != (96,):
+    if (
+        observation_mean.shape != (actor_size,)
+        or observation_std.shape != (actor_size,)
+    ):
         raise ValueError("checkpoint observation normalizer is incompatible")
 
     initializers = [
@@ -124,9 +145,17 @@ def main() -> None:
     )
     graph = helper.make_graph(
         nodes,
-        "my3d_kick_correction_policy_v1",
-        [helper.make_tensor_value_info("observations", TensorProto.FLOAT, [None, 96])],
-        [helper.make_tensor_value_info("actions", TensorProto.FLOAT, [None, 23])],
+        contract.policy_name + "_correction",
+        [
+            helper.make_tensor_value_info(
+                "observations", TensorProto.FLOAT, list(contract.input_shape)
+            )
+        ],
+        [
+            helper.make_tensor_value_info(
+                "actions", TensorProto.FLOAT, list(contract.output_shape)
+            )
+        ],
         initializer=initializers,
     )
     model = helper.make_model(
@@ -137,8 +166,10 @@ def main() -> None:
     model.ir_version = 10
     for key, value in {
         "checkpoint": str(args.checkpoint.resolve()),
-        "policy": "kick_correction_policy_v1",
-        "composition": "apollo_walk_plus_teacher_table_plus_tenth_scale_correction",
+        "policy": contract.policy_name,
+        "contract": str(args.contract.resolve()),
+        "contract_sha256": _sha256(args.contract),
+        "composition": "apollo_walk_plus_teacher_table_plus_bounded_correction",
     }.items():
         entry = model.metadata_props.add()
         entry.key = key
@@ -148,13 +179,14 @@ def main() -> None:
     onnx.save(model, args.output)
 
     networks = _network_factory()(
-        {"state": (96,), "privileged_state": (106,)},
-        23,
+        {"state": (actor_size,), "privileged_state": (actor_size + 10,)},
+        contract.action_size,
         preprocess_observations_fn=running_statistics.normalize,
     )
     rng = np.random.default_rng(args.seed)
     observations = (
-        observation_mean[None] + observation_std[None] * rng.normal(0.0, 1.0, (256, 96))
+        observation_mean[None]
+        + observation_std[None] * rng.normal(0.0, 1.0, (256, actor_size))
     ).astype(np.float32)
     with jax.default_device(jax.devices("cpu")[0]):
         expected = networks.policy_network.apply(
@@ -162,18 +194,28 @@ def main() -> None:
             policy_params,
             {
                 "state": jp.asarray(observations),
-                "privileged_state": jp.zeros((256, 106), dtype=jp.float32),
+                "privileged_state": jp.zeros(
+                    (256, actor_size + 10), dtype=jp.float32
+                ),
             },
         )[0]
     session = ort.InferenceSession(
         str(args.output.resolve()), providers=["CPUExecutionProvider"]
     )
-    actual = session.run(None, {"observations": observations})[0]
+    actual = np.concatenate(
+        [
+            session.run(None, {"observations": row[None]})[0]
+            for row in observations
+        ],
+        axis=0,
+    )
     difference = np.abs(np.asarray(expected) - actual)
     parity = {
         "schema_version": 1,
         "checkpoint": str(args.checkpoint.resolve()),
         "onnx": str(args.output.resolve()),
+        "contract": str(args.contract.resolve()),
+        "contract_sha256": _sha256(args.contract),
         "samples": observations.shape[0],
         "seed": args.seed,
         "comparison_device": "JAX CPU vs ONNX Runtime CPU",

@@ -19,8 +19,8 @@ from brax.training.agents.ppo import train as ppo
 from mujoco_playground._src import wrapper
 import numpy as np
 
-from my3d_rl.contract import load_policy_contract
-from my3d_rl.kick_env import DEFAULT_CONTRACT, DirectionalKick, default_config
+from my3d_rl.contract import PolicyContract, load_policy_contract
+from my3d_rl.kick_env import DirectionalKick, TRANSITION_CONTRACT, default_config
 from my3d_rl.kick_teacher import build_joint_delta_trajectory
 from my3d_rl.t1_control import KICK_ACTION_SCALE
 
@@ -47,7 +47,12 @@ def _git_revision() -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
-def _load_teacher_table(path: Path) -> tuple[np.ndarray, np.ndarray, list[int]]:
+def _load_teacher_table(
+    path: Path,
+    contract: PolicyContract,
+    *,
+    condition_index: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, list[int]]:
     source = json.loads(path.read_text(encoding="utf-8"))
     records = [
         record
@@ -56,12 +61,15 @@ def _load_teacher_table(path: Path) -> tuple[np.ndarray, np.ndarray, list[int]]:
         and record["mode"] == "pass"
         and abs(float(record["distance_m"]) - 2.0) < 1.0e-9
         and abs(float(record["angle_deg"])) < 1.0e-9
+        and (
+            condition_index is None
+            or int(record["condition_index"]) == condition_index
+        )
     ]
     if not records:
         raise ValueError("teacher manifest has no accepted 2 m forward-pass records")
     config = default_config()
     times = np.arange(config.episode_length, dtype=np.float64) * config.ctrl_dt
-    contract = load_policy_contract(DEFAULT_CONTRACT)
     trajectories = np.stack(
         [
             build_joint_delta_trajectory(
@@ -82,10 +90,93 @@ def _load_teacher_table(path: Path) -> tuple[np.ndarray, np.ndarray, list[int]]:
     return trajectories, offsets, [int(record["condition_index"]) for record in records]
 
 
+def _load_transition_corpus(
+    path: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    manifest_path = path.with_suffix(".json")
+    if not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"transition corpus manifest is missing: {manifest_path}"
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("purpose") != "kick_policy_v3_walk_to_kick_transition_corpus":
+        raise ValueError("transition corpus manifest has the wrong purpose")
+    if manifest.get("npz_sha256") != _sha256(path):
+        raise ValueError("transition corpus NPZ hash does not match its manifest")
+    with np.load(path, allow_pickle=False) as archive:
+        required = {"qpos", "qvel", "split", "rollout_id", "phase_bucket"}
+        if not required <= set(archive.files):
+            raise ValueError("transition corpus is missing required arrays")
+        qpos = np.asarray(archive["qpos"], dtype=np.float32)
+        qvel = np.asarray(archive["qvel"], dtype=np.float32)
+        split = np.asarray(archive["split"], dtype=np.uint8)
+        rollout_id = np.asarray(archive["rollout_id"], dtype=np.int32)
+        phase_bucket = np.asarray(archive["phase_bucket"], dtype=np.int32)
+    if (
+        qpos.ndim != 2
+        or qvel.ndim != 2
+        or split.shape != (qpos.shape[0],)
+        or rollout_id.shape != split.shape
+        or phase_bucket.shape != split.shape
+        or qvel.shape[0] != qpos.shape[0]
+        or not np.isfinite(qpos).all()
+        or not np.isfinite(qvel).all()
+    ):
+        raise ValueError("transition corpus arrays have incompatible shapes")
+    if len(set(rollout_id.tolist())) != rollout_id.size:
+        raise ValueError("transition corpus contains duplicate rollout IDs")
+    if not set(split.tolist()) <= {0, 1}:
+        raise ValueError("transition corpus split must contain only train/validation")
+    train = split == 0
+    validation = split == 1
+    if np.count_nonzero(train) < 2 or np.count_nonzero(validation) < 2:
+        raise ValueError("transition corpus needs at least two train and validation rows")
+    train_ids = set(rollout_id[train].tolist())
+    validation_ids = set(rollout_id[validation].tolist())
+    if train_ids & validation_ids:
+        raise ValueError("transition corpus leaks rollout IDs across splits")
+    metadata = {
+        "manifest": str(manifest_path.resolve()),
+        "manifest_sha256": _sha256(manifest_path),
+        "npz": str(path.resolve()),
+        "npz_sha256": _sha256(path),
+        "train_entries": int(np.count_nonzero(train)),
+        "validation_entries": int(np.count_nonzero(validation)),
+        "train_phase_buckets": sorted(set(phase_bucket[train].tolist())),
+        "validation_phase_buckets": sorted(set(phase_bucket[validation].tolist())),
+        "teacher_condition_index": int(manifest["teacher_condition_index"]),
+    }
+    return qpos[train], qvel[train], qpos[validation], qvel[validation], metadata
+
+
+def _load_parity_report(path: Path, implementation: str) -> dict[str, Any]:
+    """Validate the CPU/accelerated-backend equivalence gate for formal training."""
+    parity = json.loads(path.read_text(encoding="utf-8"))
+    if parity.get("purpose") != "kick_identical_control_cpu_mjx_parity":
+        raise ValueError("parity report has the wrong purpose")
+    if parity.get("accelerated_implementation") != implementation:
+        raise ValueError("parity report backend does not match --impl")
+    if not bool(parity.get("summary", {}).get("parity_gate_passed")):
+        raise ValueError("parity report did not pass")
+    return {
+        "path": str(path.resolve()),
+        "sha256": _sha256(path),
+        "summary": parity["summary"],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("teacher_manifest", type=Path)
+    parser.add_argument("transition_corpus", type=Path)
+    parser.add_argument("--contract", type=Path, default=TRANSITION_CONTRACT)
     parser.add_argument("--impl", choices=("jax", "warp"), default="warp")
+    parser.add_argument("--parity-report", type=Path)
+    parser.add_argument(
+        "--allow-unverified-backend-smoke",
+        action="store_true",
+        help="allow a non-promotable run without a passing CPU/backend report",
+    )
     parser.add_argument("--num-envs", type=int, default=64)
     parser.add_argument("--num-timesteps", type=int, default=262_144)
     parser.add_argument("--seed", type=int, default=6101)
@@ -94,6 +185,15 @@ def main() -> None:
     parser.add_argument("--restore-checkpoint", type=Path)
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
+
+    parity_metadata: dict[str, Any] | None = None
+    if args.parity_report is not None:
+        parity_metadata = _load_parity_report(args.parity_report, args.impl)
+    elif not args.allow_unverified_backend_smoke:
+        raise ValueError(
+            "formal training requires --parity-report; use the explicit smoke "
+            "override only for non-promotable diagnostics"
+        )
 
     if not args.run_dir.is_absolute() or args.run_dir.is_relative_to(Path.cwd()):
         raise ValueError("run-dir must be an absolute path outside the repository")
@@ -105,8 +205,20 @@ def main() -> None:
     minimum_timesteps = batch_size * num_minibatches * unroll_length
     effective_timesteps = max(args.num_timesteps, minimum_timesteps)
 
+    contract = load_policy_contract(args.contract)
+    if contract.policy_name != "kick_policy_v3" or contract.observation_size != 98:
+        raise ValueError("formal transition training requires kick_policy_v3")
+    (
+        train_qpos,
+        train_qvel,
+        validation_qpos,
+        validation_qvel,
+        transition_metadata,
+    ) = _load_transition_corpus(args.transition_corpus)
     trajectories, offsets, condition_indices = _load_teacher_table(
-        args.teacher_manifest
+        args.teacher_manifest,
+        contract,
+        condition_index=transition_metadata["teacher_condition_index"],
     )
     environment_overrides = {
         "impl": args.impl,
@@ -119,8 +231,19 @@ def main() -> None:
     }
     env = DirectionalKick(
         config_overrides=environment_overrides,
+        contract=contract,
         teacher_joint_residuals=trajectories,
         teacher_ball_offsets=offsets,
+        transition_qpos=train_qpos,
+        transition_qvel=train_qvel,
+    )
+    eval_env = DirectionalKick(
+        config_overrides=environment_overrides,
+        contract=contract,
+        teacher_joint_residuals=trajectories,
+        teacher_ball_offsets=offsets,
+        transition_qpos=validation_qpos,
+        transition_qvel=validation_qvel,
     )
     network_factory = functools.partial(
         ppo_networks.make_ppo_networks,
@@ -148,13 +271,18 @@ def main() -> None:
         "promotion_blocker": "requires exact CPU, ONNX, three-seed and server gates",
         "backend": jax.default_backend(),
         "implementation": args.impl,
+        "backend_parity": parity_metadata,
+        "unverified_backend_smoke": args.allow_unverified_backend_smoke,
         "devices": [str(device) for device in jax.devices()],
         "python": platform.python_version(),
         "jax": jax.__version__,
         "git_revision": _git_revision(),
+        "contract": str(args.contract.resolve()),
+        "contract_sha256": _sha256(args.contract),
         "teacher_manifest": str(args.teacher_manifest.resolve()),
         "teacher_manifest_sha256": _sha256(args.teacher_manifest),
         "teacher_condition_indices": condition_indices,
+        "transition_corpus": transition_metadata,
         "num_envs": args.num_envs,
         "requested_timesteps": args.num_timesteps,
         "effective_timesteps": effective_timesteps,
@@ -184,6 +312,7 @@ def main() -> None:
     try:
         _, _, final_metrics = ppo.train(
             environment=env,
+            eval_env=eval_env,
             num_timesteps=effective_timesteps,
             num_envs=args.num_envs,
             episode_length=env._config.episode_length,

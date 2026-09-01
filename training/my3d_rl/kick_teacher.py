@@ -18,6 +18,7 @@ import onnxruntime as ort
 
 from .contract import PolicyContract, load_policy_contract
 from .kick_env import DEFAULT_CONTRACT
+from .kick_transition import estimate_locomotion_phase
 from .rcss_scene import DEFAULT_RESOURCE_ROOT, build_single_t1_soccer_model
 from .t1_control import APOLLO_DEFAULT_POSE, KICK_ACTION_SCALE, apollo_joint_gains
 
@@ -94,6 +95,43 @@ class CEMResult:
     parameters: np.ndarray
     score: float
     history: tuple[dict[str, float], ...]
+
+
+@dataclass(frozen=True)
+class KickTransitionEntry:
+    """Exact physical state accepted by the deterministic setup controller."""
+
+    qpos: np.ndarray
+    qvel: np.ndarray
+    joint_position_offset: np.ndarray
+    joint_velocity: np.ndarray
+    walk_previous_action: np.ndarray
+    setup_velocity_command: np.ndarray
+    locomotion_phase: np.ndarray
+    support_hint: np.ndarray
+    phase_magnitude_rad: float
+    ball_position_local_m: np.ndarray
+    root_velocity: np.ndarray
+    torso_height_m: float
+    upright: float
+
+    def copy(self) -> "KickTransitionEntry":
+        """Return a deep copy so callers cannot mutate evaluator state."""
+        return KickTransitionEntry(
+            qpos=self.qpos.copy(),
+            qvel=self.qvel.copy(),
+            joint_position_offset=self.joint_position_offset.copy(),
+            joint_velocity=self.joint_velocity.copy(),
+            walk_previous_action=self.walk_previous_action.copy(),
+            setup_velocity_command=self.setup_velocity_command.copy(),
+            locomotion_phase=self.locomotion_phase.copy(),
+            support_hint=self.support_hint.copy(),
+            phase_magnitude_rad=self.phase_magnitude_rad,
+            ball_position_local_m=self.ball_position_local_m.copy(),
+            root_velocity=self.root_velocity.copy(),
+            torso_height_m=self.torso_height_m,
+            upright=self.upright,
+        )
 
 
 @dataclass(frozen=True)
@@ -334,7 +372,9 @@ class KickTeacherEvaluator:
         self._ball_body = self.model.body("ball").id
         self._ball_qpos = self.model.joint("ball-root").qposadr[0]
         self._ball_dof = self.model.joint("ball-root").dofadr[0]
-        self._root_dof = self.model.joint(prefix + "root").dofadr[0]
+        root_joint = self.model.joint(prefix + "root")
+        self._root_qpos = root_joint.qposadr[0]
+        self._root_dof = root_joint.dofadr[0]
         self._torso_body = self.model.body(prefix + "torso").id
         self._torso_site = self.model.site(prefix + "torso").id
         gyro = self.model.sensor(prefix + "torso_gyro")
@@ -353,6 +393,14 @@ class KickTeacherEvaluator:
         self._captured_targets = np.empty((0, self.contract.action_size))
         self._captured_observations = np.empty((0, self.contract.observation_size))
         self._captured_actions = np.empty((0, self.contract.action_size))
+        self._captured_transition_entry: KickTransitionEntry | None = None
+
+    @property
+    def captured_transition_entry(self) -> KickTransitionEntry | None:
+        """Last requested transition entry, copied at the ownership boundary."""
+        if self._captured_transition_entry is None:
+            return None
+        return self._captured_transition_entry.copy()
 
     def _stable_walk_target(
         self,
@@ -379,6 +427,57 @@ class KickTeacherEvaluator:
         ][0].astype(np.float64)
         action = np.clip(np.nan_to_num(action), -5.0, 5.0)
         return self._default_pose + 0.25 * action, action
+
+    def _make_transition_entry(
+        self,
+        data: mujoco.MjData,
+        walk_previous_action: np.ndarray,
+        setup_velocity_command: np.ndarray,
+    ) -> KickTransitionEntry:
+        torso_xmat = data.site_xmat[self._torso_site].reshape(3, 3)
+        yaw = np.arctan2(torso_xmat[1, 0], torso_xmat[0, 0])
+        c, s = np.cos(yaw), np.sin(yaw)
+        world_to_yaw = np.array([[c, s], [-s, c]])
+        torso_pos = data.xpos[self._torso_body]
+        ball_pos = data.xpos[self._ball_body]
+        ball_local_xy = world_to_yaw @ (ball_pos[:2] - torso_pos[:2])
+        joint_position_offset = (
+            data.qpos[self._joint_qpos] - self._default_pose
+        ).copy()
+        joint_velocity = data.qvel[self._joint_dof].copy()
+        locomotion = estimate_locomotion_phase(
+            joint_position_offset,
+            joint_velocity,
+            self.contract.joint_order,
+        )
+        return KickTransitionEntry(
+            qpos=data.qpos.copy(),
+            qvel=data.qvel.copy(),
+            joint_position_offset=joint_position_offset,
+            joint_velocity=joint_velocity,
+            walk_previous_action=np.asarray(
+                walk_previous_action, dtype=np.float64
+            ).copy(),
+            setup_velocity_command=np.asarray(
+                setup_velocity_command, dtype=np.float64
+            ).copy(),
+            locomotion_phase=locomotion.sin_cos.copy(),
+            support_hint=locomotion.support_hint.copy(),
+            phase_magnitude_rad=locomotion.magnitude_rad,
+            ball_position_local_m=np.array(
+                [
+                    ball_local_xy[0],
+                    ball_local_xy[1],
+                    ball_pos[2] - torso_pos[2],
+                ],
+                dtype=np.float64,
+            ),
+            root_velocity=data.qvel[
+                self._root_dof : self._root_dof + 6
+            ].copy(),
+            torso_height_m=float(torso_pos[2]),
+            upright=float(torso_xmat[2, 2]),
+        )
 
     def _kick_actor_observation(
         self,
@@ -407,12 +506,30 @@ class KickTeacherEvaluator:
         phase = np.pi * progress
         mode_index = {"pass": 0, "shot": 1, "clear": 2}[self.spec.action_mode]
         action_mode = np.eye(3, dtype=np.float64)[mode_index]
+        joint_position_offset = data.qpos[self._joint_qpos] - self._default_pose
+        joint_velocity = data.qvel[self._joint_dof]
+        phase_fields: list[np.ndarray] = [
+            np.array([np.sin(phase), np.cos(phase)])
+        ]
+        if self.contract.policy_name == "kick_policy_v3":
+            locomotion = estimate_locomotion_phase(
+                joint_position_offset,
+                joint_velocity,
+                self.contract.joint_order,
+            )
+            phase_fields.extend([locomotion.sin_cos, locomotion.support_hint])
+        elif self.contract.policy_name == "kick_policy_v2":
+            phase_fields.append(np.array([0.0, 1.0, 0.0]))
+        else:
+            raise RuntimeError(
+                f"teacher does not support contract {self.contract.policy_name!r}"
+            )
         actor = np.concatenate(
             [
                 data.sensordata[self._gyro_slice],
                 gravity,
-                data.qpos[self._joint_qpos] - self._default_pose,
-                data.qvel[self._joint_dof],
+                joint_position_offset,
+                joint_velocity,
                 previous_action,
                 np.array(
                     [
@@ -434,8 +551,7 @@ class KickTeacherEvaluator:
                 np.array([self.spec.desired_arrival_speed_mps]),
                 action_mode,
                 np.array([0.0, 1.0]),
-                np.array([np.sin(phase), np.cos(phase)]),
-                np.array([0.0, 1.0, 0.0]),
+                *phase_fields,
             ]
         ).astype(np.float32)
         if actor.shape != (self.contract.observation_size,):
@@ -459,6 +575,11 @@ class KickTeacherEvaluator:
         setup_timeout_s: float = 1.2,
         setup_tolerance_m: float = 0.015,
         setup_confirmation_cycles: int = 5,
+        initial_robot_offset_m: tuple[float, float] = (0.0, 0.0),
+        initial_robot_yaw_deg: float = 0.0,
+        initial_qpos: np.ndarray | None = None,
+        initial_qvel: np.ndarray | None = None,
+        capture_transition_entry: bool = False,
         kick_policy_session: ort.InferenceSession | None = None,
         kick_correction_session: ort.InferenceSession | None = None,
         kick_correction_scale: float = 0.5,
@@ -468,8 +589,27 @@ class KickTeacherEvaluator:
         )
         if (setup_ball_x_offset_m is None) != (setup_ball_y_offset_m is None):
             raise ValueError("setup ball x/y offsets must be provided together")
+        if (initial_qpos is None) != (initial_qvel is None):
+            raise ValueError("initial qpos and qvel must be provided together")
+        exact_initial_state = initial_qpos is not None
+        if exact_initial_state:
+            initial_qpos = np.asarray(initial_qpos, dtype=np.float64)
+            initial_qvel = np.asarray(initial_qvel, dtype=np.float64)
+            if initial_qpos.shape != (self.model.nq,) or initial_qvel.shape != (
+                self.model.nv,
+            ):
+                raise ValueError("initial qpos/qvel have incompatible shapes")
+            if not np.isfinite(initial_qpos).all() or not np.isfinite(
+                initial_qvel
+            ).all():
+                raise ValueError("initial qpos/qvel must be finite")
+            if setup_enabled:
+                raise ValueError("exact initial state cannot also run setup")
         if phase_reference_ball_x_offset_m is None:
             phase_reference_ball_x_offset_m = ball_x_offset_m
+        initial_robot_offset = np.asarray(initial_robot_offset_m, dtype=np.float64)
+        if initial_robot_offset.shape != (2,):
+            raise ValueError("initial robot offset must contain x and y")
         if not np.isfinite(
             [
                 ball_x_offset_m,
@@ -480,9 +620,25 @@ class KickTeacherEvaluator:
                 setup_ball_y_offset_m if setup_enabled else 0.0,
                 setup_timeout_s,
                 setup_tolerance_m,
+                initial_robot_offset[0],
+                initial_robot_offset[1],
+                initial_robot_yaw_deg,
             ]
         ).all():
-            raise ValueError("ball offsets must be finite")
+            raise ValueError("ball and initial robot offsets must be finite")
+        if np.max(np.abs(initial_robot_offset)) > 2.0:
+            raise ValueError("initial robot offset must stay within two metres")
+        if abs(initial_robot_yaw_deg) > 45.0:
+            raise ValueError("initial robot yaw must stay within 45 degrees")
+        if exact_initial_state and (
+            np.any(initial_robot_offset != 0.0)
+            or initial_robot_yaw_deg != 0.0
+            or ball_x_offset_m != 0.0
+            or ball_y_offset_m != 0.0
+        ):
+            raise ValueError(
+                "exact initial state is exclusive with pose and ball offsets"
+            )
         if (
             setup_timeout_s <= 0.0
             or setup_tolerance_m <= 0.0
@@ -519,10 +675,28 @@ class KickTeacherEvaluator:
         )
         action_times = np.clip(control_times - phase_shift_s, 0.0, None)
         data = mujoco.MjData(self.model)
-        data.qpos[self._ball_qpos] += ball_x_offset_m
-        data.qpos[self._ball_qpos + 1] += ball_y_offset_m
+        if exact_initial_state:
+            data.qpos[:] = initial_qpos
+            data.qvel[:] = initial_qvel
+        else:
+            data.qpos[self._ball_qpos] += ball_x_offset_m
+            data.qpos[self._ball_qpos + 1] += ball_y_offset_m
+            data.qpos[self._root_qpos : self._root_qpos + 2] += initial_robot_offset
+            yaw_half = 0.5 * np.deg2rad(initial_robot_yaw_deg)
+            yaw_quaternion = np.array(
+                [np.cos(yaw_half), 0.0, 0.0, np.sin(yaw_half)], dtype=np.float64
+            )
+            base_quaternion = data.qpos[
+                self._root_qpos + 3 : self._root_qpos + 7
+            ].copy()
+            rotated_quaternion = np.empty(4, dtype=np.float64)
+            mujoco.mju_mulQuat(rotated_quaternion, yaw_quaternion, base_quaternion)
+            data.qpos[self._root_qpos + 3 : self._root_qpos + 7] = (
+                rotated_quaternion / np.linalg.norm(rotated_quaternion)
+            )
         data.ctrl[self._pos_actuator] = self._default_pose
         mujoco.mj_forward(self.model, data)
+        self._captured_transition_entry = None
         initial_ball = data.xpos[self._ball_body, :2].copy()
         target_angle = np.deg2rad(self.spec.target_angle_deg)
         target_direction = np.array([np.cos(target_angle), np.sin(target_angle)])
@@ -563,6 +737,12 @@ class KickTeacherEvaluator:
             if kick_correction_session is not None
             else None
         )
+        if capture_transition_entry and not setup_enabled:
+            self._captured_transition_entry = self._make_transition_entry(
+                data,
+                np.zeros(self.contract.action_size, dtype=np.float64),
+                np.zeros(3, dtype=np.float64),
+            )
 
         substeps = int(round(self.spec.control_dt_s / self.spec.simulation_dt_s))
         for control_index, default_action_time_s in enumerate(action_times):
@@ -612,6 +792,12 @@ class KickTeacherEvaluator:
                     setup_duration_s = float(elapsed)
                     kick_start_index = control_index
                     setup_kick_start_yaw_deg = float(np.rad2deg(yaw))
+                    if capture_transition_entry:
+                        self._captured_transition_entry = (
+                            self._make_transition_entry(
+                                data, previous_action, velocity_command
+                            )
+                        )
                     previous_action.fill(0.0)
                     previous_kick_action.fill(0.0)
                     velocity_command = np.array([0.50, -0.04, 0.0])

@@ -5,6 +5,7 @@ from my3d_rl import load_policy_contract
 
 CONTRACT = Path(__file__).parents[1] / "contracts" / "kick_policy_v1.yaml"
 CONTRACT_V2 = Path(__file__).parents[1] / "contracts" / "kick_policy_v2.yaml"
+CONTRACT_V3 = Path(__file__).parents[1] / "contracts" / "kick_policy_v3.yaml"
 
 
 def test_kick_policy_contract_is_internally_consistent():
@@ -69,3 +70,15 @@ def test_kick_v2_conditions_on_range_speed_and_action_mode():
     assert fields["requested_ball_speed"] == 1
     assert fields["desired_arrival_speed"] == 1
     assert fields["action_mode"] == 3
+
+
+def test_kick_v3_versions_the_pre_kick_locomotion_phase():
+    contract = load_policy_contract(CONTRACT_V3)
+
+    assert contract.policy_name == "kick_policy_v3"
+    assert contract.observation_size == 98
+    assert contract.input_shape == (1, 98)
+    fields = dict(contract.observation_fields)
+    assert fields["action_progress"] == 2
+    assert fields["locomotion_phase"] == 2
+    assert fields["support_hint"] == 3

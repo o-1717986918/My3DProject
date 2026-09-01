@@ -608,3 +608,53 @@ state machine and robust 2/3.5/5 m pass grid, followed by shot/clear envelopes,
 moving-ball transitions, three-seed exact evaluation and RCSSServerMJ server
 calibration. More epochs on the current BC actor or more fixed-phase CEM are
 not justified by these results.
+
+## Phase-aware transition corpus and exact-CPU teacher pivot — 2026-09-01
+
+The kick transition is now represented by the versioned 98-value
+`kick_policy_v3` contract. Seed 7003 generated 122 valid exact-CPU walk-to-kick
+states from 128 randomized setup rollouts. The 97/25 whole-rollout split covers
+all eight locomotion-phase buckets on both sides, and the source rollouts
+record 121 contacts with zero falls. The corpus NPZ SHA-256 is
+`416ca5f6447c750ca018ff83c80a8b56fa2cf87f06cfa5888da48ae373471bba`.
+
+Backend verification rejected JAX and accepted Warp for a 60-step
+identical-control diagnostic. A guarded 16,384-step Warp PPO seed 7203 was then
+run with contact, full-gate and fall events scaled as episode impulses. It
+retained zero gate successes and worsened deterministic validation fall rate
+from 62.5% to 87.5%. ONNX parity passed at `1.40e-9`, but exact CPU validation
+reported 0/25 successes, 25 contacts and 17 falls. The checkpoint is rejected.
+
+A 150-step audit exposed a stricter problem than raw physics parity. The first
+14 independently generated control targets agree, after which tiny Warp/CPU
+state differences are amplified by the closed-loop walking policy. The target
+gap is `0.071 rad` at cycle 15 and peaks at `1.49 rad`. The earlier diagnostic
+applied the accelerated target to both engines, so it could not detect this
+closed-loop divergence. Formal accelerated learning is now gated on an
+independent-controller corpus comparison rather than one open-loop trace.
+
+Exact CPU black-box optimization remains feasible. A seed-7301 single-state
+proof passed the complete gate after 24 candidates by 10 generations, reaching
+1.952 m progress, 0.048 m range error, 0.105 m lateral error and 0.240 m/s
+launch-speed error without falling. The resumable seed-7302 eight-phase table
+then took 236 seconds. It improved training results from 5/97 to 19/97 and
+held-out results from 0/25 to 3/25; held-out falls remained zero. Phase buckets
+0 and 5 retained mean lateral errors of 1.161 and 1.094 m, while buckets 1 and
+2 were dominated by distance/speed error. Consequently, phase-only lookup is
+rejected as a deployment selector. The next dataset must label individual
+states and use the complete transition observation, especially ball-local
+position, root velocity and torso state, to predict bounded trajectory
+parameters.
+
+Immutable local evidence:
+
+- Warp run manifest SHA-256:
+  `c0909a549a3c353d8588180120524611cbbcfff32a65ff266c0747a221d424b9`;
+- rejected Warp ONNX SHA-256:
+  `0c82759235f6f1ed9fad00553931fbe977339bffc23fbf25bf05a7e86db5e507`;
+- exact CPU ONNX evaluation SHA-256:
+  `81f11c4886823bd31532bceb51e84c76ee8224da6a418a739a2e5d26bb1e6482`;
+- single-state proof SHA-256:
+  `a85411c46b8c3d8d289c577715cf0eb67ce53a46578688b9f6667cdf635716d1`;
+- phase-table manifest SHA-256:
+  `1c8747abf87032a35766b598628af16c88294204abda66abb40f1d34f7eaee1c`.

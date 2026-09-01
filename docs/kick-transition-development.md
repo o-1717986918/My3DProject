@@ -105,6 +105,58 @@ Two integration defects found during these trials have already been fixed:
    the kick transition by direct code reuse:
    <https://github.com/XiangruiJiang/ApolloCodebase>.
 
+## 2026-09-01 transition-state checkpoint
+
+K1 and the simulation part of K2 are now implemented. `kick_policy_v3` has a
+98-value actor input: the v2 fields plus an explicit locomotion phase, while
+retaining the dynamic three-value support hint. The exact-CPU corpus generator
+randomizes approach position, yaw, ball pose and setup hold length, captures
+whole `qpos`/`qvel` transition states, and performs whole-rollout
+phase-stratified splitting. Seed 7003 accepted 122/128 rollouts, has all eight
+phase buckets in both splits, 97 training states, 25 validation states, 121
+contacts and zero falls. The NPZ SHA-256 is
+`416ca5f6447c750ca018ff83c80a8b56fa2cf87f06cfa5888da48ae373471bba`;
+its manifest SHA-256 is
+`9a4be1db2796c76731527c8b2822afa1e00b765a51169765f3532654f331a75a`.
+
+The first accelerated residual-policy route was rejected by exact evidence.
+Warp passes an identical-control 60-step comparison with maximum joint error
+`8.85e-6 rad`, root error `1.38e-6 m` and ball-position error `6.13e-6 m`.
+JAX does not: it first exceeds the joint-velocity limit at step 11 and reaches
+`0.501 rad` joint, `0.064 m` root and `0.123 m` ball-position errors. Formal
+training therefore requires a hashed, passing backend report and defaults to
+Warp; JAX is diagnostic-only.
+
+That open-loop control comparison was necessary but not sufficient. A
+16,384-step Warp PPO run with the full gate reward changed validation fall rate
+from 62.5% to 87.5% and retained zero gate successes. Its ONNX export matches
+JAX CPU to `1.40e-9`, yet exact CPU replay passed 0/25 and fell in 17/25. An
+independent 150-step closed-loop comparison located the reason: the CPU and
+Warp targets match initially, but small contact-state differences feed back
+through the walking network; target error first exceeds `0.071 rad` at cycle
+15 and reaches `1.49 rad`. Applying Warp's targets to CPU, as the first parity
+tool did, hides this independent-controller amplification. The policy SHA-256
+is `0c82759235f6f1ed9fad00553931fbe977339bffc23fbf25bf05a7e86db5e507`
+and is explicitly rejected.
+
+The reliable route now generates phase/state-conditioned labels in exact CPU
+MuJoCo before fitting a deployable selector. A single-state proof improved
+condition 60 from `0.450 m` to `1.952 m` progress and passed the complete
+distance, lateral, speed, contact and posture gate in 10.9 seconds. The first
+eight-bucket exact-CPU table improved training success from 5/97 to 19/97 and
+held-out success from 0/25 to 3/25 with zero held-out falls. It is useful
+evidence, but rejected at 12% versus the 90% gate. Bucket-level errors show
+that gait phase alone is not a sufficient selector: ball-local position, root
+velocity and torso state must condition the next model. The exact table
+manifest SHA-256 is
+`1c8747abf87032a35766b598628af16c88294204abda66abb40f1d34f7eaee1c`.
+
+The next R1 action is therefore per-transition exact-CPU teacher generation,
+followed by a bounded state-to-trajectory-parameter model and held-out CPU
+rollout validation. Accelerated PPO remains blocked until an independent
+closed-loop corpus parity gate passes; more steps on the rejected seed are not
+authorized by the evidence.
+
 ## Implementation route
 
 ### K1. Version the transition contract
@@ -172,11 +224,11 @@ Only then expand to 3.5/5 m, angle bins, shot/clear, and moving-ball entries.
 
 ## Immediate engineering backlog
 
-- [ ] add a versioned pre-kick-state corpus and generator;
-- [ ] add gait/support phase to the training reset and actor contract;
+- [x] add a versioned pre-kick-state corpus and generator;
+- [x] add gait/support phase to the training reset and actor contract;
 - [ ] add server release-state telemetry/export;
-- [ ] train three transition-prior seeds and select by held-out physics, not
-      reward;
+- [ ] generate exact-CPU per-state teachers, fit the bounded transition model,
+      then train three seeds and select by held-out physics rather than reward;
 - [ ] add the guarded C++ kick-policy runner and same-cycle fallback tests;
 - [ ] rerun the central 2 m CPU and 7v7 server gates;
 - [ ] update this record and the R1 checkpoint with immutable artifact hashes.
