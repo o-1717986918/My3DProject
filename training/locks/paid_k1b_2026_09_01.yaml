@@ -106,6 +106,48 @@ visualization:
   conservative_dagger_bc_event_sha256: c0ce160ff48547de381d0141975a52d008c33ca90e8416741fc344ca70bd9096
   dashboard: http://localhost:6006
 
+state_feedback_curriculum_candidate:
+  status: final_untouched_gate_pending
+  teacher_git_revision: cd8f3a8e19c7170209904d98911bcfc84bc8dbb9
+  teacher_horizon_frames: 2
+  minimum_local_cost_improvement: 0.001
+  maximum_action_delta_from_student: 0.2
+  selected_student_state_frames: 12717
+  aggregate_frames: 19551
+  teacher_manifest_sha256: 2b25a6250f50afe2351d08476551b8775882bafaad5afa879cb4a1147e413960
+  teacher_dataset_sha256: 4578eaa8e1e9b7aad829fb4ede2ede03b7f15e7645a43649c1c767e86ef848a1
+  candidate:
+    checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
+    checkpoint_tree_sha256: bcfb60f0f75bcd70ccd7faead5681c8b04983492aa084cf189a3a0a9119f2018
+    run_manifest_sha256: a06da9e74a5c6775f063bacefaa6c64267dec183c661c33674f4ea9a2c2d16d5
+    trainable_layers: output_only
+    steps: 1000
+    seed: 20260962
+  tuning_grid:
+    trials: 679
+    baseline_report_sha256: 35d9bf6a3978ef2f38ca941d98cc62dd2a060c74b58a90d4ebcc7ccb21c5eb73
+    candidate_report_sha256: 6eadfa85fc308f60370ae5b8c8b6ad62fc8f50d77bc1d8120442ccf11c95875b
+    comparison_sha256: 2c5448be36b1cba0d5001585495bc48968941faac0ef6dc7434d68a671fe0ed7
+    baseline_completions: 196
+    candidate_completions: 198
+    baseline_mean_survival_fraction: 0.5602500949
+    candidate_mean_survival_fraction: 0.5791899542
+    survival_improvements: 319
+    survival_regressions: 60
+    one_sided_survival_sign_p: 4.5076796183e-44
+  final_untouched_protocol:
+    phase_samples: 96
+    expected_trials: 777
+    exclude_training_dataset: true
+    exclude_tuning_grid_report: true
+    runtime_promotion: false
+    ppo_curriculum_advance_gate:
+      no_net_completion_loss: true
+      mean_survival_fraction_delta_at_least: 0.015
+      survival_improvements_exceed_regressions: true
+      one_sided_exact_survival_sign_p_at_most: 0.01
+      tracking_tolerance_required: true
+
 decision:
   current_retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-bc-formal-s20260951-v1/checkpoints/000000005000
   runtime_promotable: false

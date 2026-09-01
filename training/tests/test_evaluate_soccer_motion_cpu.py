@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import numpy as np
 import pytest
 
 from tools.evaluate_soccer_motion_cpu import (
     _load_excluded_teacher_starts,
+    _load_excluded_evaluation_starts,
     _start_frames,
 )
 
@@ -46,3 +48,34 @@ def test_load_excluded_teacher_starts_rejects_unknown_motion(tmp_path):
 
     with pytest.raises(ValueError, match="out-of-range"):
         _load_excluded_teacher_starts(path, motion_count=2)
+
+
+def test_load_excluded_evaluation_starts_binds_motion_path(tmp_path):
+    path = tmp_path / "evaluation.json"
+    path.write_text(
+        json.dumps(
+            {
+                "purpose": "k1_exact_cpu_fixed_motion_phase_grid",
+                "records": [
+                    {
+                        "motion": 0,
+                        "relative_path": "motion.t1.npz",
+                        "start_frame": 7,
+                    },
+                    {
+                        "motion": 0,
+                        "relative_path": "motion.t1.npz",
+                        "start_frame": 9,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    starts, digest = _load_excluded_evaluation_starts(
+        path, relative_paths=("motion.t1.npz",)
+    )
+
+    assert starts == {0: {7, 9}}
+    assert digest == hashlib.sha256(path.read_bytes()).hexdigest()

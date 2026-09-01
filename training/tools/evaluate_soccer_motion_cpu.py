@@ -74,6 +74,31 @@ def _load_excluded_teacher_starts(
     return dict(excluded), hashlib.sha256(dataset_path.read_bytes()).hexdigest()
 
 
+def _load_excluded_evaluation_starts(
+    report_path: Path,
+    *,
+    relative_paths: tuple[str, ...],
+) -> tuple[dict[int, set[int]], str]:
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    if report.get("purpose") != "k1_exact_cpu_fixed_motion_phase_grid":
+        raise ValueError("excluded report is not an exact CPU fixed-grid evaluation")
+    records = report.get("records")
+    if not isinstance(records, list) or not records:
+        raise ValueError("excluded evaluation report has no records")
+    excluded: dict[int, set[int]] = defaultdict(set)
+    for record in records:
+        motion = int(record["motion"])
+        start = int(record["start_frame"])
+        if (
+            not 0 <= motion < len(relative_paths)
+            or record.get("relative_path") != relative_paths[motion]
+            or start < 0
+        ):
+            raise ValueError("excluded evaluation report differs from the corpus")
+        excluded[motion].add(start)
+    return dict(excluded), hashlib.sha256(report_path.read_bytes()).hexdigest()
+
+
 def _foot_contacts(
     model: mujoco.MjModel,
     data: mujoco.MjData,
@@ -114,6 +139,13 @@ def main() -> None:
             "appear in the fixed evaluation grid"
         ),
     )
+    parser.add_argument(
+        "--exclude-starts-report",
+        type=Path,
+        action="append",
+        default=[],
+        help="repeat to exclude grids already used for model or hyperparameter selection",
+    )
     parser.add_argument("--minimum-evaluated-starts", type=int, default=4)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -136,6 +168,17 @@ def main() -> None:
         excluded_starts, excluded_dataset_sha256 = _load_excluded_teacher_starts(
             args.exclude_starts_dataset,
             motion_count=len(corpus.relative_paths),
+        )
+    excluded_report_metadata = []
+    for report_path in args.exclude_starts_report:
+        report_starts, report_sha256 = _load_excluded_evaluation_starts(
+            report_path,
+            relative_paths=corpus.relative_paths,
+        )
+        for motion, starts in report_starts.items():
+            excluded_starts.setdefault(motion, set()).update(starts)
+        excluded_report_metadata.append(
+            {"path": str(report_path.resolve()), "sha256": report_sha256}
         )
     policy = load_soccer_motion_policy(
         zero_policy=args.zero_policy,
@@ -337,6 +380,11 @@ def main() -> None:
             else None
         ),
         "excluded_starts_dataset_sha256": excluded_dataset_sha256,
+        "excluded_starts_reports": excluded_report_metadata,
+        "excluded_start_counts": {
+            str(motion): len(starts)
+            for motion, starts in sorted(excluded_starts.items())
+        },
         "excluded_teacher_start_counts": {
             str(motion): len(starts)
             for motion, starts in sorted(excluded_starts.items())

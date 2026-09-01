@@ -9,6 +9,8 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
+
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -106,6 +108,23 @@ def main() -> None:
     promotion_passed = (
         improvements > regressions and p_value <= 0.05 and tracking_ok
     )
+    survival_deltas = np.asarray(
+        [pair["survival_fraction_delta"] for pair in pairs], dtype=np.float64
+    )
+    survival_improvements = int(np.sum(survival_deltas > 1.0e-12))
+    survival_regressions = int(np.sum(survival_deltas < -1.0e-12))
+    survival_ties = trials - survival_improvements - survival_regressions
+    survival_sign_p = _one_sided_exact_p(
+        survival_improvements, survival_regressions
+    )
+    mean_survival_delta = float(np.mean(survival_deltas))
+    curriculum_advance_passed = (
+        candidate_successes >= baseline_successes
+        and mean_survival_delta >= 0.015
+        and survival_improvements > survival_regressions
+        and survival_sign_p <= 0.01
+        and tracking_ok
+    )
     payload = {
         "schema_version": 1,
         "purpose": "k1_paired_exact_cpu_policy_comparison",
@@ -126,11 +145,24 @@ def main() -> None:
         "transitions": transitions,
         "one_sided_exact_mcnemar_p": p_value,
         "tracking_tolerance_passed": tracking_ok,
+        "mean_survival_fraction_delta": mean_survival_delta,
+        "survival_transitions": {
+            "improvements": survival_improvements,
+            "regressions": survival_regressions,
+            "ties": survival_ties,
+        },
+        "one_sided_exact_survival_sign_p": survival_sign_p,
         "promotion_rule": (
             "paired improvement exceeds regressions, one-sided exact McNemar "
             "p<=0.05, RMSE regression<=0.01 rad, contact regression<=0.02"
         ),
         "promotion_passed": promotion_passed,
+        "curriculum_advance_rule": (
+            "no net completion loss, mean survival delta>=0.015, survival "
+            "improvements exceed regressions with one-sided exact sign p<=0.01, "
+            "and tracking tolerance passes; authorizes PPO initialization only"
+        ),
+        "curriculum_advance_passed": curriculum_advance_passed,
         "decision": "promote" if promotion_passed else "retain_experimental",
         "pairs": pairs,
     }
