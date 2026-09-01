@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import numpy as np
 import pytest
 
@@ -7,6 +10,7 @@ from my3d_rl.soccer_motion_bc import (
     action_error_metrics,
     load_soccer_motion_teacher_dataset,
     motion_balanced_indices,
+    validate_bc_data_manifest,
 )
 from my3d_rl.contract import load_policy_contract
 from tools.train_soccer_motion_bc import DEFAULT_CONTRACT
@@ -66,3 +70,58 @@ def test_action_error_metrics_are_reported_per_motion():
 
 def test_bc_default_contract_matches_residual_v3_profile():
     assert load_policy_contract(DEFAULT_CONTRACT).policy_name == "soccer_motion_policy_v2"
+
+
+def test_validate_bc_data_manifest_accepts_bound_dagger_aggregate(tmp_path):
+    dataset = tmp_path / "dagger.npz"
+    dataset.write_bytes(b"dataset")
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    manifest = tmp_path / "run-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "purpose": "k1_b_exact_cpu_soccer_motion_dagger_collection",
+                "output_dataset_sha256": hashlib.sha256(b"dataset").hexdigest(),
+                "student_checkpoint": str(checkpoint),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    kind, path, payload = validate_bc_data_manifest(
+        dataset,
+        base_checkpoint=checkpoint,
+        dagger_manifest=manifest,
+    )
+
+    assert kind == "dagger_aggregate"
+    assert path == manifest
+    assert payload["status"] == "complete"
+
+
+def test_validate_bc_data_manifest_rejects_wrong_dagger_checkpoint(tmp_path):
+    dataset = tmp_path / "dagger.npz"
+    dataset.write_bytes(b"dataset")
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    manifest = tmp_path / "run-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "purpose": "k1_b_exact_cpu_soccer_motion_dagger_collection",
+                "output_dataset_sha256": hashlib.sha256(b"dataset").hexdigest(),
+                "student_checkpoint": str(tmp_path / "another-checkpoint"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="mismatched"):
+        validate_bc_data_manifest(
+            dataset,
+            base_checkpoint=checkpoint,
+            dagger_manifest=manifest,
+        )

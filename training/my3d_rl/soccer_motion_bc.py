@@ -2,10 +2,47 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+
+def validate_bc_data_manifest(
+    dataset: Path,
+    *,
+    base_checkpoint: Path,
+    selection_manifest: Path | None = None,
+    dagger_manifest: Path | None = None,
+) -> tuple[str, Path, dict[str, Any]]:
+    """Bind BC input to either the selected teacher or a DAgger aggregate."""
+    if (selection_manifest is None) == (dagger_manifest is None):
+        raise ValueError("select exactly one BC data manifest")
+    manifest_path = selection_manifest or dagger_manifest
+    assert manifest_path is not None
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    dataset_sha256 = hashlib.sha256(dataset.read_bytes()).hexdigest()
+    if selection_manifest is not None:
+        if (
+            manifest.get("status") != "complete_teacher_corpus_selected"
+            or manifest.get("teacher_gates_passed") != manifest.get("motion_count")
+            or manifest.get("combined_dataset", {}).get("sha256")
+            != dataset_sha256
+        ):
+            raise ValueError("teacher selection manifest is incomplete or mismatched")
+        return "selected_teacher_corpus", manifest_path, manifest
+    if (
+        manifest.get("status") != "complete"
+        or manifest.get("purpose")
+        != "k1_b_exact_cpu_soccer_motion_dagger_collection"
+        or manifest.get("output_dataset_sha256") != dataset_sha256
+        or Path(manifest.get("student_checkpoint", "")).resolve()
+        != base_checkpoint.resolve()
+    ):
+        raise ValueError("DAgger manifest is incomplete or mismatched")
+    return "dagger_aggregate", manifest_path, manifest
 
 
 def load_soccer_motion_teacher_dataset(

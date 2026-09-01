@@ -25,6 +25,7 @@ from my3d_rl.soccer_motion_bc import (
     action_error_metrics,
     load_soccer_motion_teacher_dataset,
     motion_balanced_indices,
+    validate_bc_data_manifest,
 )
 from my3d_rl.training_dashboard import TrainingDashboard
 
@@ -71,7 +72,9 @@ def _clean_revision() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset", type=Path)
-    parser.add_argument("--selection-manifest", type=Path, required=True)
+    data_group = parser.add_mutually_exclusive_group(required=True)
+    data_group.add_argument("--selection-manifest", type=Path)
+    data_group.add_argument("--dagger-manifest", type=Path)
     parser.add_argument("--base-checkpoint", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
@@ -96,13 +99,12 @@ def main() -> None:
     profile = get_ppo_profile(args.profile)
     if profile.policy_contract != contract.policy_name:
         raise ValueError("PPO profile and policy contract differ")
-    selection = json.loads(args.selection_manifest.read_text(encoding="utf-8"))
-    if (
-        selection.get("status") != "complete_teacher_corpus_selected"
-        or selection.get("teacher_gates_passed") != selection.get("motion_count")
-        or selection["combined_dataset"]["sha256"] != _sha256(args.dataset)
-    ):
-        raise ValueError("teacher selection manifest is incomplete or mismatched")
+    data_manifest_type, data_manifest_path, _ = validate_bc_data_manifest(
+        args.dataset,
+        base_checkpoint=args.base_checkpoint,
+        selection_manifest=args.selection_manifest,
+        dagger_manifest=args.dagger_manifest,
+    )
     data = load_soccer_motion_teacher_dataset(
         args.dataset,
         observation_size=contract.observation_size,
@@ -196,8 +198,17 @@ def main() -> None:
         "backend": jax.default_backend(),
         "dataset": str(args.dataset.resolve()),
         "dataset_sha256": _sha256(args.dataset),
-        "selection_manifest": str(args.selection_manifest.resolve()),
-        "selection_manifest_sha256": _sha256(args.selection_manifest),
+        "data_manifest_type": data_manifest_type,
+        "data_manifest": str(data_manifest_path.resolve()),
+        "data_manifest_sha256": _sha256(data_manifest_path),
+        "selection_manifest": (
+            str(args.selection_manifest.resolve())
+            if args.selection_manifest
+            else None
+        ),
+        "dagger_manifest": (
+            str(args.dagger_manifest.resolve()) if args.dagger_manifest else None
+        ),
         "base_checkpoint": str(args.base_checkpoint.resolve()),
         "contract": str(args.contract.resolve()),
         "contract_sha256": _sha256(args.contract),
