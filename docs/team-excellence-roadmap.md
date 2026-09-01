@@ -282,6 +282,23 @@ transition policy trained from randomized pre-kick states, with deterministic
 setup and fallback retained. Evidence, external-method boundaries, and exact
 gates are recorded in [`kick-transition-development.md`](kick-transition-development.md).
 
+Exact transition checkpoint (2026-09-01): independent CPU optimization solves
+361/368 randomized training states without falls, but observation-to-trajectory
+selectors reach only about 40% on untouched states. A frozen static phase-6
+release rule then passed only 3/5 released states on an independent corpus and
+is closed. Sequence-level timing data confirms successful windows on 87/128
+approach rollouts for one action (`67.97%`), so R1 now evaluates a compact
+action bank before fitting a grouped, causal trigger. This work does not widen
+the runtime envelope or change the default-off competition guard.
+
+Closed-loop transition checkpoint (2026-09-01): four training-selected action
+prototypes have 25/26 untouched oracle coverage, but learned timing/action
+selectors realize at most 15/26. Direct v3 behavior cloning also fails despite
+low validation loss. Exact-state DAgger improves closed-loop success from 0/92
+to 10/92 and then 27/92; the second round contacts in every trial but falls in
+one. R1 remains blocked at the 83/92 and zero-fall gate, and no candidate is
+enabled in the competition runtime.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

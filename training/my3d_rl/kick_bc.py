@@ -1,4 +1,4 @@
-"""Supervised initialization and ONNX export for kick_policy_v2."""
+"""Supervised initialization and ONNX export for versioned kick policies."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ class KickBehaviorClone(nn.Module):
 @dataclass(frozen=True)
 class KickBCResult:
     params: Any
+    observation_size: int
     observation_mean: np.ndarray
     observation_std: np.ndarray
     train_episode_ids: tuple[int, ...]
@@ -38,7 +39,9 @@ class KickBCResult:
     history: tuple[dict[str, float], ...]
 
 
-def load_teacher_dataset(path: Path) -> dict[str, np.ndarray]:
+def load_teacher_dataset(
+    path: Path, *, expected_observation_size: int = 96
+) -> dict[str, np.ndarray]:
     with np.load(path) as dataset:
         required = {"observations", "actions", "episode_ids"}
         missing = required - set(dataset.files)
@@ -47,21 +50,60 @@ def load_teacher_dataset(path: Path) -> dict[str, np.ndarray]:
         observations = np.asarray(dataset["observations"], dtype=np.float32)
         actions = np.asarray(dataset["actions"], dtype=np.float32)
         episode_ids = np.asarray(dataset["episode_ids"], dtype=np.int32)
-    if observations.ndim != 2 or observations.shape[1] != 96:
-        raise ValueError("teacher observations must have shape [N, 96]")
+        split = (
+            np.asarray(dataset["split"], dtype=np.uint8)
+            if "split" in dataset.files
+            else None
+        )
+    if expected_observation_size < 1:
+        raise ValueError("expected observation size must be positive")
+    if observations.ndim != 2 or observations.shape[1] != expected_observation_size:
+        raise ValueError(
+            "teacher observations must have shape "
+            f"[N, {expected_observation_size}]"
+        )
     if actions.shape != (observations.shape[0], 23):
         raise ValueError("teacher actions must have shape [N, 23]")
     if episode_ids.shape != (observations.shape[0],):
         raise ValueError("episode_ids must have shape [N]")
+    if split is not None and (
+        split.shape != episode_ids.shape or not set(split.tolist()) <= {0, 1}
+    ):
+        raise ValueError("split must be a binary vector with shape [N]")
     if not np.isfinite(observations).all() or not np.isfinite(actions).all():
         raise ValueError("teacher dataset must be finite")
     if np.max(np.abs(actions)) > 1.0 + 1.0e-6:
         raise ValueError("teacher actions exceed the deployment contract")
-    return {
+    result = {
         "observations": observations,
         "actions": actions,
         "episode_ids": episode_ids,
     }
+    if split is not None:
+        result["split"] = split
+    return result
+
+
+def validation_episodes_from_sample_split(
+    episode_ids: np.ndarray, split: np.ndarray
+) -> tuple[int, ...]:
+    """Resolve a whole-episode validation set from per-sample split values."""
+    ids = np.asarray(episode_ids, dtype=np.int32)
+    values = np.asarray(split, dtype=np.uint8)
+    if ids.ndim != 1 or values.shape != ids.shape:
+        raise ValueError("episode IDs and split must be aligned vectors")
+    if not set(values.tolist()) <= {0, 1}:
+        raise ValueError("split must contain only zero and one")
+    validation: list[int] = []
+    for episode_id in np.unique(ids):
+        episode_values = np.unique(values[ids == episode_id])
+        if episode_values.size != 1:
+            raise ValueError("sample split leaks an episode across partitions")
+        if int(episode_values[0]) == 1:
+            validation.append(int(episode_id))
+    if not validation:
+        raise ValueError("sample split contains no validation episodes")
+    return tuple(validation)
 
 
 def train_behavior_clone(
@@ -77,6 +119,9 @@ def train_behavior_clone(
     actions = dataset["actions"]
     episode_ids = dataset["episode_ids"]
     unique_episodes = tuple(int(value) for value in np.unique(episode_ids))
+    if observations.ndim != 2 or observations.shape[1] < 1:
+        raise ValueError("behavior cloning observations must be a non-empty matrix")
+    observation_size = int(observations.shape[1])
     if len(unique_episodes) < 2:
         raise ValueError("behavior cloning requires at least two condition episodes")
     if validation_episode_ids is None:
@@ -107,7 +152,9 @@ def train_behavior_clone(
 
     model = KickBehaviorClone()
     key = jax.random.PRNGKey(seed)
-    params = model.init(key, jnp.zeros((1, 96), dtype=jnp.float32))["params"]
+    params = model.init(
+        key, jnp.zeros((1, observation_size), dtype=jnp.float32)
+    )["params"]
     optimizer = optax.adamw(learning_rate, weight_decay=1.0e-6)
     optimizer_state = optimizer.init(params)
 
@@ -155,6 +202,7 @@ def train_behavior_clone(
     )
     return KickBCResult(
         params=params,
+        observation_size=observation_size,
         observation_mean=observation_mean.astype(np.float32),
         observation_std=observation_std.astype(np.float32),
         train_episode_ids=train_episode_ids,
@@ -226,8 +274,12 @@ def export_behavior_clone_onnx(result: KickBCResult, output_path: Path) -> None:
 
     graph = helper.make_graph(
         nodes,
-        "kick_policy_v2_behavior_clone",
-        [helper.make_tensor_value_info("observations", TensorProto.FLOAT, [1, 96])],
+        "kick_policy_behavior_clone",
+        [
+            helper.make_tensor_value_info(
+                "observations", TensorProto.FLOAT, [1, result.observation_size]
+            )
+        ],
         [helper.make_tensor_value_info("actions", TensorProto.FLOAT, [1, 23])],
         initializer=initializers,
     )

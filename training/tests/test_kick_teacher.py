@@ -7,6 +7,7 @@ from my3d_rl.kick_teacher import (
     PARAMETER_LOWER,
     PARAMETER_NAMES,
     PARAMETER_UPPER,
+    KickTeacherEvaluator,
     KickTeacherSpec,
     build_joint_delta_trajectory,
     cem_optimize,
@@ -56,6 +57,56 @@ def test_teacher_spec_rejects_unsupported_requests():
         KickTeacherSpec(target_angle_deg=31.0).validate()
     with pytest.raises(ValueError, match="divisible"):
         KickTeacherSpec(control_dt_s=0.02, simulation_dt_s=0.006).validate()
+
+
+def test_walk_history_requires_exact_state_and_matching_action_shape():
+    contract = load_policy_contract(DEFAULT_CONTRACT)
+    evaluator = KickTeacherEvaluator(KickTeacherSpec(), contract=contract)
+    parameters = np.zeros(len(PARAMETER_NAMES))
+
+    with pytest.raises(ValueError, match="exact initial state"):
+        evaluator.rollout(
+            parameters,
+            initial_walk_previous_action=np.zeros(contract.action_size),
+        )
+    with pytest.raises(ValueError, match="incompatible shape"):
+        evaluator.rollout(
+            parameters,
+            initial_qpos=np.asarray(evaluator.model.qpos0),
+            initial_qvel=np.zeros(evaluator.model.nv),
+            initial_walk_previous_action=np.zeros(contract.action_size - 1),
+        )
+
+
+def test_capture_only_stop_requires_setup_transition_capture():
+    evaluator = KickTeacherEvaluator(KickTeacherSpec())
+    parameters = np.zeros(len(PARAMETER_NAMES))
+
+    with pytest.raises(ValueError, match="requires setup capture mode"):
+        evaluator.rollout(parameters, stop_after_transition_capture=True)
+
+
+def test_capture_only_stop_preserves_the_captured_transition_state():
+    evaluator = KickTeacherEvaluator(KickTeacherSpec(evaluation_duration_s=1.2))
+    parameters = np.zeros(len(PARAMETER_NAMES))
+    kwargs = {
+        "setup_ball_x_offset_m": 0.0,
+        "setup_ball_y_offset_m": 0.0,
+        "setup_confirmation_cycles": 1,
+        "capture_transition_entry": True,
+    }
+
+    evaluator.rollout(parameters, **kwargs)
+    complete_entry = evaluator.captured_transition_entry
+    evaluator.rollout(parameters, stop_after_transition_capture=True, **kwargs)
+    stopped_entry = evaluator.captured_transition_entry
+
+    assert complete_entry is not None and stopped_entry is not None
+    np.testing.assert_array_equal(stopped_entry.qpos, complete_entry.qpos)
+    np.testing.assert_array_equal(stopped_entry.qvel, complete_entry.qvel)
+    np.testing.assert_array_equal(
+        stopped_entry.walk_previous_action, complete_entry.walk_previous_action
+    )
 
 
 def test_kick_trial_gate_requires_contact_range_direction_speed_and_upright():

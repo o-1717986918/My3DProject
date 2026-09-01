@@ -10,10 +10,13 @@ from pathlib import Path
 
 import numpy as np
 
+from my3d_rl.contract import load_policy_contract
+from my3d_rl.kick_env import DEFAULT_CONTRACT
 from my3d_rl.kick_bc import (
     export_behavior_clone_onnx,
     load_teacher_dataset,
     train_behavior_clone,
+    validation_episodes_from_sample_split,
     verify_onnx_parity,
 )
 
@@ -29,6 +32,7 @@ def _sha256(path: Path) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset", type=Path)
+    parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--seed", type=int, default=2401)
     parser.add_argument("--steps", type=int, default=5000)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -41,18 +45,28 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    dataset = load_teacher_dataset(args.dataset)
+    contract = load_policy_contract(args.contract)
+    dataset = load_teacher_dataset(
+        args.dataset, expected_observation_size=contract.observation_size
+    )
+    validation_episode_ids = (
+        tuple(args.validation_episodes)
+        if args.validation_episodes is not None
+        else (
+            validation_episodes_from_sample_split(
+                dataset["episode_ids"], dataset["split"]
+            )
+            if "split" in dataset
+            else None
+        )
+    )
     result = train_behavior_clone(
         dataset,
         seed=args.seed,
         steps=args.steps,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
-        validation_episode_ids=(
-            tuple(args.validation_episodes)
-            if args.validation_episodes is not None
-            else None
-        ),
+        validation_episode_ids=validation_episode_ids,
     )
     args.output_prefix.parent.mkdir(parents=True, exist_ok=True)
     weights_path = args.output_prefix.with_suffix(".npz")
@@ -79,11 +93,13 @@ def main() -> None:
     export_behavior_clone_onnx(result, onnx_path)
     parity = verify_onnx_parity(result, onnx_path, dataset["observations"])
     manifest = {
-        "purpose": "kick_policy_v2_supervised_initializer",
+        "purpose": f"{contract.policy_name}_supervised_initializer",
         "promotable": False,
         "promotion_blocker": "requires closed-loop physics, multi-seed and server gates",
         "dataset": str(args.dataset),
         "dataset_sha256": _sha256(args.dataset),
+        "contract": str(args.contract.resolve()),
+        "contract_sha256": _sha256(args.contract),
         "weights": str(weights_path),
         "weights_sha256": _sha256(weights_path),
         "onnx": str(onnx_path),

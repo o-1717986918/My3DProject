@@ -402,6 +402,21 @@ class KickTeacherEvaluator:
             return None
         return self._captured_transition_entry.copy()
 
+    @property
+    def captured_observations(self) -> np.ndarray:
+        """Return a defensive copy of observations from the last captured rollout."""
+        return self._captured_observations.copy()
+
+    @property
+    def captured_actions(self) -> np.ndarray:
+        """Return a defensive copy of actions from the last captured rollout."""
+        return self._captured_actions.copy()
+
+    @property
+    def captured_targets(self) -> np.ndarray:
+        """Return a defensive copy of targets from the last captured rollout."""
+        return self._captured_targets.copy()
+
     def _stable_walk_target(
         self,
         data: mujoco.MjData,
@@ -579,7 +594,9 @@ class KickTeacherEvaluator:
         initial_robot_yaw_deg: float = 0.0,
         initial_qpos: np.ndarray | None = None,
         initial_qvel: np.ndarray | None = None,
+        initial_walk_previous_action: np.ndarray | None = None,
         capture_transition_entry: bool = False,
+        stop_after_transition_capture: bool = False,
         kick_policy_session: ort.InferenceSession | None = None,
         kick_correction_session: ort.InferenceSession | None = None,
         kick_correction_scale: float = 0.5,
@@ -592,6 +609,24 @@ class KickTeacherEvaluator:
         if (initial_qpos is None) != (initial_qvel is None):
             raise ValueError("initial qpos and qvel must be provided together")
         exact_initial_state = initial_qpos is not None
+        if initial_walk_previous_action is not None:
+            initial_walk_previous_action = np.asarray(
+                initial_walk_previous_action, dtype=np.float64
+            )
+            if initial_walk_previous_action.shape != (self.contract.action_size,):
+                raise ValueError("initial walk previous action has incompatible shape")
+            if not np.isfinite(initial_walk_previous_action).all():
+                raise ValueError("initial walk previous action must be finite")
+            if not exact_initial_state:
+                raise ValueError(
+                    "initial walk previous action requires an exact initial state"
+                )
+        if stop_after_transition_capture and (
+            not capture_transition_entry or not setup_enabled
+        ):
+            raise ValueError(
+                "stopping after transition capture requires setup capture mode"
+            )
         if exact_initial_state:
             initial_qpos = np.asarray(initial_qpos, dtype=np.float64)
             initial_qvel = np.asarray(initial_qvel, dtype=np.float64)
@@ -709,7 +744,11 @@ class KickTeacherEvaluator:
         closest_lateral_error = float("inf")
         closest_directional_speed = 0.0
         maximum_progress = 0.0
-        previous_action = np.zeros(self.contract.action_size, dtype=np.float64)
+        previous_action = (
+            initial_walk_previous_action.copy()
+            if initial_walk_previous_action is not None
+            else np.zeros(self.contract.action_size, dtype=np.float64)
+        )
         previous_kick_action = np.zeros(self.contract.action_size, dtype=np.float64)
         captured_targets: list[np.ndarray] = []
         captured_observations: list[np.ndarray] = []
@@ -798,6 +837,8 @@ class KickTeacherEvaluator:
                                 data, previous_action, velocity_command
                             )
                         )
+                        if stop_after_transition_capture:
+                            break
                     previous_action.fill(0.0)
                     previous_kick_action.fill(0.0)
                     velocity_command = np.array([0.50, -0.04, 0.0])
@@ -1016,6 +1057,8 @@ class KickTeacherEvaluator:
         *,
         ball_x_offset_m: float = 0.0,
         ball_y_offset_m: float = 0.0,
+        initial_qpos: np.ndarray | None = None,
+        initial_qvel: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, float | bool]]:
         """Execute the learner and label every visited state with the teacher."""
         metrics = self.rollout(
@@ -1023,6 +1066,8 @@ class KickTeacherEvaluator:
             capture_targets=True,
             ball_x_offset_m=ball_x_offset_m,
             ball_y_offset_m=ball_y_offset_m,
+            initial_qpos=initial_qpos,
+            initial_qvel=initial_qvel,
             kick_policy_session=session,
         )
         sample_count = self._captured_observations.shape[0]

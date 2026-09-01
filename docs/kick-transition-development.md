@@ -151,11 +151,89 @@ velocity and torso state must condition the next model. The exact table
 manifest SHA-256 is
 `1c8747abf87032a35766b598628af16c88294204abda66abb40f1d34f7eaee1c`.
 
-The next R1 action is therefore per-transition exact-CPU teacher generation,
-followed by a bounded state-to-trajectory-parameter model and held-out CPU
-rollout validation. Accelerated PPO remains blocked until an independent
-closed-loop corpus parity gate passes; more steps on the rejected seed are not
-authorized by the evidence.
+Per-transition exact-CPU teacher generation is now complete for the enlarged
+training corpus; the findings and the switch-window continuation are recorded
+below. Accelerated PPO remains blocked until an independent closed-loop corpus
+parity gate passes; more steps on the rejected seed are not authorized by the
+evidence.
+
+## Exact state labels and switch-window pivot
+
+Seed 7901 enlarged the randomized transition corpus to 460 accepted states,
+with a 368/92 whole-rollout train/validation split. A 20-by-8 exact-CPU CEM
+pass plus a 32-by-12 repair pass produced successful trajectory parameters for
+361/368 training states (`98.1%`) with zero training falls. This establishes
+that the kick trajectory family is physically capable from almost every
+sampled state. It does not establish a deployable mapping from observation to
+trajectory.
+
+That mapping is the actual blocker. Nearest-neighbour selectors plateaued at
+36--37/92 on the untouched split and a cross-evaluated teacher bank did not
+generalize under a phase or global lookup. A fixed phase-6 prototype passed
+29/57 states in independent seed 8501. A release gate selected on two
+development corpora was then frozen before seed 8901; the blind result released
+only 5/41 phase-6 states and passed 3/5 (`60%`) with zero falls. The static
+threshold route is closed rather than retuned on its test set. Preserving the
+captured walk action history and blending toward a neutral pose were also
+tested and rejected because neither improved held-out success.
+
+The replacement dataset treats transition timing as a sequence problem. For
+each randomized approach, it deterministically replays increasing consecutive
+alignment periods, captures each exact `qpos`/`qvel` switch state, and evaluates
+the frozen action from that state in CPU MuJoCo. Every train/validation decision
+is made for a complete approach rollout, never adjacent frames. A capture-only
+path stops simulation immediately after copying the transition state; a
+regression test proves that this optimization is bit-identical to the previous
+full rollout at the ownership boundary.
+
+Seed 9301 contains 3,579 candidate switch frames from 128 approach rollouts.
+The single fixed prototype passes 839 frames and has six fallen frames. At
+least one successful window exists in 87/128 approaches (`67.97%`), split as
+72/102 training and 15/26 untouched validation approaches. This independently
+confirms that timing is material, while also proving that one action prototype
+cannot meet the 90% release gate.
+
+A ten-action bank was declared from earlier teacher evidence. A greedy subset
+chosen on training approaches only selected prototypes 65, 107, 84 and 117.
+Its oracle coverage is 98/102 on training and 25/26 (`96.15%`) on untouched
+validation; all ten actions cover 26/26. This passes the physical-existence
+test, but not execution: a grouped kNN selector succeeded on 10/26 validation
+approaches, and the best regularized MLP released 16 times, succeeded 15 times,
+and had zero falls. The MLP has useful `93.75%` release precision but only
+`57.69%` total approach success, so neither selector is deployable.
+
+The next controlled branch distils full closed-loop actions rather than open-
+loop trajectory parameters. All 361 successful exact teachers were replayed
+into 54,511 samples, split by whole episode into 289 training and 72 validation
+episodes over every phase bucket. The first v3 BC model has ONNX/source parity
+`4.32e-7` and validation MSE `5.53e-4`, but exact closed-loop physics passes
+0/92 untouched states (83 contacts, zero falls). The low MSE therefore cannot
+serve as a promotion metric. DAgger round one raises this to 10/92; round two
+raises it to 27/92 with 92 contacts but introduces one fall. The trend justifies
+another safety-constrained iteration, not runtime integration. Promotion still
+requires at least 83/92 on this split, zero falls, a third frozen seed, and
+exact server replay.
+
+Immutable local evidence:
+
+- repaired per-state teacher manifest SHA-256:
+  `ce692307b73ac25eb2c8f7d0122b1a74b9135166eee87033598a55f1b7ed1b4c`;
+- repaired per-state teacher NPZ SHA-256:
+  `b1761811a84f75a5c69cb646ccff476d9544d1f313fd508f0633e39a814f0418`;
+- blind seed-8901 fixed-gate report SHA-256:
+  `63e288445367c8afea75533fd07778e8e0fd7530cd75724584fe059c693f09e0`;
+- seed-9301 switch-window manifest SHA-256:
+  `0acebc40b56285075a35e02ea4407dc907e085f8421b513e614e450d6227f282`;
+- seed-9301 switch-window NPZ SHA-256:
+  `1e0e4fdf190b61735bf88d768961d5b45d797fa70da12884a4a2276f11cf1994`.
+- seed-9401 prototype-bank NPZ SHA-256:
+  `afb2bcfe40dd6d8f331bd41ef5b2256736ce92117c26b4254e13d4c4fea88988`;
+- seed-9601 closed-loop teacher dataset NPZ SHA-256:
+  `b49387323a1fe7982dfc10b405fbca8283bc88532b0397fa4488c764723b6dea`;
+- seed-10002 DAgger-round-two ONNX SHA-256:
+  `b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1`;
+- seed-10002 untouched exact-CPU report SHA-256:
+  `978e8c5682dbc0001cf88b39dbc711cd4250d959672df9e07a866b0baf6e65c4`.
 
 ## Implementation route
 
@@ -227,8 +305,11 @@ Only then expand to 3.5/5 m, angle bins, shot/clear, and moving-ball entries.
 - [x] add a versioned pre-kick-state corpus and generator;
 - [x] add gait/support phase to the training reset and actor contract;
 - [ ] add server release-state telemetry/export;
-- [ ] generate exact-CPU per-state teachers, fit the bounded transition model,
-      then train three seeds and select by held-out physics rather than reward;
+- [x] generate and repair exact-CPU per-state teachers;
+- [x] prove that a four-action switch-window bank has more than 90% untouched
+      oracle coverage, and reject selectors that do not realize it;
+- [ ] continue safety-constrained closed-loop aggregation from the 27/92
+      checkpoint; promote only at 83/92 with zero falls;
 - [ ] add the guarded C++ kick-policy runner and same-cycle fallback tests;
 - [ ] rerun the central 2 m CPU and 7v7 server gates;
 - [ ] update this record and the R1 checkpoint with immutable artifact hashes.

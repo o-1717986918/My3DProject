@@ -658,3 +658,56 @@ Immutable local evidence:
   `a85411c46b8c3d8d289c577715cf0eb67ce53a46578688b9f6667cdf635716d1`;
 - phase-table manifest SHA-256:
   `1c8747abf87032a35766b598628af16c88294204abda66abb40f1d34f7eaee1c`.
+
+## Per-state labels and sequential switch windows — 2026-09-01
+
+The exact-CPU per-transition optimizer labels each training state independently
+and writes atomic resumable JSON plus a compact NPZ. Seed 8001 followed by the
+seed-8101 repair pass solved 361/368 (`98.1%`) enlarged-corpus training states,
+with zero falls. The label manifest and NPZ SHA-256 values are respectively
+`ce692307b73ac25eb2c8f7d0122b1a74b9135166eee87033598a55f1b7ed1b4c`
+and `b1761811a84f75a5c69cb646ccff476d9544d1f313fd508f0633e39a814f0418`.
+
+State-to-parameter selection did not inherit that oracle performance. Global
+and phase-aware nearest-neighbour selectors reached only 36--37/92 untouched
+states. A fixed phase-6 action plus a development-selected physical gate was
+frozen and evaluated on independent seed 8901: it released five of 41 phase-6
+states and succeeded on three (`60%`), with no falls. The report SHA-256 is
+`63e288445367c8afea75533fd07778e8e0fd7530cd75724584fe059c693f09e0`.
+The gate is rejected and was not retuned.
+
+The next experiment changes the unit of supervision from an arbitrary state
+to a complete approach sequence. Increasing alignment-confirmation counts
+produce deterministic candidate switch frames on the same approach; the
+frozen action is replayed from every exact state, and all adjacent frames stay
+in the same split. Seed 9301 generated 3,579 frames from 128 approaches. The
+single action has 839 successful frames and six fallen frames, but only 87/128
+approaches contain any successful window (`67.97%`); untouched validation is
+15/26. Its manifest/NPZ SHA-256 values are
+`0acebc40b56285075a35e02ea4407dc907e085f8421b513e614e450d6227f282`
+and `1e0e4fdf190b61735bf88d768961d5b45d797fa70da12884a4a2276f11cf1994`.
+This retains the timing route but rejects a single-prototype trigger. A small
+predeclared action bank is the next oracle-coverage gate; no selector or C++
+runtime integration is allowed before it passes held-out rollouts.
+
+The predeclared bank passes only as an oracle. Four prototypes selected on the
+102 training approaches cover 98 of them and 25/26 untouched approaches; all
+ten cover 26/26. The bank NPZ SHA-256 is
+`afb2bcfe40dd6d8f331bd41ef5b2256736ce92117c26b4254e13d4c4fea88988`.
+A grouped kNN policy realizes only 10/26, while the strongest MLP realizes
+15/26 overall (15/16 released, no falls). The selectors are rejected because
+oracle coverage does not imply online identifiability.
+
+Full teacher trajectories were therefore replayed from all 361 successful
+states. The resulting 54,511-sample v3 dataset uses 289/72 whole-episode
+train/validation groups and all eight phase buckets; its NPZ SHA-256 is
+`b49387323a1fe7982dfc10b405fbca8283bc88532b0397fa4488c764723b6dea`.
+Plain BC achieves validation MSE `5.53e-4` and ONNX parity `4.32e-7`, but exact
+physics passes 0/92 states, with 83 contacts and zero falls. DAgger round one
+passes 10/92. Round two passes 27/92, contacts in 92/92 and falls in 1/92. The
+round-two ONNX and report SHA-256 values are
+`b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1`
+and `978e8c5682dbc0001cf88b39dbc711cd4250d959672df9e07a866b0baf6e65c4`.
+This is meaningful growth but still a rejection at `29.35%` versus the 90%
+gate. A subsequent iteration must explicitly penalize learner falls; supervised
+loss and contact count are diagnostic only.
