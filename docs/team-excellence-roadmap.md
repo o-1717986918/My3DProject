@@ -36,7 +36,7 @@ levels below.
 
 ### C0: robust humanoid athlete
 
-- stable stand, walk, run, lateral motion, turn, brake, and stop;
+- stable stand, high-speed forward walk, lateral motion, turn, brake, and stop;
 - smooth transitions among movement, ball setup, contact, recovery, and get-up;
 - no non-finite outputs or unguarded learned-policy execution;
 - reach-time and fall-risk models calibrated from the real server;
@@ -98,7 +98,16 @@ levels below.
 
 ## Current capability baseline
 
-Accepted baseline: commit `793c5af`.
+Accepted competition baseline: commit `793c5af`.
+
+Active locomotion candidate checkpoint (2026-09-01): the complete phase-v2
+actor is wired into Apollo as opt-in `FastWalkV2`, with all 21 body joints
+owned by the actor and the two head joints retained by Apollo tracking. A
+900-cycle combined 7v7 gate passes with 14/14 clean exits and exercises fast
+walking, passing and parameterized kicking together. It is not promoted: the
+locked 10-second CPU result has 32/32 upright trials and 1.499 m/s median speed,
+but 5.452 m median lateral drift, while the server gate still spends too much
+time in get-up. The stable Apollo walk remains the competition default.
 
 Available now:
 
@@ -119,8 +128,8 @@ Binding capability gaps, in priority order:
    exist;
 2. the active motion layer ignores requested target speed/range and always
    executes the same forward-walk contact macro;
-3. the experimental run policy has not passed simulator, ONNX, server,
-   transition, and multi-seed promotion gates;
+3. the complete high-speed-walk actor passes wiring/coexistence but not lateral
+   drift, server fall-rate, transition, and multi-seed promotion gates;
 4. receiver readiness does not yet prove arrival, stable ball-facing posture,
    or a feasible first-touch window;
 5. the planner formally scores passes but does not compare shot, dribble,
@@ -153,15 +162,16 @@ Binding capability gaps, in priority order:
 
 ### A. Athletic motion
 
-- finish the phase-conditioned residual run policy;
+- adapt the complete phase-conditioned high-speed-walk actor to the RCSS server
+  domain without weakening its speed;
 - train and test forward speed, lateral motion, yaw, braking, stopping, command
   changes, light pushes, and recovery;
-- build transition guards among stand/walk/run, approach, kick, receive, block,
+- build transition guards among stand/walk/fast-walk, approach, kick, receive, block,
   and get-up;
 - fit action-specific reach time and fall probability rather than one constant
   player-speed assumption;
 - retain role-aware speed limits so defenders, receiver setup, and close ball
-  control do not use an unsafe sprint command.
+  control do not use an unsafe fast-walk command.
 
 ### B. Ball skill engine
 
@@ -238,7 +248,7 @@ Kick route:
 4. expand to 2, 3.5, and 5 m at `-30, -15, 0, 15, 30` degrees;
 5. expand to 5--10 m shot/clear actions;
 6. add setup, ball, friction, mass, PD, delay, noise, and push randomization;
-7. add moving-ball and walk/run-to-kick transitions.
+7. add moving-ball and walk/fast-walk-to-kick transitions.
 
 Kick gate:
 
@@ -257,7 +267,7 @@ Kick gate:
 - three training seeds, source/ONNX parity, no non-finite output, and safe
   fallback on every load/shape/inference failure.
 
-Run gate:
+High-speed-walk gate:
 
 - three seeds and at least 200 held-out episodes per seed;
 - `vx=1.5 m/s` for 10 s with at least 95% upright completion;
@@ -426,7 +436,7 @@ Deliverables:
 
 - goalkeeper intercept prediction, angle reduction, block, recover, and
   distribution;
-- striker receive/turn/finish and timed run behaviors;
+- striker receive/turn/finish and timed off-ball movement behaviors;
 - midfield support, circulation, pressure, and transition coverage;
 - defender marking, line/lane coverage, delay, interception, and clear;
 - role-specific action envelopes and motion-risk budgets;
@@ -541,7 +551,8 @@ capability gates.
 ## Priority from the current commit
 
 1. parameterized kick teacher/residual policy and server calibration;
-2. run-policy promotion in parallel, without displacing stable walking early;
+2. high-speed-walk adaptation and promotion in parallel, without displacing
+   stable walking early;
 3. complete receive/dribble/pass/shot/clear lifecycle;
 4. goalkeeper and role-specific capability;
 5. opponent-aware coordinated attack, defense, transition, and set plays;

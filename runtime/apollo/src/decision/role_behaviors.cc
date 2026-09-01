@@ -183,8 +183,8 @@ WalkCommand make_walk_command_avoiding(
     //   - strafe mode (close to the target, or a forced sideways mover such as
     //     the keeper): face the ball and drop the heading penalty, so short
     //     lateral adjustments run at the walk's natural lateral cap;
-    //   - sprint mode (far from the target): face the travel direction and keep
-    //     the penalty, so the player turns and runs forward at full speed, then
+    //   - fast-travel mode (far from the target): face the travel direction and keep
+    //     the penalty, so the player turns and walks forward at full speed, then
     //     re-faces the ball as it arrives (dist falls into strafe range).
     // A player travelling toward the ball (the AP) has travel ~= ball direction,
     // so the two modes coincide and its behavior is unchanged. The walk runner

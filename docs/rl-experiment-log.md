@@ -951,3 +951,35 @@ remain outside Git.
 K1 checkpoint verification: every changed/new Python file compiles; all 122
 training tests and all 50 root regression tests pass in WSL; both policy
 contracts and the K1 evidence lock parse as YAML; `git diff --check` passes.
+
+## Phase-v2 full high-speed-walk Apollo integration — 2026-09-01
+
+The selected phase-v2 locomotion model was integrated into the Apollo C++
+runtime as an opt-in `FastWalkV2` backend. Although its training contract and
+external directory retain the word `run`, locked CPU evaluation reports zero
+flight phase; the capability is therefore classified as high-speed walking.
+The model owns all 21 body-joint position targets at its exact 0.5 residual
+scale and 25/0.6 gains while Apollo retains head tracking. This is full policy
+execution, not the earlier low-weight posture blend.
+
+The first two 700-cycle gates produced zero fast-walk samples because the
+runtime initially assumed absolute position commands. Apollo's far-target
+planner actually emits body-local velocity commands; the corrected router
+enters the fast backend only for long-forward demand and retains stable walking
+for braking, reverse/lateral travel, sharp turns and goalkeeper behavior. A
+second defect switched backends whenever normal gait oscillation crossed the
+entry tilt/gyro thresholds. An entry/continuation hysteresis now preserves the
+same closed-loop policy until a functional route change or genuine loss of
+posture.
+
+| Strict 7v7 run | Fast-walk samples | Get-up samples | Other evidence |
+|---|---:|---:|---|
+| pre-hysteresis, 700 cycles, status/5 | 216 | 168 | 14/14 clean; one pass contact |
+| hysteresis, 700 cycles, status/5 | 503 | 125 | 14/14 clean; no fatal/illegal-defense errors |
+| all abilities, 900 cycles, status/2 | 1,374 | 499 | 25 parameterized kicks, 210 pass plans, 176 ready samples, one pass contact, 14/14 clean |
+
+The wiring and coexistence gate passes, but the get-up rate proves a remaining
+Apollo-server domain gap. `FastWalkV2` remains local-only and opt-in. The next
+locomotion experiment should train or adapt against Apollo/RCSS transition and
+disturbance states, with fall rate as a primary promotion metric; increasing
+nominal speed is not the next objective.

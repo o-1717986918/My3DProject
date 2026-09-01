@@ -93,6 +93,27 @@ case "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" in
         ;;
 esac
 
+case "${APOLLO_ENABLE_FAST_WALK:-0}" in
+    1)
+        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-}
+        fast_walk_sha256=c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b
+        if [[ -z "$fast_walk_model" || ! -f "$fast_walk_model" ]]; then
+            echo "APOLLO_FAST_WALK_MODEL must name the phase-v2 ONNX file" >&2
+            exit 2
+        fi
+        if [[ "$(sha256sum "$fast_walk_model" | cut -d " " -f 1)" != "$fast_walk_sha256" ]]; then
+            echo "APOLLO_FAST_WALK_MODEL failed the locked SHA-256 check" >&2
+            exit 2
+        fi
+        client_strategy_args+=(--enable-fast-walk --fast-walk-model "$fast_walk_model")
+        ;;
+    0) ;;
+    *)
+        echo "APOLLO_ENABLE_FAST_WALK must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+
 cleanup() {
     for pid in "${player_pids[@]:-}"; do
         kill "$pid" 2>/dev/null || true
@@ -290,6 +311,10 @@ getup_samples=$(
     { grep -Eh "MY3D_STATUS.*motion=GetUp" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
+fast_walk_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=FastWalkV2" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
 pass_plan_samples=$(
     { grep -Eh "MY3D_STATUS.*strategy=Pass" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
@@ -326,17 +351,22 @@ if [[ "${MATCH_REQUIRE_PASS:-0}" == 1 ]] && \
       [[ $targeted_pass_kick_samples -eq 0 ]] || [[ $pass_contact_events -eq 0 ]]; }; then
     pass_requirement_failed=1
 fi
+fast_walk_requirement_failed=0
+if [[ "${MATCH_REQUIRE_FAST_WALK:-0}" == 1 && $fast_walk_samples -eq 0 ]]; then
+    fast_walk_requirement_failed=1
+fi
 
 if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
     || $play_on -ne 14 || $failures -ne 0 || $server_errors -ne 0 \
     || $illegal_defense -ne 0 || $kick_requirement_failed -ne 0 \
     || $parameterized_kick_requirement_failed -ne 0 \
-    || $pass_requirement_failed -ne 0 ]]; then
+    || $pass_requirement_failed -ne 0 || $fast_walk_requirement_failed -ne 0 ]]; then
     echo "Apollo 7v7 acceptance failed: cycles=$max_cycles clean_exits=$clean_exits " \
         "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
         "server_errors=$server_errors illegal_defense=$illegal_defense " \
         "kick_samples=$kick_samples parameterized_kick_samples=$parameterized_kick_samples " \
         "getup_samples=$getup_samples " \
+        "fast_walk_samples=$fast_walk_samples " \
         "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
         "targeted_pass_kick_samples=$targeted_pass_kick_samples " \
         "pass_contact_events=$pass_contact_events " \
@@ -353,6 +383,7 @@ echo "Apollo 7v7 acceptance passed: cycles=$max_cycles clean_exits=$clean_exits 
     "server_errors=$server_errors illegal_defense=$illegal_defense " \
     "kick_samples=$kick_samples parameterized_kick_samples=$parameterized_kick_samples " \
     "getup_samples=$getup_samples " \
+    "fast_walk_samples=$fast_walk_samples " \
     "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
     "targeted_pass_kick_samples=$targeted_pass_kick_samples " \
     "pass_contact_events=$pass_contact_events " \

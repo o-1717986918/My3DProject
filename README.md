@@ -114,6 +114,34 @@ scripts/run_visual_match.sh 3000
 Logs are written below `artifacts/apollo-visual-match-<timestamp>/` and are
 ignored by Git.
 
+### Experimental full high-speed walk
+
+The retained phase-v2 asset has the historical contract name
+`run_policy_v2`, but its locked evaluations contain no flight phase. The
+competition runtime therefore exposes it as **high-speed walking** and reports
+`motion=FastWalkV2`; it is not described or scored as running.
+
+The backend applies the policy's complete joint-position output to all 21 body
+joints (head tracking remains owned by Apollo). It is not a low-weight posture
+blend. Long forward travel uses the phase policy continuously; goalkeeper,
+near-target braking, lateral/reverse travel, sharp turns and unsafe posture use
+the stable Apollo walk/get-up fallback. The local model is SHA-256 locked to
+`c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b`:
+
+```bash
+export APOLLO_ENABLE_FAST_WALK=1
+export APOLLO_FAST_WALK_MODEL="$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx"
+export MATCH_REQUIRE_FAST_WALK=1
+scripts/run_visual_match.sh 3000
+```
+
+This remains an opt-in experimental capability, not the packaged default. A
+900-cycle combined 7v7 gate produced 1,374 `FastWalkV2` status samples, 25
+parameterized-kick samples, 210 pass-plan samples and one physical pass contact
+with 14/14 clean exits, but also 499 get-up samples at a two-cycle status
+interval. The deployment is complete enough for visual/domain-gap collection;
+its fall rate is not yet competition-release quality.
+
 ## Package
 
 Build a self-contained competition archive:

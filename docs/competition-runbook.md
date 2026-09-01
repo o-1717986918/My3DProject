@@ -94,6 +94,21 @@ scripts/run_visual_match.sh 3000
 This is the same strict Apollo self-play path with rendering enabled. Evidence
 is retained under `artifacts/apollo-visual-match-<timestamp>/`.
 
+To opt into the complete phase-v2 high-speed walking backend while retaining
+stable near-ball/turning fallback:
+
+```bash
+APOLLO_ENABLE_FAST_WALK=1 \
+APOLLO_FAST_WALK_MODEL="$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx" \
+MATCH_REQUIRE_FAST_WALK=1 scripts/run_visual_match.sh 3000
+```
+
+`run_policy_v2` is a historical artifact/contract identifier. Its locked
+rollouts have zero flight phase, so runtime telemetry and project documentation
+call the capability `FastWalkV2`, not running. The launcher rejects a missing
+model and any model whose SHA-256 differs from
+`c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b`.
+
 ## 6. Package and inspect
 
 ```bash
@@ -124,6 +139,14 @@ training reward is higher. Promotion requires:
 4. multiple seeds with uprightness, fall-rate, speed, and energy criteria;
 5. strict 7v7, then visual 7v7, with same-cycle fallback retained.
 
+The opt-in `FastWalkV2` integration is deliberately below promotion. It uses
+the exact 80-to-23 observation/decoder contract and full 21-body-joint policy
+targets, preserves Apollo head tracking, and has a latched control handoff so
+normal gait oscillation cannot switch policies every frame. It has passed a
+combined 7v7 wiring gate but still falls materially more often than the stable
+Apollo walk. Use it for visual and simulator-domain data collection; do not
+enable it in a release package until multi-seed fall-rate gates pass.
+
 The current v4/GMR result stays in the training workbench because it needs an
 external restricted reference and its 80-value input is incompatible with the
 Apollo 78-value runtime observation. See `apollo-policy-migration.md`.
@@ -139,5 +162,8 @@ Apollo 78-value runtime observation. See `apollo-policy-migration.md`.
   the inclusive 4.0 m goalkeeper-area boundary.
 - No kick observed in a short gate: use 1200 or more cycles and status interval
   10 before treating it as a regression.
-- Run model rejected: do not bypass shape/hash/reference gates. Continue using
-  the native Apollo walk policy until a self-contained compatible export passes.
+- High-speed-walk model rejected at launch: verify the exact phase-v2 path and
+  SHA-256; do not bypass the hash gate.
+- Excess get-up activity with `FastWalkV2`: this is a known simulator-domain
+  gap. Preserve the stable fallback and collect the per-player gate/status logs;
+  do not relabel the result as release-ready locomotion.

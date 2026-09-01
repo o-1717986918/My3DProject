@@ -1,0 +1,91 @@
+schema_version: 1
+recorded_at: 2026-09-01
+stage: phase_v2_apollo_full_high_speed_walk
+status: experimental_opt_in_not_promoted
+
+classification:
+  public_name: high_speed_walk
+  runtime_motion_name: FastWalkV2
+  historical_contract_name: run_policy_v2
+  flight_phase_observed: false
+  running_claimed: false
+
+policy:
+  contract: training/contracts/run_policy_v2.yaml
+  local_path: /home/win98/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx
+  sha256: c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b
+  cpu_evaluation_path: /home/win98/rl_runs/run-phase-v2-formal-s71-20260831-01/eval-best-cpu-vx15.json
+  cpu_evaluation_sha256: e662f29b2e8581e30787bade48f2af2de10d0694a05a93793d273cc221f183e6
+  cpu_commanded_speed_mps: 1.5
+  cpu_upright_trials: 32
+  cpu_trials: 32
+  cpu_median_speed_mps: 1.4990445
+  cpu_median_lateral_drift_m: 5.45178
+  cpu_flight_fraction: 0.0
+
+runtime_contract:
+  body_joint_policy_ownership: 21_of_21
+  head_joint_ownership: apollo_head_tracker_2_of_2
+  permanent_posture_blend: false
+  action_scale: 0.5
+  gains: {kp: 25.0, kd: 0.6}
+  activation:
+    - play_on
+    - non_goalkeeper
+    - long_forward_demand
+    - low_turn_rate
+    - upright_entry_gate
+  stable_fallback:
+    - goalkeeper
+    - near_target_or_braking
+    - lateral_or_reverse_motion
+    - sharp_turn
+    - lost_posture
+    - non_finite_or_failed_inference
+  transition_hysteresis: strict_entry_relaxed_continuation
+
+strict_7v7:
+  fast_walk_only_gate:
+    cycles: 700
+    status_interval_cycles: 5
+    local_evidence_path: artifacts/apollo-fast-walk-headless-20260901-verify4
+    ordered_log_set_sha256: 9295b7935799e465f8e69cd958a2657c6530773b99c00dc6ed7102404713d4b6
+    clean_exits: 14
+    connections: 14
+    joins: 14
+    play_on_clients: 14
+    fast_walk_samples: 503
+    get_up_samples: 125
+    illegal_defense: 0
+    fatal_errors: 0
+    passed: true
+  all_abilities_gate:
+    cycles: 900
+    status_interval_cycles: 2
+    local_evidence_path: artifacts/apollo-all-abilities-headless-20260901
+    ordered_log_set_sha256: fe3e5271ba40bf6899a68f96a7947a0370dcaf632d5dc482eb17d5469abfb8d1
+    clean_exits: 14
+    connections: 14
+    joins: 14
+    play_on_clients: 14
+    fast_walk_samples: 1374
+    get_up_samples: 499
+    parameterized_kick_samples: 25
+    pass_plan_samples: 210
+    pass_ready_samples: 176
+    targeted_pass_kick_samples: 25
+    pass_contact_events: 1
+    illegal_defense: 0
+    fatal_errors: 0
+    passed: true
+
+decision:
+  runtime_wiring_complete: true
+  package_default: false
+  promoted: false
+  reason: full_policy_and_ability_coexistence_pass_but_fall_rate_and_lateral_drift_fail_release_quality
+  next:
+    - collect_apollo_transition_and_disturbance_states
+    - adapt_or_retrain_for_rcss_server_domain
+    - use_fall_rate_and_lateral_drift_as_primary_promotion_metrics
+    - do_not_optimize_nominal_speed_next

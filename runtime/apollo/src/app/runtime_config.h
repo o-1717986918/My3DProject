@@ -30,6 +30,13 @@ struct RuntimeConfig {
     /// The validated fixed forward contact remains the default until server
     /// calibration passes the R1 promotion gate.
     bool enable_parameterized_kick{false};
+    /// Enables full-body ownership by the experimental phase-v2 fast-walk
+    /// actor on supported long, forward travel commands. Unsupported commands
+    /// retain the original stable walk and get-up paths.
+    bool enable_fast_walk{false};
+    /// Explicit external-local ONNX path. The restricted research model is
+    /// never bundled into the competition asset tree.
+    std::string fast_walk_model;
 
     /// Parses supported command-line options and preserves unspecified defaults.
     static RuntimeConfig from_args(int argc, char* argv[]);

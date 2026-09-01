@@ -229,6 +229,7 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << " ball_vy=" << snapshot.ball.velocity_mps[1]
             << " x=" << snapshot.self.position_m[0]
             << " y=" << snapshot.self.position_m[1]
+            << " z=" << snapshot.self.position_m[2]
             << " self_yaw=" << self_yaw_deg
             << " kick_speed=" << (kick_command != nullptr
                     ? kick_command->requested_ball_speed_mps

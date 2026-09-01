@@ -36,12 +36,15 @@ int main() {
         "--host", "localhost", "--port", "61000", "--max-cycles", "800",
         "--status-interval", "20",
         "--disable-pass-strategy", "--enable-parameterized-kick",
+        "--enable-fast-walk", "--fast-walk-model", "/tmp/fast-walk.onnx",
     });
 
     if (config.team_name != "My3D" || config.player_number != 7 ||
         config.host != "localhost" || config.port != 61000 ||
         config.max_cycles != 800U || config.status_interval_cycles != 20U ||
-        config.enable_pass_strategy || !config.enable_parameterized_kick) {
+        config.enable_pass_strategy || !config.enable_parameterized_kick ||
+        !config.enable_fast_walk ||
+        config.fast_walk_model != "/tmp/fast-walk.onnx") {
         std::cerr << "valid runtime arguments were not parsed correctly\n";
         return 1;
     }
@@ -58,6 +61,10 @@ int main() {
         std::cerr << "experimental parameterized kick was enabled by default\n";
         return 1;
     }
+    if (safe_default.enable_fast_walk || !safe_default.fast_walk_model.empty()) {
+        std::cerr << "experimental fast walk was enabled by default\n";
+        return 1;
+    }
 
     const app::RuntimeConfig kick_disabled = parse({
         "ApolloCodeBase", "--enable-parameterized-kick",
@@ -71,7 +78,10 @@ int main() {
         !throws_invalid_argument([] { parse({"ApolloCodeBase", "--player-number", "8"}); }) ||
         !throws_invalid_argument([] { parse({"ApolloCodeBase", "--max-cycles", "0"}); }) ||
         !throws_invalid_argument([] { parse({"ApolloCodeBase", "--status-interval", "0"}); }) ||
-        !throws_invalid_argument([] { parse({"ApolloCodeBase", "--team"}); })) {
+        !throws_invalid_argument([] { parse({"ApolloCodeBase", "--team"}); }) ||
+        !throws_invalid_argument([] {
+            parse({"ApolloCodeBase", "--enable-fast-walk"});
+        })) {
         std::cerr << "invalid runtime arguments were not rejected\n";
         return 1;
     }

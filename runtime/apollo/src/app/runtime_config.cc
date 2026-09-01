@@ -64,11 +64,21 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
             config.enable_parameterized_kick = true;
         } else if (arg == "--disable-parameterized-kick") {
             config.enable_parameterized_kick = false;
+        } else if (arg == "--enable-fast-walk") {
+            config.enable_fast_walk = true;
+        } else if (arg == "--disable-fast-walk") {
+            config.enable_fast_walk = false;
+        } else if (arg == "--fast-walk-model") {
+            config.fast_walk_model = require_value("--fast-walk-model");
         }
     }
 
     if (config.player_number < 1 || config.player_number > 7) {
         throw std::invalid_argument("--player-number must be in 1..7");
+    }
+    if (config.enable_fast_walk && config.fast_walk_model.empty()) {
+        throw std::invalid_argument(
+            "--enable-fast-walk requires --fast-walk-model");
     }
 
     return config;

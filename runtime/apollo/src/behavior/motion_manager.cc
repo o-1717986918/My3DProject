@@ -12,7 +12,11 @@
 namespace behavior {
 
 MotionManager::MotionManager(const app::RuntimeConfig& config)
-    : walk_runner_(config.resolve_asset_path("networks/walk/policy.onnx")),
+    : walk_runner_(
+          config.resolve_asset_path("networks/walk/policy.onnx"),
+          config.enable_fast_walk
+              ? std::optional<std::filesystem::path>{config.fast_walk_model}
+              : std::nullopt),
       neutral_runner_(config.resolve_asset_path("keyframes/neutral.yaml")),
       getup_runner_(config.resolve_asset_path("networks/getup/policy.onnx")),
       parameterized_kick_enabled_(config.enable_parameterized_kick) {
@@ -43,7 +47,10 @@ MotionStepResult MotionManager::step(
     if (const auto* walk = std::get_if<decision::WalkCommand>(&command)) {
         reset_get_up_state();
         const auto result = walk_runner_.step(snapshot, *walk, reset, walk->role_id);
-        return {true, "Walk", result.joint_targets};
+        return {
+            true,
+            result.fast_walk_active ? "FastWalkV2" : "Walk",
+            result.joint_targets};
     }
 
     if (const auto* kick = std::get_if<decision::KickCommand>(&command)) {
