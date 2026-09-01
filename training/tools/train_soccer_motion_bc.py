@@ -108,6 +108,9 @@ def main() -> None:
         observation_size=contract.observation_size,
         action_size=contract.action_size,
     )
+    anchored_base_action = np.clip(
+        data["base_action"], *contract.action_clip
+    ).astype(np.float32)
     base_params = ppo_checkpoint.load(args.base_checkpoint)
     checkpoint_config = ppo_checkpoint.load_config(args.base_checkpoint)
     preprocess = (
@@ -196,6 +199,7 @@ def main() -> None:
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "base_anchor_weight": args.base_anchor_weight,
+        "base_anchor_target": "base_actor_action_clipped_to_policy_contract",
         "action_bound_weight": args.action_bound_weight,
         "seed": args.seed,
         "train_samples": int(np.sum(data["split"] == 0)),
@@ -231,7 +235,7 @@ def main() -> None:
                 optimizer_state,
                 jp.asarray(data["observation"][indices]),
                 jp.asarray(data["teacher_action"][indices]),
-                jp.asarray(data["base_action"][indices]),
+                jp.asarray(anchored_base_action[indices]),
             )
             if step % report_interval == 0 or step == 1 or step == args.steps:
                 validation_prediction = np.asarray(
@@ -302,13 +306,13 @@ def main() -> None:
             "train": action_error_metrics(
                 train_prediction,
                 data["teacher_action"][train_mask],
-                data["base_action"][train_mask],
+                anchored_base_action[train_mask],
                 data["motion"][train_mask],
             ),
             "validation": action_error_metrics(
                 validation_prediction,
                 data["teacher_action"][validation_mask],
-                data["base_action"][validation_mask],
+                anchored_base_action[validation_mask],
                 data["motion"][validation_mask],
             ),
             "checkpoint": str(checkpoint_path.resolve()),
