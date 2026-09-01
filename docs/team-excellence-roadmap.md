@@ -519,6 +519,19 @@ This advances work to R1 ball contact and motion transition only. It still does
 not authorize Apollo runtime deployment, reward-only PPO, or any claim of a
 complete football skill.
 
+K2-A contact/recovery checkpoint (2026-09-02): exact RCSS-ball replay shows why
+K1-D alone is not a kick: the full 13-motion/lead-time screen produces useful
+impulse but zero stable trials. A one-frame handoff after correct-foot contact
+to Apollo's retained zero-command walk controller changes the outcome. Motion
+12 frames 113--118 pass three predeclared 120-trial perturbation seeds with
+360/360 correct-foot contacts, 360/360 stable screening completions, zero falls,
+zero wrong-foot contacts and a 3.66--4.77 m progress range. This becomes the
+fixed K2-A training baseline only. It is not target-conditioned, does not cover
+approach/moving-ball entry and remains outside the runtime. Next is a versioned
+ball/target-conditioned contract initialized from K1-D, followed by controlled
+2/3.5/5 m direction and arrival-speed training. Evidence is locked in
+`training/locks/paid_k2a_2026_09_02.yaml`.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

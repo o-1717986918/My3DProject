@@ -1219,3 +1219,34 @@ improvements and 294 regressions. Tracking passes twice and every motion avoids
 a net completion loss. The K1-D checkpoint is now the retained training actor.
 It advances the roadmap to ball-contact and motion-transition development, not
 to Apollo runtime deployment.
+
+## PAiD K2-A motion-guided contact/recovery gate — 2026-09-02
+
+The first exact-ball audit prevents overclaiming the K1-D result. PAiD-style
+endpoint placement over 91 motion/lead-time cases yields eight correct-foot
+contacts, but 86 falls, five initial overlaps and no stable success. Motion 12
+still transfers useful physical impulse, including a 1.98 m exploratory result.
+K1-D, K1-B and zero residual all fall on the same contact states, locating the
+failure in the post-contact reference rather than in one clone checkpoint.
+
+Direct blends to the default pose at 1, 5, 10, 20 and 40 frames all fail. The
+retained Apollo walk actor with a zero command is a dynamic balance controller,
+however: switching one frame after correct-foot contact gives a contiguous
+nominal window at motion-12 frames 113--118. The predeclared robustness protocol
+then evaluates 20 perturbation replicas per frame on seeds 20260986--20260988.
+
+Every seed passes 120/120 correct-foot contacts and 120/120 stable screenings,
+with no fall, wrong-foot contact, initial overlap or non-finite state. Median
+progress is 4.133, 4.177 and 4.142 m and the global range is 3.659--4.765 m.
+Canonical reports bind clean revision `6d361d3` and the retained checkpoint
+tree hash `6615b6a9...`. The first reports are not evidence because they used a
+different tree-fingerprint encoding and lacked Git-clean provenance; clean
+`v2` reports reproduce their physics exactly.
+
+The fixed motion-12 plus immediate Apollo recovery composition is retained as
+the K2-A training baseline, not promoted to Apollo runtime. It has no requested
+range, target-angle, arrival-speed, approach or moving-ball capability. The next
+experiment adds a versioned ball/target observation boundary initialized from
+K1-D and trains the 2/3.5/5 m conditional skill without weakening this recovery
+fallback. Full hashes and stop rules are in
+`training/locks/paid_k2a_2026_09_02.yaml`.

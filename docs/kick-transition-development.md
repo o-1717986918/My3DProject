@@ -358,6 +358,43 @@ The accepted continuation is not more PPO steps on this reward. It is:
 5. require three exact seeds, ONNX/source parity and server replay before any
    C++ runtime integration.
 
+## K2-A motion-guided contact and Apollo recovery baseline
+
+K1-D was first replayed against the exact RCSS ball using PAiD's endpoint
+placement rule. This corrected an important interpretation error: relative
+motion-tracking promotion did not imply a complete kick. Across 91 full-corpus
+motion/lead-time trials, the actor produced eight correct-foot contacts, but 86
+trials fell and five started in collision. No trial passed contact plus 8 cm
+progress plus upright completion. The strongest motion nevertheless moved the
+ball 1.98 m, establishing useful impulse before a stable transition existed.
+
+The failure was isolated to post-contact ownership. Blending directly to the
+default joint pose at five different rates still allowed the torso to sink
+below 0.35 m. Switching one control frame after correct-foot contact to the
+retained Apollo walk actor with a zero command instead stabilizes motion 12.
+The nominal contiguous entry window is frames 113--118; it keeps the original
+K1-D motion actor before contact and uses Apollo only for dynamic recovery.
+
+That controller composition passes the predeclared exact-CPU robustness gate.
+Seeds 20260986, 20260987 and 20260988 each evaluate 120 unique cases over the
+six entry frames, with joint, root-velocity, yaw, ball-radius and ball-arc
+perturbations. All three produce 120/120 correct-foot contacts, 120/120 stable
+screening successes, zero falls, zero wrong-foot contacts and zero non-finite
+states. Median progress is 4.13, 4.18 and 4.14 m; the complete observed range is
+3.66--4.77 m. Reports bind clean revision `6d361d3`, the canonical K1-D tree
+hash and unique reset/ball seeds. The earlier `v1` reports are invalidated only
+because their checkpoint fingerprint algorithm was noncanonical and they did
+not record Git cleanliness; canonical `v2` reports reproduce the physics.
+
+This is the retained K2-A *training baseline*, not a runtime kick. It proves a
+fixed roughly 4 m contact-and-recovery envelope under small perturbations. It
+does not accept requested range, direction, arrival speed, walking entry or a
+moving ball. The next policy contract must preserve the K1-D motion features,
+add egocentric ball/target commands, initialize new input columns without
+destroying the retained actor, and learn target-conditioned contact before any
+server integration. Immutable paths and hashes are in
+`training/locks/paid_k2a_2026_09_02.yaml`.
+
 ## Implementation route
 
 ### K1. Version the transition contract
@@ -440,6 +477,10 @@ Only then expand to 3.5/5 m, angle bins, shot/clear, and moving-ball entries.
       evaluator;
 - [ ] beat the deterministic prior with a privileged teacher on untouched
       exact-CPU rollouts, then distil a 50-frame history student;
+- [x] retain a three-seed exact-CPU motion-12 contact baseline with immediate
+      Apollo post-contact recovery and zero falls;
+- [ ] add a ball/target-conditioned K2 contract and train range/direction above
+      the retained contact-and-recovery baseline;
 - [ ] add the guarded C++ kick-policy runner and same-cycle fallback tests;
 - [ ] rerun the central 2 m CPU and 7v7 server gates;
 - [ ] update this record and the R1 checkpoint with immutable artifact hashes.

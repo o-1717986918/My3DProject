@@ -1,7 +1,7 @@
 schema_version: 1
 recorded_at: 2026-09-02
 stage: paid_k2a_motion_guided_contact_recovery
-status: predeclared_before_robustness_evaluation
+status: three_seed_robustness_gate_passed_training_baseline_retained
 
 source:
   retained_motion_checkpoint: /home/win98/rl_runs/paid-k1/k1d-crossfit-bc-s20260982-v2/checkpoints/000000001000
@@ -78,3 +78,74 @@ next_if_passed:
   - preserve_k1d_motion_features_and_initialize_new_ball_input_columns_to_zero
   - train_fixed_range_contact_and_recovery_before_2_3_5m_range_conditioning
   - retain_apollo_walk_as_same_cycle_fallback_and_post_contact_controller
+
+implementation_evidence:
+  initial_evaluator_revision: 65ce3b5
+  canonical_evidence_revision: 6d361d3e9ad0a16b1d89fd5b22927b4ce79a5d7b
+  targeted_tests_passed: 12
+  checkpoint_tree_hash_algorithm: sha256_over_sorted_posix_relative_path_nul_file_sha256_hex_newline
+  canonical_checkpoint_tree_sha256: 6615b6a9ea6a77e38d9f382186064e05375c9b61e6fa4c5c0c1d9df52a1c537a
+  invalidated_formal_v1:
+    reason: report_used_a_noncanonical_checkpoint_tree_fingerprint_algorithm_and_did_not_record_git_cleanliness
+    physical_results_used_for_selection_or_claims: false
+    replacement: canonical_clean_v2_reports_below
+
+formal_results:
+  all_gates_passed: true
+  aggregate_trials: 360
+  aggregate_correct_foot_contacts: 360
+  aggregate_stable_screening_passes: 360
+  aggregate_falls: 0
+  aggregate_wrong_foot_contacts: 0
+  aggregate_non_finite_states: 0
+  seed_20260986:
+    report: /home/win98/rl_runs/paid-k2/k2a-robust-formal-s20260986-v2/report.json
+    report_sha256: 5998e31640b29ec694fa93b5e4c079cdc57db3e8d36502f5b489019adfed6d70
+    trials: 120
+    correct_foot_contacts: 120
+    stable_screening_passes: 120
+    falls: 0
+    wrong_foot_contacts: 0
+    median_progress_m: 4.13327813727088
+    progress_range_m: [3.7582982407108854, 4.728682559146154]
+    unique_reset_seeds: 120
+    unique_ball_seeds: 120
+  seed_20260987:
+    report: /home/win98/rl_runs/paid-k2/k2a-robust-formal-s20260987-v2/report.json
+    report_sha256: 334a01a752ae42bf11a0db409defb6dcccc8d02a55400df7bdb260e4640a6713
+    trials: 120
+    correct_foot_contacts: 120
+    stable_screening_passes: 120
+    falls: 0
+    wrong_foot_contacts: 0
+    median_progress_m: 4.177201992697572
+    progress_range_m: [3.659237149859674, 4.75307552057844]
+    unique_reset_seeds: 120
+    unique_ball_seeds: 120
+  seed_20260988:
+    report: /home/win98/rl_runs/paid-k2/k2a-robust-formal-s20260988-v2/report.json
+    report_sha256: 83c12a78bb900473ae657958e6579fa3b5c13e999a17a695a93963964b0a7346
+    trials: 120
+    correct_foot_contacts: 120
+    stable_screening_passes: 120
+    falls: 0
+    wrong_foot_contacts: 0
+    median_progress_m: 4.142051395375068
+    progress_range_m: [3.698105266266406, 4.765342308894277]
+    unique_reset_seeds: 120
+    unique_ball_seeds: 120
+
+decision:
+  retained_k2a_training_baseline: motion12_frames_113_through_118_then_immediate_apollo_stand
+  proven_scope:
+    - fixed_motion_window_correct_foot_ball_contact
+    - immediate_post_contact_apollo_recovery
+    - bounded_small_reset_and_ball_endpoint_perturbations
+  explicitly_unproven:
+    - requested_distance_or_arrival_speed
+    - target_direction_generalization
+    - approach_or_high_speed_walk_entry
+    - moving_ball_contact
+    - server_or_apollo_runtime_execution
+  runtime_promotion_authorized: false
+  target_conditioned_k2_development_authorized: true
