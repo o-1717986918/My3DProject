@@ -477,6 +477,13 @@ additional locked training seeds, a common disjoint final perturbation grid,
 a median-seed rule and a second confirmation perturbation grid are required
 before the checkpoint can advance to ball-contact work.
 
+The three-seed family does not pass: all seeds avoid net completion loss, but
+the median delta is 0.00965 rather than the locked 0.01 and only one of three
+passes paired promotion. The confirmation seed remains untouched. An equal
+average of the three aligned one-step parameter deltas is now the bounded
+variance-reduction experiment, with separate selection and confirmation
+perturbation seeds. Failure leaves the state-feedback clone unchanged.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

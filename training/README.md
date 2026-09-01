@@ -385,6 +385,25 @@ Changing the perturbation seed creates a disjoint deterministic state grid
 while retaining the same phase coverage. This prevents repeated model
 selection from exhausting the finite set of motion start frames.
 
+When several PPO runs start from the same checkpoint and execute the same small
+update, their parameter coordinates remain aligned. The formal averaging tool
+requires identical network signatures, records all source tree hashes, and
+averages actor and critic leaves equally. Because this profile disables
+observation normalization, it copies the explicitly supplied retained-base
+normalizer instead of averaging Brax's still-updated statistic containers:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/average_soccer_motion_checkpoints.py \
+  /path/to/seed-a/checkpoint /path/to/seed-b/checkpoint \
+  /path/to/seed-c/checkpoint --base-checkpoint /path/to/retained/base \
+  --step 196608 \
+  --output-dir /home/win98/rl_runs/paid-k1/ppo-average-<name>
+```
+
+Parameter averaging is a new candidate, not a way to override a failed
+multi-seed gate. It receives its own disjoint selection and confirmation grids.
+
 After a single-motion K1-A gate passes, generate independent teachers for the
 entire locked corpus with the resumable batch orchestrator:
 

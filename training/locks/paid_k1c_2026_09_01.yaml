@@ -1,7 +1,7 @@
 schema_version: 1
 recorded_at: 2026-09-01
 stage: paid_k1c_evidence_bound_ppo_resume
-status: conservative_resume_selected_multiseed_final_predeclared
+status: multiseed_family_rejected_equal_average_predeclared
 
 source:
   retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
@@ -170,11 +170,97 @@ multiseed_final_predeclaration:
     require_exact_grid_promotion_or_curriculum_advance: true
   runtime_promotion: false
 
+multiseed_training_artifacts:
+  seed_20260969:
+    git_revision: c4a6a1fe3a19db427b3a46ba4c4c38a7d9d74dc4
+    run_manifest_sha256: 85f035fcbc7a4c9552d8debdf92289b785069e4243ce101eac13ac225f4faf83
+    progress_jsonl_sha256: 3a4c0caf2903e0d30eb5a4804c4095cd9ddfdab98b84efa009dde97cda2f3850
+    tensorboard_event_sha256: dbaec43f32149f9633399b3b3f83bdc404864ccbbf598527f4ce36f36566725b
+    checkpoint_tree_sha256: 9ec2e8306a774c429d7e894a2c2c35883858777cba3c15cf8600119948ac4843
+    timestep_accounting_passed: true
+  seed_20260970:
+    git_revision: c4a6a1fe3a19db427b3a46ba4c4c38a7d9d74dc4
+    run_manifest_sha256: 22b2b24beaaefeccbd011faf79c593505339fc5aab853dc6f4914163aa110b70
+    progress_jsonl_sha256: e7b753d423cf35a51f50f99485899a4e07c4b6e2d93abc9068c06c33f5695ba9
+    tensorboard_event_sha256: 886b14b81574baffbeee32e40f45be8414c142a99be2805c7c39624f048a302f
+    checkpoint_tree_sha256: f6cd793898c087346433575f964fc0080bb8f7e0d2de86a35598c84bb16b565a
+    timestep_accounting_passed: true
+
+multiseed_final_result:
+  perturbation_seed: 20260968
+  paired_trials_per_seed: 518
+  baseline_report_sha256: 43c485620e30069c13f5ee66e22657e718bb641eee2931db5ea6a0b41f14c0bd
+  baseline_completions: 178
+  seeds:
+    seed_20260966:
+      report_sha256: df619a74bcb7008a6a39fea40ae071cd3fb70327c54ed57a451a5f3c4412b463
+      comparison_sha256: 9f11e2e8a382bb9e876e5d9c0f8ba922b79d0c04e8056e3de4c5568a852fe39f
+      completions: 186
+      completion_rate_delta: 0.0154440154
+      mean_survival_fraction_delta: 0.0123878623
+      promotion_passed: true
+      tracking_tolerance_passed: true
+    seed_20260969:
+      report_sha256: dbe26ef2fdb5761bcb97606a065177fae3aa687366563a3f4df3ca13c3275fb0
+      comparison_sha256: b491221ffaf5cd4899ef6dbfb8ac6369b73c3499c4e9609929191fe3848397e5
+      completions: 183
+      completion_rate_delta: 0.0096525097
+      mean_survival_fraction_delta: -0.0054528578
+      promotion_passed: false
+      tracking_tolerance_passed: true
+    seed_20260970:
+      report_sha256: d9957f2cf05805ce7fdc95f5464ff212f4f923896845b43e0821b1d90ad6722e
+      comparison_sha256: 74a4f0d236eb4f604039c11ff7e7333be4dfd3aca8fa72898d57faff1a8c55ce
+      completions: 181
+      completion_rate_delta: 0.0057915058
+      mean_survival_fraction_delta: 0.0043448446
+      promotion_passed: false
+      tracking_tolerance_passed: true
+  family_gate:
+    all_three_timestep_accounting_passed: true
+    all_three_tracking_tolerance_passed: true
+    no_seed_has_net_completion_loss: true
+    median_completion_rate_delta: 0.0096525097
+    median_completion_rate_delta_at_least_0_01: false
+    promotion_pass_count: 1_of_3
+    at_least_two_promotion_passes: false
+    passed: false
+  representative_confirmation_seed_20260971_used: false
+  decision: reject_v4_family_keep_state_feedback_clone
+
+equal_parameter_average_predeclaration:
+  rationale: all_runs_share_one_initialization_and_one_small_update_so_parameter_permutations_remain_aligned
+  inputs:
+    - /home/win98/rl_runs/paid-k1/k1c-ppo-reference-v4-s20260966-v1/checkpoints/000000196608
+    - /home/win98/rl_runs/paid-k1/k1c-ppo-reference-v4-s20260969-v1/checkpoints/000000196608
+    - /home/win98/rl_runs/paid-k1/k1c-ppo-reference-v4-s20260970-v1/checkpoints/000000196608
+  retained_base_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
+  weights:
+    - 0.3333333333333333
+    - 0.3333333333333333
+    - 0.3333333333333333
+  aggregation: arithmetic_mean_of_aligned_actor_and_critic_parameters
+  normalizer_rule: normalization_is_disabled_so_copy_the_retained_base_normalizer_and_do_not_average_updated_statistic_containers
+  selection_grid:
+    phase_samples: 2000
+    expected_trials: 518
+    minimum_per_motion: 17
+    perturbation_seed: 20260972
+    reset_joint_noise: 0.002
+    reset_root_velocity_noise: 0.005
+    reset_yaw_range: 0.01
+  selection_gate: exact_grid_promotion_passed_or_curriculum_advance_passed
+  confirmation_grid_if_selected:
+    perturbation_seed: 20260973
+    same_phase_and_noise_envelope: true
+    seed_disjoint_from_all_prior_perturbation_grids: true
+    require_exact_grid_promotion_or_curriculum_advance: true
+  runtime_promotion: false
+
 decision:
   current_retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
   next:
-    - train_seeds_20260969_and_20260970_from_the_same_retained_checkpoint
-    - evaluate_all_three_once_on_perturbation_seed_20260968
-    - apply_the_predeclared_family_gate_and_representative_rule
-    - confirm_the_representative_once_on_perturbation_seed_20260971
+    - create_the_predeclared_equal_parameter_average_from_all_three_v4_runs
+    - evaluate_once_on_perturbation_seed_20260972
+    - confirm_once_on_perturbation_seed_20260973_only_if_selected
     - keep_all_models_out_of_apollo_until_ball_and_server_gates_pass

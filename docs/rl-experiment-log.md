@@ -1124,3 +1124,21 @@ all, no seed with a net completion loss, median completion delta at least 0.01,
 and at least two exact-grid promotion passes. The median seed is then confirmed
 once on disjoint perturbation seed `20260971`. This prevents selecting the best
 of three noisy runs and reporting it as an untouched result.
+
+The family gate fails as written. On perturbation seed `20260968`, completion
+deltas for the three runs are +0.01544, +0.00965 and +0.00579. All preserve
+tracking and avoid a net completion loss, but the median is `0.00965 < 0.01`
+and only seed `20260966` passes the exact-grid promotion test. Seed `20260969`
+also reduces mean survival by 0.00545. The reserved representative confirmation
+seed `20260971` is not opened, and the state-feedback clone remains retained.
+
+The next candidate is an equal parameter average of the three aligned one-step
+updates. This is well-defined because all runs share one initialization and
+architecture; averaging their small deltas estimates the mean update rather
+than mixing independently permuted networks. Observation normalization is
+disabled, but Brax still updates the statistic containers, so the formal tool
+copies the retained-base normalizer instead of averaging or ignoring this
+difference. It checks the remaining invariants and hashes every input. The
+average is predeclared for a new
+selection perturbation seed `20260972` and, only if it passes, confirmation seed
+`20260973`. It does not inherit the failed family's release status.
