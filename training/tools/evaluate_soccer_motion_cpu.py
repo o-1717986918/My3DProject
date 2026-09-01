@@ -28,6 +28,44 @@ from my3d_rl.t1_control import apollo_joint_gains
 REPOSITORY_ROOT = Path(__file__).parents[2]
 
 
+def _case_seed(base_seed: int, motion: int, start_frame: int) -> int:
+    if min(base_seed, motion, start_frame) < 0:
+        raise ValueError("perturbation seed inputs must be non-negative")
+    return int(
+        np.random.SeedSequence([base_seed, motion, start_frame]).generate_state(
+            1, dtype=np.uint64
+        )[0]
+    )
+
+
+def _yaw_quaternion_rotate(quaternion: np.ndarray, yaw: float) -> np.ndarray:
+    half = 0.5 * yaw
+    yaw_w = np.cos(half)
+    yaw_z = np.sin(half)
+    w, x, y, z = quaternion
+    return np.asarray(
+        [
+            yaw_w * w - yaw_z * z,
+            yaw_w * x - yaw_z * y,
+            yaw_w * y + yaw_z * x,
+            yaw_w * z + yaw_z * w,
+        ],
+        dtype=np.float64,
+    )
+
+
+def _yaw_vector_rotate(vector: np.ndarray, yaw: float) -> np.ndarray:
+    cosine, sine = np.cos(yaw), np.sin(yaw)
+    return np.asarray(
+        [
+            cosine * vector[0] - sine * vector[1],
+            sine * vector[0] + cosine * vector[1],
+            vector[2],
+        ],
+        dtype=np.float64,
+    )
+
+
 def _start_frames(
     length: int,
     samples: int,
@@ -147,6 +185,14 @@ def main() -> None:
         help="repeat to exclude grids already used for model or hyperparameter selection",
     )
     parser.add_argument("--minimum-evaluated-starts", type=int, default=4)
+    parser.add_argument(
+        "--perturbation-seed",
+        type=int,
+        help="non-negative base seed for deterministic per-case reset perturbations",
+    )
+    parser.add_argument("--reset-joint-noise", type=float, default=0.0)
+    parser.add_argument("--reset-root-velocity-noise", type=float, default=0.0)
+    parser.add_argument("--reset-yaw-range", type=float, default=0.0)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.zero_policy == (args.checkpoint is not None):
@@ -155,8 +201,21 @@ def main() -> None:
         args.phase_samples < 1
         or args.minimum_remaining_frames < 2
         or args.minimum_evaluated_starts < 1
+        or args.reset_joint_noise < 0.0
+        or args.reset_root_velocity_noise < 0.0
+        or args.reset_yaw_range < 0.0
+        or (args.perturbation_seed is not None and args.perturbation_seed < 0)
     ):
         raise ValueError("invalid fixed phase grid")
+    if args.perturbation_seed is None and any(
+        value > 0.0
+        for value in (
+            args.reset_joint_noise,
+            args.reset_root_velocity_noise,
+            args.reset_yaw_range,
+        )
+    ):
+        raise ValueError("reset perturbations require --perturbation-seed")
     contract = load_policy_contract(args.contract)
     profile = get_ppo_profile(args.profile)
     if profile.policy_contract != contract.policy_name:
@@ -237,20 +296,65 @@ def main() -> None:
                 f"minimum is {args.minimum_evaluated_starts}"
             )
         for start in starts:
+            perturbation_case_seed = (
+                _case_seed(args.perturbation_seed, motion, start)
+                if args.perturbation_seed is not None
+                else None
+            )
+            rng = (
+                np.random.default_rng(perturbation_case_seed)
+                if perturbation_case_seed is not None
+                else None
+            )
+            yaw = (
+                float(rng.uniform(-args.reset_yaw_range, args.reset_yaw_range))
+                if rng is not None
+                else 0.0
+            )
+            joint_noise = (
+                rng.uniform(
+                    -args.reset_joint_noise,
+                    args.reset_joint_noise,
+                    size=contract.action_size,
+                )
+                if rng is not None
+                else np.zeros(contract.action_size, dtype=np.float64)
+            )
+            velocity_noise = (
+                rng.uniform(
+                    -args.reset_root_velocity_noise,
+                    args.reset_root_velocity_noise,
+                    size=6,
+                )
+                if rng is not None
+                else np.zeros(6, dtype=np.float64)
+            )
             data = mujoco.MjData(model)
             data.qpos[:] = model.qpos0
             data.qvel[:] = 0.0
             data.qpos[root_qpos : root_qpos + 2] = model_root_xy
             data.qpos[root_qpos + 2] = corpus.root_position[motion, start, 2]
             data.qpos[root_qpos + 3 : root_qpos + 7] = (
-                corpus.root_quaternion_wxyz[motion, start]
+                _yaw_quaternion_rotate(
+                    corpus.root_quaternion_wxyz[motion, start], yaw
+                )
             )
-            data.qpos[joint_qpos] = corpus.joint_position[motion, start]
+            data.qpos[joint_qpos] = np.clip(
+                corpus.joint_position[motion, start] + joint_noise,
+                lower,
+                upper,
+            )
             data.qvel[root_dof : root_dof + 3] = (
-                corpus.root_linear_velocity[motion, start]
+                _yaw_vector_rotate(
+                    corpus.root_linear_velocity[motion, start], yaw
+                )
+                + velocity_noise[:3]
             )
             data.qvel[root_dof + 3 : root_dof + 6] = (
-                corpus.root_angular_velocity[motion, start]
+                _yaw_vector_rotate(
+                    corpus.root_angular_velocity[motion, start], yaw
+                )
+                + velocity_noise[3:]
             )
             data.qvel[joint_dof] = corpus.joint_velocity[motion, start]
             data.ctrl[tau_actuator] = 0.0
@@ -326,6 +430,7 @@ def main() -> None:
                     "motion": motion,
                     "relative_path": relative_path,
                     "start_frame": start,
+                    "perturbation_seed": perturbation_case_seed,
                     "length": length,
                     "completed": completed,
                     "terminal_frame": terminal_frame,
@@ -363,7 +468,7 @@ def main() -> None:
             }
         )
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "purpose": "k1_exact_cpu_fixed_motion_phase_grid",
         "engine": f"MuJoCo {mujoco.__version__}",
         "policy": "zero_residual" if args.zero_policy else "checkpoint",
@@ -374,6 +479,14 @@ def main() -> None:
         "phase_samples": args.phase_samples,
         "minimum_remaining_frames": args.minimum_remaining_frames,
         "minimum_evaluated_starts": args.minimum_evaluated_starts,
+        "reset_perturbation": {
+            "base_seed": args.perturbation_seed,
+            "joint_noise": args.reset_joint_noise,
+            "root_velocity_noise": args.reset_root_velocity_noise,
+            "yaw_range": args.reset_yaw_range,
+            "generator": "numpy_default_rng_seedsequence_v1",
+            "numpy_version": np.__version__,
+        },
         "excluded_starts_dataset": (
             str(args.exclude_starts_dataset.resolve())
             if args.exclude_starts_dataset

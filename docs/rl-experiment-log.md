@@ -1088,3 +1088,22 @@ therefore rejected. The trainer now mirrors Brax interval rounding in advance
 and records observed final steps plus an equality check. The diagnostic still
 proved that live TensorBoard, hash-bound restoration, checkpoint saving and
 exact-CPU policy replay operate end to end.
+
+A separate 634-trial exact-CPU grid excludes the state-feedback dataset, its
+679-trial tuning grid and its 777-trial final grid. The retained clone completes
+174. The first PPO checkpoint completes 180 with eight improvements and two
+regressions (`p=0.0546875`), but mean survival falls by 0.00128 and survival
+regressions exceed improvements 179 to 131. The second completes 177 with five
+improvements and two regressions (`p=0.2265625`); survival rises only 0.00238
+with 173 regressions versus 159 improvements. Both candidates are rejected.
+
+The next optimizer ablation is predeclared rather than extended reactively:
+one PPO pass, `1e-5` learning rate, `1e-4` entropy cost and `0.002` desired KL.
+Because repeated start-frame exclusion leaves a finite and shrinking grid, the
+exact-CPU evaluator now supports deterministic per-motion/start joint,
+root-velocity and yaw perturbations. The perturbation seed is part of every
+paired record key. Two identical-seed 26-case smoke reports are byte-identical;
+their comparison pairs all 26 cases exactly. Different seeds therefore provide
+disjoint reproducible selection and final grids without relaxing phase
+coverage. The v3 evidence and v4 protocol are locked in
+`training/locks/paid_k1c_2026_09_01.yaml`.

@@ -7,9 +7,12 @@ import numpy as np
 import pytest
 
 from tools.evaluate_soccer_motion_cpu import (
+    _case_seed,
     _load_excluded_teacher_starts,
     _load_excluded_evaluation_starts,
     _start_frames,
+    _yaw_quaternion_rotate,
+    _yaw_vector_rotate,
 )
 
 
@@ -79,3 +82,19 @@ def test_load_excluded_evaluation_starts_binds_motion_path(tmp_path):
 
     assert starts == {0: {7, 9}}
     assert digest == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_perturbation_case_seed_is_stable_and_case_specific():
+    assert _case_seed(20260965, 2, 17) == _case_seed(20260965, 2, 17)
+    assert _case_seed(20260965, 2, 17) != _case_seed(20260965, 2, 18)
+    assert _case_seed(20260965, 2, 17) != _case_seed(20260966, 2, 17)
+
+
+def test_numpy_yaw_rotation_matches_identity_and_quarter_turn():
+    identity = np.array([1.0, 0.0, 0.0, 0.0])
+    np.testing.assert_allclose(_yaw_quaternion_rotate(identity, 0.0), identity)
+    np.testing.assert_allclose(
+        _yaw_vector_rotate(np.array([1.0, 0.0, 2.0]), np.pi / 2),
+        np.array([0.0, 1.0, 2.0]),
+        atol=1.0e-12,
+    )

@@ -247,6 +247,21 @@ def test_motion_transfer_profile_has_explicit_conservative_kl_bounds():
     assert profile.desired_kl == 0.002
 
 
+def test_soccer_motion_v4_resume_is_conservative_and_checkpoint_compatible():
+    aggressive = get_ppo_profile("soccer_motion_residual_v3")
+    profile = get_ppo_profile("soccer_motion_residual_v4")
+
+    assert profile.policy_contract == aggressive.policy_contract
+    assert profile.policy_hidden_layer_sizes == aggressive.policy_hidden_layer_sizes
+    assert profile.value_hidden_layer_sizes == aggressive.value_hidden_layer_sizes
+    assert profile.distribution_type == aggressive.distribution_type
+    assert profile.normalize_observations == aggressive.normalize_observations
+    assert profile.num_updates_per_batch == 1
+    assert profile.learning_rate == 1.0e-5
+    assert profile.learning_rate_max == 2.0e-5
+    assert profile.desired_kl == 0.002
+
+
 def test_reference_residual_profile_starts_at_zero_with_low_noise():
     rejected_profile = get_ppo_profile("reference_residual_v1")
     profile = get_ppo_profile("reference_residual_v2")

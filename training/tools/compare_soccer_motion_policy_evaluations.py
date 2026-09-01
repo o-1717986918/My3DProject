@@ -43,6 +43,15 @@ def _one_sided_exact_p(improvements: int, regressions: int) -> float:
     ) / (2.0**discordant)
 
 
+def _record_key(record: dict) -> tuple[str, int, int, int | None]:
+    return (
+        record["relative_path"],
+        record["start_frame"],
+        record["length"],
+        record.get("perturbation_seed"),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("baseline", type=Path)
@@ -56,11 +65,12 @@ def main() -> None:
     if candidate.get("purpose") != baseline["purpose"]:
         raise ValueError("candidate report has another purpose")
 
-    def key(record: dict) -> tuple[str, int, int]:
-        return record["relative_path"], record["start_frame"], record["length"]
-
-    baseline_records = {key(record): record for record in baseline["records"]}
-    candidate_records = {key(record): record for record in candidate["records"]}
+    baseline_records = {
+        _record_key(record): record for record in baseline["records"]
+    }
+    candidate_records = {
+        _record_key(record): record for record in candidate["records"]
+    }
     if set(baseline_records) != set(candidate_records):
         raise ValueError("fixed evaluation grids differ")
     transitions = {
@@ -86,6 +96,7 @@ def main() -> None:
             {
                 "relative_path": record_key[0],
                 "start_frame": record_key[1],
+                "perturbation_seed": record_key[3],
                 "transition": transition,
                 "survival_fraction_delta": (
                     second["survival_fraction"] - first["survival_fraction"]

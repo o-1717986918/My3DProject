@@ -366,6 +366,25 @@ still uses held-out exact-CPU, Warp/ONNX parity, three seeds and RCSSServer
 replay. The MuJoCo viewer is deliberately separate from accelerated training
 so rendering cannot reduce rollout throughput or alter timings.
 
+Exact-CPU grids can add deterministic reset perturbations without sacrificing
+paired comparison. `--perturbation-seed` derives a distinct case seed for each
+motion/start pair; joint, root-velocity and yaw envelopes are explicit. The
+paired comparator includes that seed in its key, so reports from different
+perturbation grids cannot be compared accidentally:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/evaluate_soccer_motion_cpu.py /path/to/corpus \
+  --checkpoint /path/to/checkpoint --phase-samples 256 \
+  --perturbation-seed 20260967 --reset-joint-noise 0.002 \
+  --reset-root-velocity-noise 0.005 --reset-yaw-range 0.01 \
+  --output /path/to/evaluation.json
+```
+
+Changing the perturbation seed creates a disjoint deterministic state grid
+while retaining the same phase coverage. This prevents repeated model
+selection from exhausting the finite set of motion start frames.
+
 After a single-motion K1-A gate passes, generate independent teachers for the
 entire locked corpus with the resumable batch orchestrator:
 

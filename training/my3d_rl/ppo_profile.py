@@ -146,6 +146,31 @@ PROFILES = {
         init_noise_std=0.5,
         zero_mean_init=True,
     ),
+    # The first PPO resume from the state-feedback clone gained a few phase
+    # completions but regressed survival under v3's five-pass, high-entropy
+    # update. v4 keeps the checkpoint-compatible actor/critic boundary while
+    # using one pass, one tenth the learning rate and a tighter KL region.
+    "soccer_motion_residual_v4": PpoProfile(
+        name="soccer_motion_residual_v4",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=1,
+        discounting=0.99,
+        entropy_cost=1.0e-4,
+        learning_rate=1.0e-5,
+        normalize_observations=False,
+        adaptive_kl=True,
+        policy_contract="soccer_motion_policy_v2",
+        desired_kl=0.002,
+        learning_rate_min=2.5e-6,
+        learning_rate_max=2.0e-5,
+        init_noise_std=0.2,
+        zero_mean_init=True,
+    ),
     # Kept solely so the first integration checkpoints remain reproducible.
     "smoke_20260830": PpoProfile(
         name="smoke_20260830",

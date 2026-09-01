@@ -457,6 +457,18 @@ Git tree and an external new run directory, and emits continuous TensorBoard
 metrics. A separate exact-CPU checkpoint viewer shows the actual closed-loop
 policy at declared evaluation boundaries without slowing vectorized training.
 
+K1-C first PPO diagnostic (2026-09-01): the aggressive v3 optimizer does not
+survive a new 634-trial grid excluded from all state-feedback training and
+selection phases. Its first checkpoint changes completion from 174 to 180 but
+reduces mean survival and has 179 survival regressions versus 131 improvements;
+the second reaches only 177 and has 173 regressions versus 159 improvements.
+Neither gate passes, so the state-feedback clone remains retained. A v4 resume
+is predeclared with one PPO pass, one tenth the learning rate and a tighter KL
+region. Exact-CPU selection now supports deterministic joint/root-velocity/yaw
+perturbation seeds included in the paired key, preserving untouched grids after
+the finite phase-start set has been used repeatedly. Protocol and hashes are in
+`training/locks/paid_k1c_2026_09_01.yaml`.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.
