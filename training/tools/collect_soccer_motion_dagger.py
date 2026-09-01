@@ -146,6 +146,20 @@ def main() -> None:
         contract=contract,
         contract_sha256=sha256(args.contract),
     )
+    teacher_base_checkpoints = {
+        node["teacher_base_checkpoint"] for node in teacher_provenance
+    }
+    if None in teacher_base_checkpoints or len(teacher_base_checkpoints) != 1:
+        raise ValueError("selected teachers do not share one checkpoint base")
+    teacher_base_checkpoint = Path(teacher_base_checkpoints.pop())
+    teacher_base = load_soccer_motion_policy(
+        zero_policy=False,
+        checkpoint=teacher_base_checkpoint,
+        profile_name=args.profile,
+        policy_contract_name=contract.policy_name,
+        observation_size=contract.observation_size,
+        action_size=contract.action_size,
+    )
     student = load_soccer_motion_policy(
         zero_policy=False,
         checkpoint=args.student_checkpoint,
@@ -181,6 +195,7 @@ def main() -> None:
                     correction,
                     capture=True,
                     teacher_execution_probability=args.teacher_beta,
+                    teacher_base_policy=teacher_base,
                     rng=rng,
                 )
                 captures.append((motion, start, result["trajectory"], result))
@@ -282,6 +297,7 @@ def main() -> None:
         "contract_sha256": sha256(args.contract),
         "profile": args.profile,
         "student_checkpoint": str(args.student_checkpoint.resolve()),
+        "teacher_base_checkpoint": str(teacher_base_checkpoint.resolve()),
         "selection_manifest": str(args.selection_manifest.resolve()),
         "selection_manifest_sha256": sha256(args.selection_manifest),
         "source_dataset": str(args.source_dataset.resolve()),
@@ -293,8 +309,8 @@ def main() -> None:
         "aggregate_frames": int(aggregate["observation"].shape[0]),
         "teacher_beta": args.teacher_beta,
         "teacher_query": (
-            "selected motion-specific phase correction evaluated on every "
-            "student-visited observation"
+            "fixed selected teacher-base actor plus motion-specific phase "
+            "correction evaluated on every student-visited observation"
         ),
         "phase_samples": args.phase_samples,
         "minimum_remaining_frames": args.minimum_remaining_frames,

@@ -69,6 +69,7 @@ def load_selected_teacher_corrections(
             "relative_path": corpus.relative_paths[motion],
             "report": str(report_path.resolve()),
             "report_sha256": node["report_sha256"],
+            "teacher_base_checkpoint": report.get("checkpoint"),
         }
 
     if any(value is None for value in corrections + provenance):

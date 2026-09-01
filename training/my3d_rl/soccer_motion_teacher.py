@@ -212,6 +212,7 @@ class SoccerMotionCorrectionEvaluator:
         *,
         capture: bool = False,
         teacher_execution_probability: float = 1.0,
+        teacher_base_policy: SoccerMotionPolicy | None = None,
         rng: np.random.Generator | None = None,
     ) -> dict[str, Any]:
         """Run one deterministic exact-state restart to the finite endpoint."""
@@ -267,6 +268,7 @@ class SoccerMotionCorrectionEvaluator:
         reason = "completed"
         observations: list[np.ndarray] = []
         base_actions: list[np.ndarray] = []
+        teacher_base_actions: list[np.ndarray] = []
         teacher_actions: list[np.ndarray] = []
         executed_actions: list[np.ndarray] = []
         teacher_interventions: list[bool] = []
@@ -296,8 +298,18 @@ class SoccerMotionCorrectionEvaluator:
             base_action = np.asarray(self.base_policy(observation), dtype=np.float64)
             if base_action.shape != (self.contract.action_size,):
                 raise ValueError("base policy returned an incompatible action")
+            teacher_base_action = np.asarray(
+                (
+                    teacher_base_policy(observation)
+                    if teacher_base_policy is not None
+                    else base_action
+                ),
+                dtype=np.float64,
+            )
+            if teacher_base_action.shape != (self.contract.action_size,):
+                raise ValueError("teacher base policy returned an incompatible action")
             teacher_action = np.clip(
-                base_action + correction[current], *self.contract.action_clip
+                teacher_base_action + correction[current], *self.contract.action_clip
             )
             action, use_teacher = select_dagger_action(
                 base_action,
@@ -350,6 +362,7 @@ class SoccerMotionCorrectionEvaluator:
             if capture:
                 observations.append(observation)
                 base_actions.append(base_action)
+                teacher_base_actions.append(teacher_base_action)
                 teacher_actions.append(teacher_action.copy())
                 executed_actions.append(action.copy())
                 teacher_interventions.append(use_teacher)
@@ -411,6 +424,10 @@ class SoccerMotionCorrectionEvaluator:
             result["trajectory"] = {
                 "observations": np.asarray(observations, dtype=np.float32),
                 "base_actions": np.asarray(base_actions, dtype=np.float32),
+                "teacher_base_actions": np.asarray(
+                    teacher_base_actions,
+                    dtype=np.float32,
+                ),
                 "teacher_actions": np.asarray(teacher_actions, dtype=np.float32),
                 "executed_actions": np.asarray(executed_actions, dtype=np.float32),
                 "teacher_interventions": np.asarray(
