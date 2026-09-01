@@ -1,0 +1,90 @@
+schema_version: 1
+recorded_at: 2026-09-02
+stage: paid_k2b_ball_target_conditioning
+status: bootstrap_checkpoint_retained_training_pending
+
+source:
+  retained_k1d_checkpoint: /home/win98/rl_runs/paid-k1/k1d-crossfit-bc-s20260982-v2/checkpoints/000000001000
+  retained_k1d_checkpoint_tree_sha256: 6615b6a9ea6a77e38d9f382186064e05375c9b61e6fa4c5c0c1d9df52a1c537a
+  retained_k2a_protocol: training/locks/paid_k2a_2026_09_02.yaml
+  required_contact_motion: football_stylized-003_right.t1.npz
+  accepted_entry_frames: [113, 114, 115, 116, 117, 118]
+  post_contact_controller: apollo_zero_command_walk_after_one_control_frame
+
+observation_contract:
+  path: training/contracts/soccer_ball_motion_policy_v1.yaml
+  sha256: 949e97cd9b485a6edbbcb2b798de8da48aed7c1c108b442771f6edbf43adb341
+  actor_size: 126
+  critic_size: 134
+  inherited_actor_prefix_size: 110
+  appended_feature_size: 16
+  appended_fields:
+    - ball_position_torso_yaw
+    - ball_velocity_relative_torso_yaw
+    - ball_to_target_direction_torso_yaw
+    - ball_to_target_distance
+    - requested_launch_speed
+    - requested_arrival_speed
+    - action_mode_pass_shot_clear
+    - ball_observation_age
+    - ball_observation_valid
+  invalid_ball_behavior:
+    policy_extension: all_zero
+    runtime: reject_output_and_enter_apollo_walk_search
+
+bootstrap_transfer:
+  implementation_revision: 5659e626005cbd61843da0270ea5f9708351f15c
+  report: /home/win98/rl_runs/paid-k2/k2b-ball-transfer-s20260989-v1/transfer-report.json
+  report_sha256: 23b36dd764c5fe9ebbcc6a4c74169bd383a135cb8cbbca2e7a2afab858ca8cbb
+  checkpoint: /home/win98/rl_runs/paid-k2/k2b-ball-transfer-s20260989-v1/checkpoints/000000001000
+  checkpoint_tree_sha256: 782ae53676aaca1884d6d6867535544436b6840aaffd0415de6384da0f67bb47
+  parity_seed: 20260989
+  parity_samples: 4096
+  actor_max_abs_error: 0.0
+  critic_max_abs_error: 0.0
+  required_max_abs_error: 5.0e-7
+  new_first_layer_rows: zero
+  authorization_scope: training_initialization_only_not_runtime_promotion
+
+training_sequence:
+  - fixed_contact_and_apollo_recovery_with_2m_stationary_ball
+  - stationary_central_ranges_2m_3_5m_5m
+  - stationary_direction_bins_minus30_minus15_zero_plus15_plus30_degrees
+  - requested_arrival_speed_and_action_modes
+  - randomized_contact_pose_and_friction
+  - rolling_ball_and_walk_entry
+
+formal_gate:
+  screening_trials_per_condition: 20
+  screening_minimum_successes: 18
+  formal_seeds: 3
+  formal_untouched_trials_per_seed_per_range: 200
+  minimum_raw_success_rate: 0.90
+  minimum_one_sided_wilson_lower_bound: 0.85
+  minimum_upright_rate: 0.95
+  maximum_median_direction_error_degrees: 10.0
+  preserve_k2a_contact_and_recovery_rate: true
+  source_onnx_parity_required: true
+  runtime_server_replay_required: true
+
+failure_policy:
+  - never_replace_the_k1d_or_k2a_fallback_on_training_reward_alone
+  - stop_if_fixed_contact_or_recovery_regresses_before_range_training
+  - retain_the_smallest_reliable_range_direction_envelope
+  - reject_nonfinite_or_invalid_ball_policy_execution_same_cycle
+
+implementation_evidence:
+  complete_training_test_suite_passed: true
+  training_test_count: 210
+  test_failures: 0
+  test_skips: 0
+  test_duration_seconds: 155.844
+
+decision:
+  bootstrap_checkpoint_retained: true
+  target_conditioned_skill_trained: false
+  apollo_runtime_promotion_authorized: false
+  next:
+    - implement_exact_ball_training_environment_from_k2a_composition
+    - train_fixed_2m_contact_without_changing_the_inherited_actor_at_reset
+    - open_3_5m_and_5m_only_after_fixed_contact_and_recovery_screening_passes

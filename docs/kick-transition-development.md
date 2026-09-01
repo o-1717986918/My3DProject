@@ -395,6 +395,30 @@ destroying the retained actor, and learn target-conditioned contact before any
 server integration. Immutable paths and hashes are in
 `training/locks/paid_k2a_2026_09_02.yaml`.
 
+## K2-B ball/target contract and lossless bootstrap
+
+The conditioning boundary is now implemented as
+`soccer_ball_motion_policy_v1`. It preserves the complete 110-value K1-D actor
+prefix and appends 16 values: egocentric ball position and relative velocity,
+ball-to-target direction and distance, requested launch and arrival speeds,
+pass/shot/clear mode, and ball observation age/validity. Invalid perception
+maps the extension to all zero, but the deployment contract still requires a
+same-cycle Apollo walking/search fallback rather than executing a blind kick.
+
+K1-D is transferred by copying every existing actor/critic parameter and
+zero-initializing only the new first-layer rows. The critic mapping inserts the
+new command before its old eight-value root/upright suffix, preserving the old
+semantics. On clean revision `5659e62`, 4,096 deterministic CPU states produce
+exactly zero actor and critic output difference. The new 126-to-23 checkpoint
+tree SHA-256 is `782ae53676aaca1884d6d6867535544436b6840aaffd0415de6384da0f67bb47`.
+
+This closes only the K2-B bootstrap gate. The retained checkpoint is an
+initialization for physical outcome training, not a target-conditioned skill
+and not a runtime candidate. The locked order is fixed 2 m contact/recovery,
+central 2/3.5/5 m range, direction bins, arrival speed and modes, then contact
+randomization, rolling ball and walking entry. Full provenance and stop rules
+are in `training/locks/paid_k2b_2026_09_02.yaml`.
+
 ## Implementation route
 
 ### K1. Version the transition contract
@@ -479,8 +503,10 @@ Only then expand to 3.5/5 m, angle bins, shot/clear, and moving-ball entries.
       exact-CPU rollouts, then distil a 50-frame history student;
 - [x] retain a three-seed exact-CPU motion-12 contact baseline with immediate
       Apollo post-contact recovery and zero falls;
-- [ ] add a ball/target-conditioned K2 contract and train range/direction above
-      the retained contact-and-recovery baseline;
+- [x] add a ball/target-conditioned K2 contract and losslessly bootstrap it
+      from K1-D;
+- [ ] train range/direction above the retained contact-and-recovery baseline;
 - [ ] add the guarded C++ kick-policy runner and same-cycle fallback tests;
 - [ ] rerun the central 2 m CPU and 7v7 server gates;
-- [ ] update this record and the R1 checkpoint with immutable artifact hashes.
+- [x] update this record and the R1 checkpoint with immutable K2-B bootstrap
+      artifact hashes;

@@ -532,6 +532,19 @@ ball/target-conditioned contract initialized from K1-D, followed by controlled
 2/3.5/5 m direction and arrival-speed training. Evidence is locked in
 `training/locks/paid_k2a_2026_09_02.yaml`.
 
+K2-B bootstrap checkpoint (2026-09-02): the deployable observation contract
+now appends 16 ball/target command values to the unchanged 110-value K1-D
+prefix, producing a 126-to-23 actor and a 134-value critic boundary. A formal
+zero-row checkpoint transfer at clean revision `5659e62` preserves all K1-D
+parameters and yields exactly zero actor/critic output difference on 4,096 CPU
+states. The resulting checkpoint tree SHA-256 is
+`782ae53676aaca1884d6d6867535544436b6840aaffd0415de6384da0f67bb47`.
+It is retained only as the initialization for K2-B physical-outcome training;
+it has learned no range or direction response and has no Apollo runtime status.
+The next gate is fixed 2 m contact/recovery followed by central 2/3.5/5 m
+training, with the K2-A composition kept as an independent fallback. Evidence
+and stop rules are locked in `training/locks/paid_k2b_2026_09_02.yaml`.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

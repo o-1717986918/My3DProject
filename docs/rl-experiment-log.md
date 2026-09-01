@@ -1250,3 +1250,31 @@ experiment adds a versioned ball/target observation boundary initialized from
 K1-D and trains the 2/3.5/5 m conditional skill without weakening this recovery
 fallback. Full hashes and stop rules are in
 `training/locks/paid_k2a_2026_09_02.yaml`.
+
+## PAiD K2-B ball/target bootstrap — 2026-09-02
+
+The K2 actor boundary is extended before any outcome optimization. The first
+110 inputs remain byte-for-byte the `soccer_motion_policy_v2` ordering. Sixteen
+append-only inputs encode egocentric ball position and relative velocity,
+target direction/range, requested launch and arrival speeds, pass/shot/clear
+mode, and observation freshness/validity. Invalid perception produces the
+neutral all-zero extension and requires an Apollo walking/search fallback.
+
+The transfer implementation copies all K1-D parameters, appends zero rows to
+the actor's first layer and inserts zero rows before the critic's retained
+eight-value root/upright suffix. The complete training suite passes 210/210.
+After commit `5659e62` is clean and pushed, the formal CPU transfer samples
+4,096 random old-boundary states under seed 20260989. Actor and critic maximum
+absolute differences are both exactly zero.
+
+The retained initialization is
+`/home/win98/rl_runs/paid-k2/k2b-ball-transfer-s20260989-v1/checkpoints/000000001000`,
+with tree SHA-256
+`782ae53676aaca1884d6d6867535544436b6840aaffd0415de6384da0f67bb47`.
+The report SHA-256 is
+`23b36dd764c5fe9ebbcc6a4c74169bd383a135cb8cbbca2e7a2afab858ca8cbb`.
+This authorizes training initialization only. The next experiment adds the
+exact ball to the K2-A contact/recovery composition, holds 2 m fixed until
+contact and upright recovery pass, and only then opens 3.5 m, 5 m and direction
+conditions. Full predeclared gates are in
+`training/locks/paid_k2b_2026_09_02.yaml`.
