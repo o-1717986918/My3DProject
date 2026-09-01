@@ -1,0 +1,80 @@
+schema_version: 1
+recorded_at: 2026-09-02
+stage: paid_k2a_motion_guided_contact_recovery
+status: predeclared_before_robustness_evaluation
+
+source:
+  retained_motion_checkpoint: /home/win98/rl_runs/paid-k1/k1d-crossfit-bc-s20260982-v2/checkpoints/000000001000
+  retained_motion_checkpoint_tree_sha256: 6615b6a9ea6a77e38d9f382186064e05375c9b61e6fa4c5c0c1d9df52a1c537a
+  corpus_root: /home/win98/rl_runs/paid-k0/corpus-semantic-v4
+  selected_motion: soccer-stylized/football_stylized-003_right.t1.npz
+  selected_motion_index: 12
+  source_policy_license_boundary: local_attributed_noncommercial_paid_motion_never_commit_or_redistribute
+
+exploratory_evidence:
+  exact_ball_screening_report: /home/win98/rl_runs/paid-k2/k2-ball-screen-baseline-s20260985-v1/report.json
+  exact_ball_screening_sha256: 6921f5c720d1e8cc9b9729df562030fdcae50dc7cc25430d4021a936bc381f31
+  trials: 91
+  correct_foot_contacts: 8
+  falls: 86
+  screening_passes: 0
+  finding: the_motion_prior_has_ball_impulse_but_no_post_contact_stability
+  selected_recovery_report: /home/win98/rl_runs/paid-k2/k2-motion12-apollo-window-s20260985-v1/report.json
+  selected_recovery_report_sha256: 535f151cebe3c3f7b9cc28aaadbfec9edc5f4d1762b01cec90a259864fdfb1cc
+  selected_nominal_start_frames: [113, 114, 115, 116, 117, 118]
+  selected_nominal_results:
+    correct_foot_contacts: 6
+    stable_screening_passes: 6
+    falls: 0
+    maximum_progress_range_m: [3.86, 4.66]
+  recovery_controller: apollo_walk_onnx_zero_command
+  recovery_switch_delay_control_frames: 1
+  selection_scope: nominal_physical_existence_only_not_a_release_or_training_seed
+
+formal_robustness_protocol:
+  evaluator: training/tools/evaluate_soccer_motion_ball_cpu.py
+  engine: exact_cpu_mujoco_rcss_assets
+  start_frames: [113, 114, 115, 116, 117, 118]
+  start_encoding: strike_frame_127_minus_lead_frames_14_through_9
+  replicates_per_start: 20
+  trials_per_seed: 120
+  seeds: [20260986, 20260987, 20260988]
+  reset_randomization:
+    joint_position_uniform_rad: 0.001
+    root_velocity_uniform: 0.003
+    yaw_uniform_rad: 0.005
+  ball_randomization:
+    endpoint_radius_uniform_m: 0.005
+    endpoint_arc_uniform_deg: 1.0
+  post_contact:
+    controller: apollo_stand
+    blend_frames: 1
+    evaluation_tail_frames: 50
+  exact_contact: ball_geom_to_labelled_right_foot_geom_pair
+  screening_success: correct_foot_contact_and_progress_ge_0_08m_and_no_fall_or_invalid
+
+formal_gate:
+  each_seed:
+    minimum_correct_foot_contact_rate: 0.95
+    minimum_stable_screening_rate: 0.90
+    maximum_fall_rate: 0.05
+    maximum_wrong_foot_contacts: 0
+    minimum_median_progress_m: 1.0
+  aggregate:
+    require_all_three_seeds: true
+    require_no_non_finite_state: true
+  interpretation_if_passed:
+    - retain_motion12_plus_immediate_apollo_recovery_as_k2a_training_baseline
+    - authorize_target_conditioned_k2_policy_development_only
+    - do_not_authorize_apollo_runtime_deployment
+    - do_not_claim_a_parameterized_pass_or_shot
+  interpretation_if_failed:
+    - keep_the_experiment_as_contact_existence_evidence
+    - train_a_contact_and_recovery_teacher_before_target_conditioning
+    - do_not_retune_on_the_three_formal_seeds
+
+next_if_passed:
+  - version_a_ball_and_target_conditioned_motion_policy_contract
+  - preserve_k1d_motion_features_and_initialize_new_ball_input_columns_to_zero
+  - train_fixed_range_contact_and_recovery_before_2_3_5m_range_conditioning
+  - retain_apollo_walk_as_same_cycle_fallback_and_post_contact_controller
