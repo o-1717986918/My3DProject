@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -27,15 +28,50 @@ from my3d_rl.t1_control import apollo_joint_gains
 REPOSITORY_ROOT = Path(__file__).parents[2]
 
 
-def _start_frames(length: int, samples: int, minimum_remaining: int) -> list[int]:
+def _start_frames(
+    length: int,
+    samples: int,
+    minimum_remaining: int,
+    *,
+    excluded: set[int] | None = None,
+) -> list[int]:
     final_start = max(0, length - minimum_remaining)
+    excluded = excluded or set()
     return sorted(
         set(
             int(value)
             for value in np.linspace(0, final_start, samples, dtype=np.int64)
-            if value < length - 1
+            if value < length - 1 and int(value) not in excluded
         )
     )
+
+
+def _load_excluded_teacher_starts(
+    dataset_path: Path,
+    *,
+    motion_count: int,
+) -> tuple[dict[int, set[int]], str]:
+    if not dataset_path.is_file():
+        raise FileNotFoundError(f"teacher dataset does not exist: {dataset_path}")
+    with np.load(dataset_path, allow_pickle=False) as dataset:
+        required = {"motion", "start_frame"}
+        missing = required.difference(dataset.files)
+        if missing:
+            raise ValueError(
+                f"teacher dataset lacks exclusion keys: {sorted(missing)}"
+            )
+        motions = np.asarray(dataset["motion"], dtype=np.int64)
+        starts = np.asarray(dataset["start_frame"], dtype=np.int64)
+    if motions.ndim != 1 or starts.shape != motions.shape:
+        raise ValueError("teacher dataset motion/start_frame columns are malformed")
+    if np.any(motions < 0) or np.any(motions >= motion_count):
+        raise ValueError("teacher dataset contains an out-of-range motion index")
+    excluded: dict[int, set[int]] = defaultdict(set)
+    for motion, start in zip(motions.tolist(), starts.tolist(), strict=True):
+        if start < 0:
+            raise ValueError("teacher dataset contains a negative start frame")
+        excluded[int(motion)].add(int(start))
+    return dict(excluded), hashlib.sha256(dataset_path.read_bytes()).hexdigest()
 
 
 def _foot_contacts(
@@ -70,17 +106,37 @@ def main() -> None:
     )
     parser.add_argument("--phase-samples", type=int, default=8)
     parser.add_argument("--minimum-remaining-frames", type=int, default=10)
+    parser.add_argument(
+        "--exclude-starts-dataset",
+        type=Path,
+        help=(
+            "NPZ teacher dataset whose (motion, start_frame) pairs must not "
+            "appear in the fixed evaluation grid"
+        ),
+    )
+    parser.add_argument("--minimum-evaluated-starts", type=int, default=4)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.zero_policy == (args.checkpoint is not None):
         raise ValueError("select exactly one of --zero-policy or --checkpoint")
-    if args.phase_samples < 1 or args.minimum_remaining_frames < 2:
+    if (
+        args.phase_samples < 1
+        or args.minimum_remaining_frames < 2
+        or args.minimum_evaluated_starts < 1
+    ):
         raise ValueError("invalid fixed phase grid")
     contract = load_policy_contract(args.contract)
     profile = get_ppo_profile(args.profile)
     if profile.policy_contract != contract.policy_name:
         raise ValueError("PPO profile and policy contract differ")
     corpus = load_soccer_motion_corpus(args.corpus_root)
+    excluded_starts: dict[int, set[int]] = {}
+    excluded_dataset_sha256: str | None = None
+    if args.exclude_starts_dataset:
+        excluded_starts, excluded_dataset_sha256 = _load_excluded_teacher_starts(
+            args.exclude_starts_dataset,
+            motion_count=len(corpus.relative_paths),
+        )
     policy = load_soccer_motion_policy(
         zero_policy=args.zero_policy,
         checkpoint=args.checkpoint,
@@ -126,9 +182,18 @@ def main() -> None:
 
     for motion, relative_path in enumerate(corpus.relative_paths):
         length = int(corpus.lengths[motion])
-        for start in _start_frames(
-            length, args.phase_samples, args.minimum_remaining_frames
-        ):
+        starts = _start_frames(
+            length,
+            args.phase_samples,
+            args.minimum_remaining_frames,
+            excluded=excluded_starts.get(motion),
+        )
+        if len(starts) < args.minimum_evaluated_starts:
+            raise ValueError(
+                f"motion {motion} retains only {len(starts)} blind starts; "
+                f"minimum is {args.minimum_evaluated_starts}"
+            )
+        for start in starts:
             data = mujoco.MjData(model)
             data.qpos[:] = model.qpos0
             data.qvel[:] = 0.0
@@ -255,7 +320,7 @@ def main() -> None:
             }
         )
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "purpose": "k1_exact_cpu_fixed_motion_phase_grid",
         "engine": f"MuJoCo {mujoco.__version__}",
         "policy": "zero_residual" if args.zero_policy else "checkpoint",
@@ -265,6 +330,17 @@ def main() -> None:
         "corpus_root": str(args.corpus_root.resolve()),
         "phase_samples": args.phase_samples,
         "minimum_remaining_frames": args.minimum_remaining_frames,
+        "minimum_evaluated_starts": args.minimum_evaluated_starts,
+        "excluded_starts_dataset": (
+            str(args.exclude_starts_dataset.resolve())
+            if args.exclude_starts_dataset
+            else None
+        ),
+        "excluded_starts_dataset_sha256": excluded_dataset_sha256,
+        "excluded_teacher_start_counts": {
+            str(motion): len(starts)
+            for motion, starts in sorted(excluded_starts.items())
+        },
         "episode_count": len(records),
         "completion_rate": float(np.mean([item["completed"] for item in records])),
         "mean_survival_fraction": float(
