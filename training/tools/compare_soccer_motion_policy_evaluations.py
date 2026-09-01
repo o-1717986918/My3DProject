@@ -10,6 +10,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+from scipy.stats import binomtest
 
 
 def _sha256(path: Path) -> str:
@@ -34,13 +35,19 @@ def _wilson(successes: int, trials: int, z: float = 1.959963984540054) -> tuple[
 
 
 def _one_sided_exact_p(improvements: int, regressions: int) -> float:
+    if min(improvements, regressions) < 0:
+        raise ValueError("paired transition counts must be non-negative")
     discordant = improvements + regressions
     if discordant == 0:
         return 1.0
-    return sum(
-        math.comb(discordant, count)
-        for count in range(improvements, discordant + 1)
-    ) / (2.0**discordant)
+    return float(
+        binomtest(
+            improvements,
+            discordant,
+            p=0.5,
+            alternative="greater",
+        ).pvalue
+    )
 
 
 def _record_key(record: dict) -> tuple[str, int, int, int | None]:
