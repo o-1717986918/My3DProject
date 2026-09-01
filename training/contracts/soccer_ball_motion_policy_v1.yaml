@@ -1,0 +1,136 @@
+schema_version: 1
+policy_name: soccer_ball_motion_policy_v1
+robot: Booster T1
+experimental: true
+control:
+  frequency_hz: 50
+  mode: motion_reference_residual_joint_position
+  action_size: 23
+  action_clip: [-1.0, 1.0]
+  action_scale: 0.35
+  units: normalized_residual
+
+joint_order:
+  - AAHead_yaw
+  - Head_pitch
+  - Left_Shoulder_Pitch
+  - Left_Shoulder_Roll
+  - Left_Elbow_Pitch
+  - Left_Elbow_Yaw
+  - Right_Shoulder_Pitch
+  - Right_Shoulder_Roll
+  - Right_Elbow_Pitch
+  - Right_Elbow_Yaw
+  - Waist
+  - Left_Hip_Pitch
+  - Left_Hip_Roll
+  - Left_Hip_Yaw
+  - Left_Knee_Pitch
+  - Left_Ankle_Pitch
+  - Left_Ankle_Roll
+  - Right_Hip_Pitch
+  - Right_Hip_Roll
+  - Right_Hip_Yaw
+  - Right_Knee_Pitch
+  - Right_Ankle_Pitch
+  - Right_Ankle_Roll
+
+effector_order:
+  - he1
+  - he2
+  - lae1
+  - lae2
+  - lae3
+  - lae4
+  - rae1
+  - rae2
+  - rae3
+  - rae4
+  - te1
+  - lle1
+  - lle2
+  - lle3
+  - lle4
+  - lle5
+  - lle6
+  - rle1
+  - rle2
+  - rle3
+  - rle4
+  - rle5
+  - rle6
+
+actor_observation:
+  size: 126
+  frame: body_local_plus_finite_motion_reference_plus_ball_target_command
+  extension_rule: append_only_after_soccer_motion_policy_v2_actor
+  fields:
+    - {name: interleaved_reference_joint_position_error_velocity_error_previous_residual_action, size: 69, units: normalized}
+    - {name: body_angular_velocity, size: 3, units: normalized_rad_s}
+    - {name: projected_gravity, size: 3, units: normalized}
+    - {name: reference_joint_position, size: 23, units: normalized_rad}
+    - {name: reference_root_linear_velocity, size: 3, units: normalized_m_s}
+    - {name: reference_root_angular_velocity, size: 3, units: normalized_rad_s}
+    - {name: reference_foot_contact, size: 2, units: boolean}
+    - {name: finite_progress_cos_sin, size: 2, units: normalized}
+    - {name: kick_leg_one_hot, size: 2, units: boolean}
+    - {name: ball_position_torso_yaw, size: 3, units: normalized_m}
+    - {name: ball_velocity_relative_torso_yaw, size: 3, units: normalized_m_s}
+    - {name: ball_to_target_direction_torso_yaw, size: 2, units: unit_vector}
+    - {name: ball_to_target_distance, size: 1, units: normalized_m}
+    - {name: requested_launch_speed, size: 1, units: normalized_m_s}
+    - {name: requested_arrival_speed, size: 1, units: normalized_m_s}
+    - {name: action_mode_pass_shot_clear, size: 3, units: one_hot}
+    - {name: ball_observation_age, size: 1, units: normalized_s}
+    - {name: ball_observation_valid, size: 1, units: boolean}
+  normalization:
+    inherited_prefix_contract: soccer_motion_policy_v2
+    ball_position_divisors_xyz: [6.0, 4.0, 2.0]
+    ball_relative_velocity_divisors_xyz: [15.0, 15.0, 10.0]
+    target_distance_divisor: 20.0
+    requested_launch_speed_divisor: 15.0
+    requested_arrival_speed_divisor: 10.0
+    ball_observation_age_divisor: 1.0
+    observation_clip: [-10.0, 10.0]
+  invalid_ball_invariant:
+    appended_features: all_zero
+    runtime_action: reject_policy_output_and_enter_apollo_walk_search
+
+critic_observation:
+  size: 134
+  fields:
+    - {name: actor_observation, size: 126}
+    - {name: root_linear_and_angular_velocity, size: 6}
+    - {name: torso_upright_and_height, size: 2}
+
+decoder:
+  formula: q_target_physical=clip(q_reference_physical[motion,frame]+0.35*clip(action,-1,1),joint_limits)
+  zero_action_invariant: q_target_physical=q_reference_physical_at_finite_frame
+  progression: nonperiodic_one_frame_per_50hz_control_step_clamped_at_final_frame
+  gains: apollo_t1_per_joint
+  inherited_reference_contract: soccer_motion_policy_v2
+  reference_artifact:
+    path_policy: external_local_only_not_committed
+    format: soccer_motion_reference_v1_npz_corpus
+    provenance_lock: training/locks/paid_k0_2026_09_01.yaml
+
+transfer:
+  source_contract: soccer_motion_policy_v2
+  source_actor_size: 110
+  source_critic_size: 118
+  actor_new_feature_initialization: zero_first_layer_rows
+  critic_new_feature_initialization: zero_first_layer_rows_inserted_before_proprioceptive_privileged_suffix
+  required_zero_extension_parity_max_abs: 5.0e-7
+
+deployment:
+  format: ONNX_residual_actor_plus_external_finite_reference_decoder
+  input_name: observations
+  output_name: residual_actions
+  input_shape: [1, 126]
+  output_shape: [1, 23]
+  requires_finite_output: true
+  requires_ball_observation_valid: true
+  maximum_ball_observation_age_s: 1.0
+  reference_required: true
+  release_status: training_only
+  fallback: apollo_walk_search_then_accepted_apollo_kick_bank

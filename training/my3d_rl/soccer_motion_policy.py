@@ -19,6 +19,7 @@ from .ppo_profile import get_ppo_profile
 
 SoccerMotionPolicy = Callable[[np.ndarray], np.ndarray]
 SOCCER_MOTION_PRIVILEGED_OBSERVATION_SIZE = 118
+SOCCER_BALL_PRIVILEGED_OBSERVATION_SIZE = 134
 
 
 def _validated_actor_observation(
@@ -111,10 +112,15 @@ def load_soccer_motion_policy(
         if profile.normalize_observations
         else brax_types.identity_observation_preprocessor
     )
+    privileged_observation_size = (
+        SOCCER_BALL_PRIVILEGED_OBSERVATION_SIZE
+        if policy_contract_name == "soccer_ball_motion_policy_v1"
+        else SOCCER_MOTION_PRIVILEGED_OBSERVATION_SIZE
+    )
     networks = profile.network_factory()(
         {
             "state": observation_size,
-            "privileged_state": SOCCER_MOTION_PRIVILEGED_OBSERVATION_SIZE,
+            "privileged_state": privileged_observation_size,
         },
         action_size,
         preprocess_observations_fn=preprocess,

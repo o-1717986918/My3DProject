@@ -171,6 +171,30 @@ PROFILES = {
         init_noise_std=0.2,
         zero_mean_init=True,
     ),
+    # K2 appends ball/target commands to the retained K1-D actor.  The transfer
+    # tool copies this architecture and zero-initializes only the 16 new first-
+    # layer rows, preserving the inherited motion controller at bootstrap.
+    "soccer_ball_motion_residual_v1": PpoProfile(
+        name="soccer_ball_motion_residual_v1",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=1,
+        discounting=0.99,
+        entropy_cost=1.0e-4,
+        learning_rate=1.0e-5,
+        normalize_observations=False,
+        adaptive_kl=True,
+        policy_contract="soccer_ball_motion_policy_v1",
+        desired_kl=0.002,
+        learning_rate_min=2.5e-6,
+        learning_rate_max=2.0e-5,
+        init_noise_std=0.2,
+        zero_mean_init=True,
+    ),
     # Kept solely so the first integration checkpoints remain reproducible.
     "smoke_20260830": PpoProfile(
         name="smoke_20260830",

@@ -66,3 +66,16 @@ def test_soccer_motion_policy_rejects_profile_contract_mismatch():
             observation_size=110,
             action_size=23,
         )
+
+
+def test_zero_ball_motion_policy_accepts_extended_contract():
+    policy = load_soccer_motion_policy(
+        zero_policy=True,
+        checkpoint=None,
+        profile_name="soccer_ball_motion_residual_v1",
+        policy_contract_name="soccer_ball_motion_policy_v1",
+        observation_size=126,
+        action_size=23,
+    )
+
+    np.testing.assert_array_equal(policy(np.zeros(126)), np.zeros(23))
