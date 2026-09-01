@@ -109,11 +109,22 @@ def _select_normalizer(
 
 
 def _config_signature(config: dict[str, Any]) -> dict[str, Any]:
+    def plain(value: Any) -> Any:
+        if hasattr(value, "to_dict"):
+            return plain(value.to_dict())
+        if isinstance(value, dict):
+            return {str(key): plain(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [plain(item) for item in value]
+        if isinstance(value, np.generic):
+            return value.item()
+        return value
+
     network = config["network_factory_kwargs"]
     return {
         "action_size": config["action_size"],
         "normalize_observations": config["normalize_observations"],
-        "observation_size": config["observation_size"],
+        "observation_size": plain(config["observation_size"]),
         "policy_hidden_layer_sizes": list(network["policy_hidden_layer_sizes"]),
         "value_hidden_layer_sizes": list(network["value_hidden_layer_sizes"]),
         "distribution_type": network["distribution_type"],

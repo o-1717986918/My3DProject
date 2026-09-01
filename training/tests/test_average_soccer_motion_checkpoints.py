@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from tools.average_soccer_motion_checkpoints import (
+    _config_signature,
     _mean_tree,
     _select_normalizer,
     _trees_equal,
@@ -56,3 +57,28 @@ def test_enabled_normalization_rejects_different_statistics():
             [{"count": np.array(1)}],
             normalize_observations=True,
         )
+
+
+def test_config_signature_is_json_serializable():
+    class DictLike:
+        def to_dict(self):
+            return {"state": {"shape": (110,), "dtype": "float32"}}
+
+    config = {
+        "action_size": 23,
+        "normalize_observations": False,
+        "observation_size": DictLike(),
+        "network_factory_kwargs": {
+            "policy_hidden_layer_sizes": (512, 256, 128),
+            "value_hidden_layer_sizes": (512, 256, 128),
+            "distribution_type": "normal",
+            "policy_obs_key": "state",
+            "value_obs_key": "privileged_state",
+            "state_dependent_std": False,
+        },
+    }
+
+    import json
+
+    encoded = json.dumps(_config_signature(config))
+    assert '"shape": [110]' in encoded

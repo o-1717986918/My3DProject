@@ -257,6 +257,14 @@ equal_parameter_average_predeclaration:
     require_exact_grid_promotion_or_curriculum_advance: true
   runtime_promotion: false
 
+invalidated_average_attempt:
+  output_dir: /home/win98/rl_runs/paid-k1/k1c-ppo-reference-v4-average-s20260972-v1
+  checkpoint_was_written: true
+  run_manifest_was_written: false
+  reason: configuration_signature_contained_a_non_json_serializable_configdict
+  use_for_evaluation_training_or_selection: false
+  retry_directory: /home/win98/rl_runs/paid-k1/k1c-ppo-reference-v4-average-s20260972-v2
+
 decision:
   current_retained_checkpoint: /home/win98/rl_runs/paid-k1/k1b-state-feedback-bc-tune-s20260962-v1/checkpoints/000000001000
   next:

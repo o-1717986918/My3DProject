@@ -1142,3 +1142,10 @@ difference. It checks the remaining invariants and hashes every input. The
 average is predeclared for a new
 selection perturbation seed `20260972` and, only if it passes, confirmation seed
 `20260973`. It does not inherit the failed family's release status.
+
+The first averaging execution wrote a checkpoint but failed before its manifest
+because the loaded Brax observation signature contains a `ConfigDict` that is
+not directly JSON serializable. That `v1` directory is invalidated and never
+evaluated. The signature writer now recursively converts only the selected
+shape/dtype metadata to plain JSON data, with a regression test; the clean
+retry uses a new `v2` directory so no partial artifact is overwritten.
