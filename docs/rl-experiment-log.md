@@ -983,3 +983,33 @@ Apollo-server domain gap. `FastWalkV2` remains local-only and opt-in. The next
 locomotion experiment should train or adapt against Apollo/RCSS transition and
 disturbance states, with fall rate as a primary promotion metric; increasing
 nominal speed is not the next objective.
+
+## PAiD K1-A exact-CPU phase teacher and live visualization — 2026-09-01
+
+The K1 continuation now uses a shared deterministic actor boundary and an
+exact-CPU low-dimensional phase teacher instead of adding more reward-only PPO
+steps. Formal tools refuse a dirty Git tree, validate the PPO/profile contract,
+keep reports and demonstrations outside Git, and record source, contract,
+motion and dataset hashes. TensorBoard-compatible events expose every CEM
+generation and every future finite-motion PPO evaluation; captured exact CPU
+`qpos` trajectories can be replayed in the MuJoCo viewer independently from
+accelerated training.
+
+The deliberately short 4-by-1 platform smoke completed in 3.94 seconds and
+proved event and 512-frame replay generation. It happened to improve the four
+held-out phases, but was not used as evidence. The formal 64-population,
+8-generation search ran from clean revision `f5a4837` in 238.61 seconds on the
+worst retained motion, `football_stylized-001`. Its objective improved through
+all eight generations from 392.67 to 468.26.
+
+| Fixed exact-CPU phase split | Baseline completion | Teacher completion | Baseline survival | Teacher survival | Delta |
+|---|---:|---:|---:|---:|---:|
+| training, 4 phases | 0/4 | 1/4 | 0.4274 | 0.5409 | +0.1135 |
+| untouched validation, 4 phases | 1/4 | 1/4 | 0.5028 | 0.5533 | +0.0505 |
+
+All four predeclared K1-A checks pass: training and validation score improve,
+held-out survival gains at least 0.02, and no validation completion is lost.
+This supports expanding the teacher to all thirteen locked motions and then
+training BC/DAgger. It does not promote a model, widen a runtime envelope, or
+justify PPO resume by itself. The report, 585-frame dataset and eight-generation
+TensorBoard event are bound by `training/locks/paid_k1a_2026_09_01.yaml`.

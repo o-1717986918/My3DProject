@@ -1,0 +1,78 @@
+schema_version: 1
+recorded_at: 2026-09-01
+stage: paid_k1a_exact_cpu_phase_teacher
+status: teacher_gate_passed_not_promoted
+
+source:
+  git_revision: f5a4837506c33fb034cbaeff76e1199c2d7375f7
+  git_dirty: false
+  corpus_root: /home/win98/rl_runs/paid-k0/corpus-semantic-v4
+  motion: soccer-stylized/football_stylized-001_right.t1.npz
+  motion_sha256: 55059b118d3a428786da602465e7a856c76cbb563f3904afa05a75605719fa2d
+  contract: training/contracts/soccer_motion_policy_v2.yaml
+  contract_sha256: ac4260e8d75d905d2b68d13c0033fb8af4f2a061660147f90343b0e45ba3e5df
+  base_checkpoint: /home/win98/rl_runs/paid-k1/train-semantic-prefailure-v3-s20260904/checkpoints/000002359296
+
+method:
+  engine: exact_cpu_mujoco
+  teacher: bounded_phase_correction_cem
+  population: 64
+  generations: 8
+  seed: 20260905
+  phase_samples: 8
+  training_phases: 4
+  held_out_validation_phases: 4
+  active_joints: 8
+  knot_count: 5
+  parameters: 40
+  maximum_abs_correction: 0.35
+  paid_reference_commit: e72e470230047dedaf66df0983f1d0ab746faeb5
+  t1_dagger_reference_commit: 378a12ac7446cd175f973c04e32912eb9acbee10
+
+result:
+  elapsed_seconds: 238.6089
+  objective: 468.2645
+  training:
+    baseline_completions: 0
+    candidate_completions: 1
+    baseline_mean_survival_fraction: 0.4273912
+    candidate_mean_survival_fraction: 0.5408867
+    mean_survival_fraction_delta: 0.1134955
+    survival_improvements: 4
+    survival_regressions: 0
+  validation:
+    baseline_completions: 1
+    candidate_completions: 1
+    baseline_mean_survival_fraction: 0.5028236
+    candidate_mean_survival_fraction: 0.5533160
+    mean_survival_fraction_delta: 0.0504924
+    mean_teacher_score_delta: 50.3409
+    survival_improvements: 2
+    survival_regressions: 1
+  gate_checks:
+    training_score_improved: true
+    validation_score_improved: true
+    validation_survival_delta_at_least_0_02: true
+    no_validation_completion_regression: true
+  k1_a_teacher_gate_passed: true
+
+artifacts:
+  report: /home/win98/rl_runs/paid-k1/k1a-stylized001-formal-s20260905-v1/report.json
+  report_sha256: 6e56fa8a2baba36073fbe3473f8fd5a0d332aab631c351944315799da522b2da
+  dataset: /home/win98/rl_runs/paid-k1/k1a-stylized001-formal-s20260905-v1/teacher-dataset.npz
+  dataset_sha256: 544118a8af7c91a74f65c4dc8a980164282a2b6bda45136cce8d22c89c035df4
+  dataset_frames: 585
+  tensorboard_event: /home/win98/rl_runs/paid-k1/k1a-stylized001-formal-s20260905-v1/tensorboard/events.out.tfevents.1788266054.Win-98
+  tensorboard_event_sha256: 0974e62b9466e63921df5870ae96ab0c8d2f18e137f2ed2c676ebe1598c8c62e
+  tensorboard_generations: 8
+  mujoco_replay_available: true
+
+decision:
+  teacher_hypothesis_supported: true
+  promotable: false
+  blocker: single_motion_teacher_precedes_full_corpus_bc_dagger_and_three_seed_gates
+  next:
+    - generate_phase_teachers_for_all_thirteen_locked_motions
+    - train_behavior_clone_on_teacher_actions
+    - collect_closed_loop_dagger_states
+    - resume_ppo_only_if_bc_and_dagger_pass_the_same_exact_cpu_grid

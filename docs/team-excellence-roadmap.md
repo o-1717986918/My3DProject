@@ -402,6 +402,20 @@ phase-level optimized correction teacher, behavior cloning, then PPO resume
 only if the teacher first improves the same exact-CPU grid. Evidence is locked
 in `training/locks/paid_k1_2026_09_01.yaml`.
 
+K1-A teacher checkpoint (2026-09-01): a clean-revision exact-CPU phase teacher
+now optimizes a bounded 40-parameter correction on training phases and evaluates
+untouched validation phases. On the weakest retained motion,
+`football_stylized-001`, the formal 64-by-8 CEM run improves training survival
+from 0.427 to 0.541 with four improvements and zero regressions. Held-out
+survival improves from 0.503 to 0.553; completion remains 1/4 with no completion
+regression. The predeclared K1-A teacher gate passes, supporting the searched
+teacher -> behavior cloning -> DAgger route. It remains non-promotable because
+one motion cannot train or validate a thirteen-motion deployable actor. Live
+TensorBoard scalars and exact MuJoCo `qpos` replay are now emitted without
+rendering in the accelerated loop. Evidence is locked in
+`training/locks/paid_k1a_2026_09_01.yaml`; next is full-corpus teacher generation,
+then BC and closed-loop DAgger before any PPO resume.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.
