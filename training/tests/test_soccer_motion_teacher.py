@@ -99,6 +99,7 @@ def test_state_feedback_candidates_are_bounded_and_keep_student_and_teacher():
         action_scale=0.35,
         control_period=0.02,
         action_clip=(-1.0, 1.0),
+        maximum_delta_from_student=0.2,
     )
 
     assert candidates.shape == (6, 3)
@@ -106,3 +107,4 @@ def test_state_feedback_candidates_are_bounded_and_keep_student_and_teacher():
     np.testing.assert_allclose(candidates[1], teacher)
     assert np.max(np.abs(candidates)) <= 1.0
     np.testing.assert_allclose(candidates[3:, 0], teacher[0])
+    assert np.max(np.abs(candidates - student)) <= 0.2 + 1.0e-12

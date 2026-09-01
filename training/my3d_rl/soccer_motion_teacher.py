@@ -130,6 +130,7 @@ def state_feedback_action_candidates(
     action_scale: float,
     control_period: float,
     action_clip: tuple[float, float],
+    maximum_delta_from_student: float = 1.0,
 ) -> np.ndarray:
     """Build bounded, deterministic actions for short-horizon teacher search."""
     student_action = np.asarray(student_action, dtype=np.float64)
@@ -143,7 +144,11 @@ def state_feedback_action_candidates(
         or velocity_error.shape != student_action.shape
     ):
         raise ValueError("state-feedback teacher vectors are incompatible")
-    if action_scale <= 0.0 or control_period <= 0.0:
+    if (
+        action_scale <= 0.0
+        or control_period <= 0.0
+        or maximum_delta_from_student <= 0.0
+    ):
         raise ValueError("state-feedback decoder scales must be positive")
     active = np.asarray(active_joint_indices, dtype=np.int64)
     if active.ndim != 1 or active.size < 1 or np.any(active < 0) or np.any(
@@ -163,7 +168,9 @@ def state_feedback_action_candidates(
         nominal_teacher_action + 0.5 * feedback,
         nominal_teacher_action + feedback,
     ]
-    return np.stack([np.clip(node, *action_clip) for node in nodes])
+    lower = np.maximum(action_clip[0], student_action - maximum_delta_from_student)
+    upper = np.minimum(action_clip[1], student_action + maximum_delta_from_student)
+    return np.stack([np.clip(node, lower, upper) for node in nodes])
 
 
 class SoccerMotionCorrectionEvaluator:
@@ -262,6 +269,7 @@ class SoccerMotionCorrectionEvaluator:
         correction: np.ndarray,
         teacher_base_policy: SoccerMotionPolicy,
         horizon: int,
+        maximum_action_delta: float,
     ) -> tuple[np.ndarray, dict[str, float]]:
         """Select a state-feedback label using exact copied MuJoCo states."""
         length = int(self.corpus.lengths[motion])
@@ -281,6 +289,7 @@ class SoccerMotionCorrectionEvaluator:
             action_scale=self.contract.action_scale,
             control_period=1.0 / self.contract.frequency_hz,
             action_clip=self.contract.action_clip,
+            maximum_delta_from_student=maximum_action_delta,
         )
         costs: list[float] = []
         for first_action in candidates:
@@ -390,6 +399,7 @@ class SoccerMotionCorrectionEvaluator:
         teacher_base_policy: SoccerMotionPolicy | None = None,
         state_feedback_horizon: int = 0,
         minimum_state_feedback_improvement: float = 0.0,
+        maximum_state_feedback_action_delta: float = 1.0,
         rng: np.random.Generator | None = None,
     ) -> dict[str, Any]:
         """Run one deterministic exact-state restart to the finite endpoint."""
@@ -405,7 +415,11 @@ class SoccerMotionCorrectionEvaluator:
             raise ValueError("correction must have one action per finite frame")
         if not np.isfinite(correction).all():
             raise ValueError("correction contains non-finite values")
-        if state_feedback_horizon < 0 or minimum_state_feedback_improvement < 0.0:
+        if (
+            state_feedback_horizon < 0
+            or minimum_state_feedback_improvement < 0.0
+            or maximum_state_feedback_action_delta <= 0.0
+        ):
             raise ValueError("state-feedback teacher settings are invalid")
 
         data = mujoco.MjData(self.model)
@@ -510,6 +524,7 @@ class SoccerMotionCorrectionEvaluator:
                     correction=correction,
                     teacher_base_policy=teacher_base_policy,
                     horizon=state_feedback_horizon,
+                    maximum_action_delta=maximum_state_feedback_action_delta,
                 )
                 cost_improvement = feedback["improvement_over_student"]
                 label_selected = (

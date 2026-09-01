@@ -114,6 +114,9 @@ def main() -> None:
     parser.add_argument(
         "--minimum-state-feedback-improvement", type=float, default=0.0
     )
+    parser.add_argument(
+        "--maximum-state-feedback-action-delta", type=float, default=1.0
+    )
     parser.add_argument("--seed", type=int, default=20260952)
     args = parser.parse_args()
     if (
@@ -123,6 +126,7 @@ def main() -> None:
         or not 0.0 <= args.teacher_beta <= 1.0
         or args.state_feedback_horizon < 0
         or args.minimum_state_feedback_improvement < 0.0
+        or args.maximum_state_feedback_action_delta <= 0.0
     ):
         raise ValueError("DAgger collection settings are invalid")
     output_dir = _external_new_directory(args.output_dir)
@@ -206,6 +210,9 @@ def main() -> None:
                     minimum_state_feedback_improvement=(
                         args.minimum_state_feedback_improvement
                     ),
+                    maximum_state_feedback_action_delta=(
+                        args.maximum_state_feedback_action_delta
+                    ),
                     rng=rng,
                 )
                 captures.append((motion, start, result["trajectory"], result))
@@ -219,6 +226,12 @@ def main() -> None:
             selected_labels = np.concatenate(
                 [
                     node["trajectory"]["teacher_label_selected"]
+                    for node in results
+                ]
+            )
+            cost_improvements = np.concatenate(
+                [
+                    node["trajectory"]["teacher_cost_improvement"]
                     for node in results
                 ]
             )
@@ -243,6 +256,16 @@ def main() -> None:
                             )
                         )
                     )
+                    if np.any(selected_labels)
+                    else 0.0
+                ),
+                "dagger/selected_mean_cost_improvement": (
+                    float(np.mean(cost_improvements[selected_labels]))
+                    if np.any(selected_labels)
+                    else 0.0
+                ),
+                "dagger/selected_min_cost_improvement": (
+                    float(np.min(cost_improvements[selected_labels]))
                     if np.any(selected_labels)
                     else 0.0
                 ),
@@ -360,6 +383,9 @@ def main() -> None:
         "state_feedback_horizon": args.state_feedback_horizon,
         "minimum_state_feedback_improvement": (
             args.minimum_state_feedback_improvement
+        ),
+        "maximum_state_feedback_action_delta": (
+            args.maximum_state_feedback_action_delta
         ),
         "teacher_query": (
             "short-horizon exact-CPU state-feedback action search around the "
