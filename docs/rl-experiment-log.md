@@ -1187,3 +1187,35 @@ configuration, selection perturbation seed `20260983`, conditional confirmation
 seed `20260984`, and all fail-closed rules are fixed in
 `training/locks/paid_k1d_2026_09_02.yaml`. The complete training test suite
 passes before this predeclaration. No new checkpoint is retained yet.
+
+The formal K1-D run admits 15,002 labels from 416 beta-zero episodes and
+produces a 34,553-frame aggregate. Of the new labels, 11,626 are training and
+3,376 are validation rows; 394 episode groups contain labels and none spans
+both partitions. All reset and validation seeds are present. The observed
+minimum search improvement is `0.00100031`, and the minimum independent
+validation improvement is `0.00051880`, both above the locked thresholds.
+
+The first clone command is rejected before creating an output directory
+because the BC validator recognizes only the older K1-B DAgger purpose. The
+validator is extended explicitly for K1-D. Its appended-row monitor also moves
+from `(motion,start)` inference to the manifest's source-frame boundary,
+because disjoint perturbations intentionally reuse nominal starts. Regression
+tests cover both behaviors. The clean `v2` output-head clone lowers new-label
+teacher MSE from `0.00846` to `0.00737`; best episode-held validation MSE is
+`0.004406`.
+
+Selection and confirmation each evaluate all 3,076 available phases under a
+disjoint reset seed. The large survival sign test first exposes a float
+overflow in direct `2**discordant` evaluation; no comparison is accepted. The
+tool is changed to SciPy's numerically stable exact binomial test and gains
+small-count, negative-count and 1,200-discordant regression cases.
+
+On selection seed `20260983`, completion rises from 939 to 972. Transitions are
+34 candidate-only versus one baseline-only (`p=1.05e-9`); mean survival rises
+by `0.011239`, with 1,171 improvements and 285 regressions. On the reserved
+confirmation seed `20260984`, completion rises from 939 to 973, transitions
+are 35 versus one (`p=5.38e-10`), and survival rises by `0.011535`, with 1,162
+improvements and 294 regressions. Tracking passes twice and every motion avoids
+a net completion loss. The K1-D checkpoint is now the retained training actor.
+It advances the roadmap to ball-contact and motion-transition development, not
+to Apollo runtime deployment.

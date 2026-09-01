@@ -505,6 +505,20 @@ when its completed manifest binds the exact dataset hash. Selection and a
 conditional confirmation use untouched perturbation seeds; neither authorizes
 runtime deployment or ball work by itself.
 
+K1-D closes successfully on 2026-09-02. Formal beta-zero collection covers
+416 perturbed student episodes and admits 15,002 labels; the 34,553-frame
+aggregate contains 11,626 new training labels and 3,376 new validation labels
+with zero episode split leaks. The output-head clone passes two disjoint,
+full-phase 3,076-pair exact-CPU grids. Selection improves completion from 939
+to 972 with 34 candidate-only versus one baseline-only completion
+(`p=1.05e-9`) and raises mean survival by 0.01124. Confirmation improves 939
+to 973 with 35 versus one (`p=5.38e-10`) and raises survival by 0.01153. Both
+tracking gates pass and no motion has a net completion loss. The K1-D clone is
+therefore the retained training actor; the prior K1-B clone remains a fallback.
+This advances work to R1 ball contact and motion transition only. It still does
+not authorize Apollo runtime deployment, reward-only PPO, or any claim of a
+complete football skill.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.
