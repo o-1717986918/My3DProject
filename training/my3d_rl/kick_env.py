@@ -112,8 +112,14 @@ class DirectionalKick(mjx_env.MjxEnv):
         ):
             raise ValueError("fixed_desired_arrival_speed must be -1 or in (0, 6]")
         self.contract = contract or load_policy_contract(DEFAULT_CONTRACT)
-        if self.contract.policy_name not in {"kick_policy_v2", "kick_policy_v3"}:
-            raise ValueError("DirectionalKick requires a v2 or v3 kick contract")
+        if self.contract.policy_name not in {
+            "kick_policy_v2",
+            "kick_policy_v3",
+            "striker_policy_v1",
+        }:
+            raise ValueError(
+                "DirectionalKick requires a v2, v3 or striker-v1 contract"
+            )
         self.prefix = prefix
         self._resource_root = resource_root
 

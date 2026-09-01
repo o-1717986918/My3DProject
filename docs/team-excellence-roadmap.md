@@ -310,6 +310,19 @@ at the switch boundary. R1 now ports the official ICRA 2026 Booster T1
 long-horizon privileged-teacher/history-student curriculum to MuJoCo/Warp;
 the default-off table remains only a regression fallback.
 
+Long-horizon striker checkpoint (2026-09-01): the official T1 curriculum
+structure is now represented by a versioned 20-second MuJoCo/Warp task, a
+102-to-23 deployable actor contract, a 115-value privileged teacher boundary,
+the preserved exact-CPU kick prior, and an independent exact CPU evaluator.
+The deterministic settled controller contacts in 64/64 with zero falls, but
+passes only 29/64 in Warp and 23/64 in exact CPU. A 32,768-step residual PPO
+teacher is worse than the prior under the accepted controller; normalization-
+induced saturation and prior-free exploration were also explicitly rejected.
+R1 therefore remains open. The next gate is a target-range-conditioned
+teacher that beats 23/64 on untouched exact-CPU rollouts, followed by history
+distillation, three seeds, source/ONNX parity and server replay. No long-
+horizon model is enabled in the competition runtime.
+
 ### R2: complete individual football actions
 
 Estimated effort: 15--25 effective engineering days.

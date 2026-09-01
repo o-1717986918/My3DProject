@@ -760,3 +760,61 @@ student and constrained adaptation. The next experiment ports that task
 structure and curriculum to this repository's MuJoCo/Warp backend. No external
 checkpoint exists in the source, and Isaac Gym code is not copied into the
 competition runtime.
+
+## Long-horizon striker task and settled contact gate — 2026-09-01
+
+`striker_policy_v1` now defines a 102-value student observation, 115-value
+privileged teacher/value state and 23 residual actions. The task lasts 1,000
+50 Hz cycles and composes Apollo's accepted walk target, a frozen 60-frame
+kick prior and a distance-gated 0.10-scale learned correction. Reset
+curricula cover near-ball, closed-loop and robust approach distributions.
+The training script records hashes/configuration/checkpoints and refuses a
+formal accelerated run without a passing parity report.
+
+The first implementation exposed three experiment-invalidating effects.
+Missing `time_out` metadata broke Brax bootstrap-on-timeout. Online Welford
+normalization made constant pre-contact features acquire near-zero variance;
+after contact, a seed-11102 checkpoint saturated almost every action near
+`+/-1` despite small in-distribution error. It is rejected. With
+normalization disabled, prior-free seed 11103 remained upright but produced no
+contact through the retained continuation, confirming that a 5% Gaussian
+residual cannot discover the coordinated 23-joint kick from scratch.
+
+Adding the physical prior initially still produced no contact. Exact replay
+located the mismatch: the original trajectory was optimized while Apollo
+continued `[0.50, -0.04, 0]` for 33 frames. Restoring this versioned ownership
+made the nominal pose reach 1.93 m/s directional ball speed. Removing
+activation-based attenuation from the approach command then eliminated a gait
+deadband. Under a strict 7 cm trigger, frozen seed 11203 reached 55/64,
+contacted 55/64, succeeded 19/64 and fell zero times. All nine missed robots
+settled safely between 8.2 and 10.2 cm.
+
+The accepted trigger is now strict immediate release plus a 25-frame
+confirmation inside an 11 cm/0.10 rad envelope. On the same 64 Warp rollouts
+it triggers and contacts in 64/64, succeeds in 29/64 (`45.31%`) and has zero
+falls. An independent exact CPU MuJoCo implementation evaluated seed 12203:
+64/64 triggers, 64/64 contacts, 23/64 successes (`35.94%`) and zero falls. A
+32,768-step prior-assisted teacher checkpoint reaches only 28/64 under the
+accepted Warp controller, so it regresses against the 29/64 prior and is
+rejected; later continuation also regresses.
+
+Immutable local evidence:
+
+- striker contract SHA-256:
+  `5cbd1d899336416078bd377ce5c713f3c09f96f65c9f3204f3e88b8ad37e411d`;
+- frozen kick-prior manifest SHA-256:
+  `4605fc6b18f360c4079a9f8cf8c5bf463523c5d35f834f4bec351f4d44136108`;
+- accepted prior-only Warp report SHA-256:
+  `9d61cf3c1b56b496ad0b10f93d328c0e855e71a2223646e7ab606fef8b399b29`;
+- rejected early-teacher Warp report SHA-256:
+  `404cc55f444eec7361abedcb22a689d97717af95ce126e586173c03b1d2aea25`;
+- accepted exact-CPU diagnostic report SHA-256:
+  `b601785d2dcb0eea58fb2cd58b6a8c35da844d80f4d2b39840af5d7b394ef3f0`;
+- rejected early/continued teacher run-manifest SHA-256 values:
+  `1269930628ba571df16fb442987e30a00241f6fb77bc1caed6b1b995dd5cf4f6`
+  and `619f6e171b3d27561ef70951a026362b0deeafe4273787357447411f8d16cef6`.
+
+This is a safe closed-loop baseline, not a promoted kick. The next experiment
+must train target-range-conditioned physical outcome corrections and exceed
+the deterministic 23/64 exact-CPU baseline before history distillation. More
+steps on the rejected PPO objective are not authorized by current evidence.

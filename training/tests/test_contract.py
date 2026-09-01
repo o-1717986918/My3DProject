@@ -6,6 +6,9 @@ from my3d_rl import load_policy_contract
 CONTRACT = Path(__file__).parents[1] / "contracts" / "kick_policy_v1.yaml"
 CONTRACT_V2 = Path(__file__).parents[1] / "contracts" / "kick_policy_v2.yaml"
 CONTRACT_V3 = Path(__file__).parents[1] / "contracts" / "kick_policy_v3.yaml"
+STRIKER_CONTRACT = (
+    Path(__file__).parents[1] / "contracts" / "striker_policy_v1.yaml"
+)
 
 
 def test_kick_policy_contract_is_internally_consistent():
@@ -80,5 +83,20 @@ def test_kick_v3_versions_the_pre_kick_locomotion_phase():
     assert contract.input_shape == (1, 98)
     fields = dict(contract.observation_fields)
     assert fields["action_progress"] == 2
+    assert fields["locomotion_phase"] == 2
+    assert fields["support_hint"] == 3
+
+
+def test_striker_v1_versions_the_closed_loop_approach_boundary():
+    contract = load_policy_contract(STRIKER_CONTRACT)
+
+    assert contract.policy_name == "striker_policy_v1"
+    assert contract.observation_size == 102
+    assert contract.input_shape == (1, 102)
+    assert contract.output_shape == (1, 23)
+    fields = dict(contract.observation_fields)
+    assert fields["approach_command"] == 3
+    assert fields["kick_activation"] == 1
+    assert fields["kick_phase"] == 2
     assert fields["locomotion_phase"] == 2
     assert fields["support_hint"] == 3

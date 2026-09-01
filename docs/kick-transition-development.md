@@ -291,6 +291,73 @@ staging will be reimplemented against the existing MuJoCo/Warp stack. The
 short 3-second open-loop transition task remains an exact regression gate, not
 the primary learning task.
 
+## Long-horizon striker baseline and exact-CPU gate
+
+The first port is now implemented as the versioned `striker_policy_v1`
+boundary. Its deployable actor has 102 values and 23 bounded joint
+corrections; the training-only teacher/critic view has 115 values. A
+20-second task keeps Apollo walking in closed loop toward a target-relative
+contact pose, runs the frozen 60-frame exact-CPU kick prior after a guarded
+trigger, and permits recovery/re-approach. The actor sees current ball and
+target state, approach command, kick activation/progress, locomotion phase and
+support hint. It does not receive privileged base velocity or goal-relative
+teacher fields.
+
+Four implementation failures were resolved before interpreting learning:
+
+- Brax timeout bootstrapping required an explicit `time_out` state field;
+- online Welford normalization saturated features that are constant before
+  contact and change afterwards, so this contract now retains bounded SI
+  units and disables online observation normalization;
+- the preserved kick trajectory requires Apollo's versioned
+  `[0.50, -0.04, 0]` walk command for its first 33 frames; removing that
+  concurrent baseline removed contact even at the nominal pose;
+- attenuating small approach commands by kick activation put Apollo below its
+  gait deadband and stranded the robot outside the trigger envelope.
+
+After removing the command attenuation, a strict 7 cm trigger reached 55/64
+seed-11203 Warp rollouts, contacted in all 55, succeeded in 19 and fell in
+none. The nine non-triggering robots had safely converged to 8.2--10.2 cm
+contact error. The deterministic controller now triggers immediately inside
+the strict envelope, or after 25 consecutive frames inside an 11 cm/0.10 rad
+settled envelope. On the same frozen rollouts this reaches and contacts in
+64/64, succeeds in 29/64 (`45.31%`), and has zero falls. The detailed Warp
+report SHA-256 is
+`9d61cf3c1b56b496ad0b10f93d328c0e855e71a2223646e7ab606fef8b399b29`.
+
+An independent double-precision CPU MuJoCo evaluator reimplements the same
+geometry, confirmation state, Apollo ONNX feedback, kick-walk ownership,
+prior playback, rearm and terminal rules. Seed 12203 contacts in 64/64,
+succeeds in 23/64 (`35.94%`) and has zero falls. Its report SHA-256 is
+`b601785d2dcb0eea58fb2cd58b6a8c35da844d80f4d2b39840af5d7b394ef3f0`.
+The accelerated/exact difference and the low absolute success rate both block
+promotion.
+
+Random residual exploration without the physical prior never discovered a
+contact through the retained seed-11103 checkpoints. A seed-11102 run with
+online normalization appeared to contact, but inspection showed near-unit
+action saturation as soon as post-contact fields left their pre-contact
+zero-variance distribution; it is invalid. With the prior restored and
+normalization disabled, a 32,768-step teacher checkpoint regresses to 28/64
+under the accepted settled controller, versus the deterministic prior's
+29/64. Its accelerated report SHA-256 is
+`404cc55f444eec7361abedcb22a689d97717af95ce126e586173c03b1d2aea25`.
+Later continuation also regressed, so none of these checkpoints is retained
+as a candidate.
+
+The accepted continuation is not more PPO steps on this reward. It is:
+
+1. freeze the 64/64 contact, zero-fall controller as the measurable baseline;
+2. add identical-state independent-controller CPU/Warp comparison and retain
+   exact CPU as the promotion authority;
+3. make kick strength/range a supervised target and train a privileged
+   correction against physical terminal outcomes, not exploration-only
+   contact discovery;
+4. distil a 50-frame history student only after the teacher beats the
+   deterministic prior on untouched exact-CPU rollouts;
+5. require three exact seeds, ONNX/source parity and server replay before any
+   C++ runtime integration.
+
 ## Implementation route
 
 ### K1. Version the transition contract
@@ -368,8 +435,11 @@ Only then expand to 3.5/5 m, angle bins, shot/clear, and moving-ball entries.
       exact CPU replay fails to improve the safe 16/92 base;
 - [x] scale switch timing to 512 approaches, prove 101/102 bank oracle
       coverage, and reject current-state, history, kNN and fallback selectors;
-- [ ] implement the long-horizon privileged approach-and-kick teacher in the
-      existing MuJoCo/Warp task, then distil a history student;
+- [x] implement the long-horizon privileged approach-and-kick task, frozen
+      kick prior, deterministic settled trigger and independent exact-CPU
+      evaluator;
+- [ ] beat the deterministic prior with a privileged teacher on untouched
+      exact-CPU rollouts, then distil a 50-frame history student;
 - [ ] add the guarded C++ kick-policy runner and same-cycle fallback tests;
 - [ ] rerun the central 2 m CPU and 7v7 server gates;
 - [ ] update this record and the R1 checkpoint with immutable artifact hashes.

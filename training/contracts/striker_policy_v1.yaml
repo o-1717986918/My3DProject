@@ -1,0 +1,129 @@
+schema_version: 1
+policy_name: striker_policy_v1
+robot: Booster T1
+control:
+  frequency_hz: 50
+  mode: residual_joint_position
+  action_size: 23
+  action_clip: [-1.0, 1.0]
+  units: normalized
+
+joint_order:
+  - AAHead_yaw
+  - Head_pitch
+  - Left_Shoulder_Pitch
+  - Left_Shoulder_Roll
+  - Left_Elbow_Pitch
+  - Left_Elbow_Yaw
+  - Right_Shoulder_Pitch
+  - Right_Shoulder_Roll
+  - Right_Elbow_Pitch
+  - Right_Elbow_Yaw
+  - Waist
+  - Left_Hip_Pitch
+  - Left_Hip_Roll
+  - Left_Hip_Yaw
+  - Left_Knee_Pitch
+  - Left_Ankle_Pitch
+  - Left_Ankle_Roll
+  - Right_Hip_Pitch
+  - Right_Hip_Roll
+  - Right_Hip_Yaw
+  - Right_Knee_Pitch
+  - Right_Ankle_Pitch
+  - Right_Ankle_Roll
+
+effector_order:
+  - he1
+  - he2
+  - lae1
+  - lae2
+  - lae3
+  - lae4
+  - rae1
+  - rae2
+  - rae3
+  - rae4
+  - te1
+  - lle1
+  - lle2
+  - lle3
+  - lle4
+  - lle5
+  - lle6
+  - rle1
+  - rle2
+  - rle3
+  - rle4
+  - rle5
+  - rle6
+
+actor_observation:
+  size: 102
+  frame: torso_yaw_local
+  fields:
+    - {name: body_angular_velocity, size: 3, units: rad_s}
+    - {name: projected_gravity, size: 3, units: normalized}
+    - {name: joint_position_offset, size: 23, units: rad}
+    - {name: joint_velocity, size: 23, units: rad_s}
+    - {name: previous_action, size: 23, units: normalized}
+    - {name: ball_position, size: 3, units: m}
+    - {name: ball_velocity, size: 3, units: m_s}
+    - {name: target_direction, size: 2, units: normalized}
+    - {name: target_distance, size: 1, units: m}
+    - {name: requested_ball_speed, size: 1, units: m_s}
+    - {name: desired_arrival_speed, size: 1, units: m_s}
+    - {name: action_mode, size: 3, units: one_hot, values: [pass, shot, clear]}
+    - {name: ball_observation_age, size: 1, units: s}
+    - {name: ball_observation_valid, size: 1, units: binary}
+    - {name: approach_command, size: 3, units: m_s_m_s_rad_s}
+    - {name: kick_activation, size: 1, units: normalized}
+    - {name: kick_phase, size: 2, units: sin_cos_half_circle}
+    - {name: locomotion_phase, size: 2, units: sin_cos_limit_cycle_proxy}
+    - {name: support_hint, size: 3, units: one_hot, values: [left, double, right]}
+
+locomotion_phase_estimator:
+  position_signal: Right_Hip_Pitch_minus_Left_Hip_Pitch
+  velocity_signal: Right_Hip_Pitch_minus_Left_Hip_Pitch
+  nominal_frequency_hz: 1.6
+  neutral_magnitude_rad: 0.02
+  support_switch_sine: 0.15
+  runtime_inputs: [joint_position_offset, joint_velocity]
+
+decoder:
+  baseline: apollo_walk_policy
+  composition: clipped_baseline_plus_distance_gated_closed_loop_residual
+  action_scale_rad:
+    - 0.10
+    - 0.10
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.20
+    - 0.15
+    - 0.35
+    - 0.25
+    - 0.25
+    - 0.45
+    - 0.25
+    - 0.20
+    - 0.35
+    - 0.25
+    - 0.25
+    - 0.45
+    - 0.25
+    - 0.20
+  gains: apollo_t1_per_joint
+
+deployment:
+  format: ONNX
+  input_name: observations
+  output_name: actions
+  input_shape: [1, 102]
+  output_shape: [1, 23]
+  requires_finite_output: true
+  fallback: apollo_walk_and_existing_stable_kick
