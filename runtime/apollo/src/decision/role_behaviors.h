@@ -45,7 +45,8 @@ public:
         const world::WorldSnapshot& snapshot,
         Blackboard& blackboard,
         RoleManager& role_manager,
-        bool enable_pass_strategy) const;
+        bool enable_pass_strategy,
+        bool enable_targeted_kick = false) const;
     void reset_state() const { state_ = {}; }
 private:
     mutable APState state_;
@@ -90,6 +91,7 @@ std::optional<HighLevelCommand> select_role_behavior(
     const world::WorldSnapshot& snapshot,
     Blackboard& blackboard,
     RoleManager& role_manager,
-    bool enable_pass_strategy);
+    bool enable_pass_strategy,
+    bool enable_targeted_kick = false);
 
 }  // namespace decision

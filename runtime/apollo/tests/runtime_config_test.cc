@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "src/app/runtime_config.h"
+#include "src/strategy/action_capability.h"
 
 #include <functional>
 #include <iostream>
@@ -71,6 +72,21 @@ int main() {
         "--disable-parameterized-kick"});
     if (kick_disabled.enable_parameterized_kick) {
         std::cerr << "parameterized kick could not be disabled\n";
+        return 1;
+    }
+
+    const strategy::ActionCapabilityRegistry safe_capabilities(false);
+    const strategy::CooperativeAction pass{};
+    if (safe_capabilities.state(strategy::SkillCapability::TargetedPass) !=
+            strategy::CapabilityState::Unavailable ||
+        safe_capabilities.executable(pass, 0.0)) {
+        std::cerr << "disabled target kick capability was executable\n";
+        return 1;
+    }
+    const strategy::ActionCapabilityRegistry experimental_capabilities(true);
+    if (experimental_capabilities.state(strategy::SkillCapability::TargetedPass) !=
+        strategy::CapabilityState::Experimental) {
+        std::cerr << "enabled target kick capability was not experimental\n";
         return 1;
     }
 

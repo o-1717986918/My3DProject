@@ -2,6 +2,7 @@
 
 #include "src/behavior/kick_execution_profile.h"
 
+#include "src/decision/kick_contract.h"
 #include "src/math/math_utils.h"
 #include "src/world/frame_normalizer.h"
 
@@ -12,10 +13,6 @@ namespace behavior {
 
 namespace {
 
-constexpr double kMinimumTargetDistanceM = 0.25;
-constexpr double kMaximumTargetAngleDeg = 15.0;
-constexpr double kMinimumRequestedSpeedMps = 0.8;
-constexpr double kMaximumRequestedSpeedMps = 3.0;
 constexpr double kMinimumDriveTargetM = 0.50;
 constexpr double kMaximumDriveTargetM = 0.85;
 constexpr double kBaseLateralTargetM = -0.04;
@@ -40,8 +37,8 @@ KickExecutionProfile make_kick_execution_profile(
         !command.target_point_m.has_value() ||
         !snapshot.ball.position_valid ||
         !std::isfinite(command.requested_ball_speed_mps) ||
-        command.requested_ball_speed_mps < kMinimumRequestedSpeedMps ||
-        command.requested_ball_speed_mps > kMaximumRequestedSpeedMps ||
+        command.requested_ball_speed_mps < decision::kick_contract::kMinimumRequestedSpeedMps ||
+        command.requested_ball_speed_mps > decision::kick_contract::kMaximumRequestedSpeedMps ||
         !finite_point(*command.target_point_m) ||
         !finite_point({
             snapshot.self.position_m[0], snapshot.self.position_m[1]})) {
@@ -53,7 +50,8 @@ KickExecutionProfile make_kick_execution_profile(
         (*command.target_point_m)[1] - snapshot.ball.position_m[1],
     };
     const double target_distance_m = math::norm2(target_delta);
-    if (target_distance_m < kMinimumTargetDistanceM) {
+    if (target_distance_m < decision::kick_contract::kMinimumTargetDistanceM ||
+        target_distance_m > decision::kick_contract::kMaximumTargetDistanceM) {
         return profile;
     }
 
@@ -64,13 +62,14 @@ KickExecutionProfile make_kick_execution_profile(
     const double relative_angle_deg =
         math::normalize_deg(target_heading_deg - self_yaw_deg);
     if (!std::isfinite(relative_angle_deg) ||
-        std::abs(relative_angle_deg) > kMaximumTargetAngleDeg) {
+        std::abs(relative_angle_deg) > decision::kick_contract::kMaximumTargetAngleDeg) {
         return profile;
     }
 
     const double speed_fraction =
-        (command.requested_ball_speed_mps - kMinimumRequestedSpeedMps) /
-        (kMaximumRequestedSpeedMps - kMinimumRequestedSpeedMps);
+        (command.requested_ball_speed_mps - decision::kick_contract::kMinimumRequestedSpeedMps) /
+        (decision::kick_contract::kMaximumRequestedSpeedMps -
+         decision::kick_contract::kMinimumRequestedSpeedMps);
     const double drive_target =
         kMinimumDriveTargetM +
         speed_fraction * (kMaximumDriveTargetM - kMinimumDriveTargetM);

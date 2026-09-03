@@ -108,7 +108,8 @@ readiness, and behavior-tree selection/fallback.
 The strict deterministic full-team gate was run with:
 
 ```bash
-MATCH_PASS_SCENARIO=1 MATCH_REQUIRE_PASS=1 MATCH_REQUIRE_KICK=1 \
+APOLLO_ENABLE_PARAMETERIZED_KICK=1 MATCH_PASS_SCENARIO=1 \
+  MATCH_REQUIRE_PASS=1 MATCH_REQUIRE_KICK=1 \
   APOLLO_STATUS_INTERVAL=5 scripts/run_apollo_acceptance_match.sh 600
 ```
 

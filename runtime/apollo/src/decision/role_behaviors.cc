@@ -8,6 +8,7 @@
 #include "src/decision/field_geometry.h"
 #include "src/decision/role_manager.h"
 #include "src/math/math_utils.h"
+#include "src/strategy/action_capability.h"
 #include "src/world/frame_normalizer.h"
 
 #include <algorithm>
@@ -599,7 +600,8 @@ HighLevelCommand APBehavior::make_command(
     const world::WorldSnapshot& snapshot,
     Blackboard& blackboard,
     RoleManager& role_manager,
-    bool enable_pass_strategy) const {
+    bool enable_pass_strategy,
+    bool enable_targeted_kick) const {
     static const APNodePtr ap_tree = bt::command<APDecisionContext>(make_ap_push_ball_to_goal);
 
     if (!is_our_set_play(snapshot)) {
@@ -614,7 +616,9 @@ HighLevelCommand APBehavior::make_command(
         0.0};
     context.ball_distance = math::planar_dist(context.ball, context.self);
 
-    if (enable_pass_strategy && snapshot.play_mode == world::PlayMode::PlayOn) {
+    const strategy::ActionCapabilityRegistry capabilities(enable_targeted_kick);
+    if (enable_pass_strategy && enable_targeted_kick &&
+        snapshot.play_mode == world::PlayMode::PlayOn) {
         strategy::PlanningResult plan = action_planner_.plan(snapshot);
         blackboard.set(Blackboard::kKeyStrategyPlan, plan);
 
@@ -627,7 +631,19 @@ HighLevelCommand APBehavior::make_command(
 
         constexpr double kPassPlanningEngageDistanceM = 2.5;
         constexpr double kPassCommitDurationS = 6.0;
+        double relative_target_angle_deg = 0.0;
+        if (plan.selected.has_value()) {
+            const auto target_delta = math::vec2_sub(
+                plan.selected->target_point_m, context.ball);
+            const double target_heading_deg = math::vector_angle_deg(target_delta);
+            const double self_yaw_deg =
+                world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+                    snapshot.self.orientation_wxyz);
+            relative_target_angle_deg =
+                math::normalize_deg(target_heading_deg - self_yaw_deg);
+        }
         if (!state_.committed_pass.has_value() && plan.selected.has_value() &&
+            capabilities.executable(*plan.selected, relative_target_angle_deg) &&
             context.ball_distance <= kPassPlanningEngageDistanceM) {
             strategy::CooperativeAction committed = *plan.selected;
             state_.next_pass_sequence_id = static_cast<std::uint8_t>(
@@ -757,13 +773,15 @@ std::optional<HighLevelCommand> select_role_behavior(
     const world::WorldSnapshot& snapshot,
     Blackboard& blackboard,
     RoleManager& role_manager,
-    bool enable_pass_strategy) {
+    bool enable_pass_strategy,
+    bool enable_targeted_kick) {
     // AP is the only behavior that needs RoleManager (to latch the set-play
     // push); dispatch it directly and let the other behaviors share the
     // 2-param base interface.
     if (ap_behavior_instance().matches(blackboard)) {
         return ap_behavior_instance().make_command(
-            snapshot, blackboard, role_manager, enable_pass_strategy);
+            snapshot, blackboard, role_manager, enable_pass_strategy,
+            enable_targeted_kick);
     }
     static const std::array<const RoleBehavior*, 6> behaviors{
         &cbm_behavior_instance(),

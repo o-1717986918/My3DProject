@@ -79,14 +79,14 @@ std::string_view kick_mode_name(const decision::HighLevelCommand& command) {
 AgentApp::AgentApp(RuntimeConfig config)
     : config_(std::move(config)),
       world_state_(config_.team_name, config_.player_number, 7),
-      decision_manager_(config_.enable_pass_strategy),
+      decision_manager_(config_.enable_pass_strategy, config_.enable_parameterized_kick),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name) {}
 
 AgentApp::AgentApp(RuntimeConfig config, std::unique_ptr<server::TcpLpmClient> client)
     : config_(std::move(config)),
       world_state_(config_.team_name, config_.player_number, 7),
-      decision_manager_(config_.enable_pass_strategy),
+      decision_manager_(config_.enable_pass_strategy, config_.enable_parameterized_kick),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name),
       client_(std::move(client)) {}
@@ -156,9 +156,11 @@ std::string AgentApp::process_perception_message(const std::string& message) {
         nodes.push_back(server::ActionEncoder::encode_beam(beam->x_m, beam_y, beam->yaw_deg));
         world_state_.set_has_beamed(true);
         last_active_motion_ = "Beam";
+        last_execution_status_ = behavior::SkillExecutionStatus::Completed;
     } else {
         const auto motion_result = motion_manager_.step(snapshot, command, reset);
         last_active_motion_ = motion_result.active_motion;
+        last_execution_status_ = motion_result.status;
         if (motion_result.handled) {
             const auto motor_nodes = server::ActionEncoder::encode_motor_actions(motion_result.joint_targets, robot_model_);
             nodes.insert(nodes.end(), motor_nodes.begin(), motor_nodes.end());
@@ -214,6 +216,7 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << " cycle=" << frame.server_cycle
             << " play_on=" << (snapshot.play_mode == world::PlayMode::PlayOn ? 1 : 0)
             << " motion=" << last_active_motion_
+            << " execution=" << behavior::to_string(last_execution_status_)
             << " kick_mode=" << kick_mode_name(command)
             << " ball_visible=" << (snapshot.ball.visible ? 1 : 0)
             << " ball_position_valid=" << (snapshot.ball.position_valid ? 1 : 0)

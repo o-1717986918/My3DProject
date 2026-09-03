@@ -90,6 +90,7 @@ add_library(comm_core
 
 add_library(strategy_core
     src/strategy/action_planner.cc
+    src/strategy/action_capability.cc
     src/strategy/ball_trajectory_model.cc
     src/strategy/cooperative_action.cc
     src/strategy/field_evaluator.cc
@@ -248,6 +249,7 @@ if(BUILD_TESTING)
         tests/runtime_config_test.cc
         src/app/runtime_config.cc
     )
+    target_link_libraries(runtime_config_test PRIVATE strategy_core)
     target_include_directories(runtime_config_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(runtime_config_test PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME runtime_config_test COMMAND runtime_config_test)
@@ -262,6 +264,12 @@ if(BUILD_TESTING)
     target_include_directories(strategy_core_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(strategy_core_test PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME strategy_core_test COMMAND strategy_core_test)
+
+    add_executable(action_capability_test tests/action_capability_test.cc)
+    target_link_libraries(action_capability_test PRIVATE strategy_core)
+    target_include_directories(action_capability_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(action_capability_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME action_capability_test COMMAND action_capability_test)
 
     add_executable(team_comm_strategy_test tests/team_comm_strategy_test.cc)
     target_link_libraries(team_comm_strategy_test PRIVATE comm_core)

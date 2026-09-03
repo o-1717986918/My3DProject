@@ -21,6 +21,7 @@ struct BehaviorContext {
     Blackboard& blackboard;
     RoleManager& role_manager;
     bool enable_pass_strategy;
+    bool enable_targeted_kick;
 };
 
 using NodeResult = bt::NodeResult<BehaviorContext>;
@@ -216,7 +217,7 @@ HighLevelCommand make_set_play_command(BehaviorContext& context) {
         // and an approaching AP would crowd the keeper's clearance.
         auto selected = select_role_behavior(
             context.snapshot, context.blackboard, context.role_manager,
-            false);
+            false, context.enable_targeted_kick);
         if (selected.has_value()) {
             return *selected;
         }
@@ -225,7 +226,7 @@ HighLevelCommand make_set_play_command(BehaviorContext& context) {
     if (role_id == RoleManager::ROLE_GK) {
         auto selected = select_role_behavior(
             context.snapshot, context.blackboard, context.role_manager,
-            false);
+            false, context.enable_targeted_kick);
         if (selected.has_value()) {
             return *selected;
         }
@@ -238,7 +239,7 @@ NodeResult make_role_behavior_command(BehaviorContext& context) {
     const int role_id = current_role_from_blackboard(context.blackboard);
     auto selected = select_role_behavior(
         context.snapshot, context.blackboard, context.role_manager,
-        context.enable_pass_strategy);
+        context.enable_pass_strategy, context.enable_targeted_kick);
     if (!selected.has_value()) {
         return NodeResult::failure();
     }
@@ -296,12 +297,14 @@ HighLevelCommand BehaviorTree::evaluate(
     const world::WorldSnapshot& snapshot,
     Blackboard& blackboard,
     RoleManager& role_manager,
-    bool enable_pass_strategy) const {
+    bool enable_pass_strategy,
+    bool enable_targeted_kick) const {
     blackboard.clear();
     update_kickoff_hold_state(snapshot);
 
     BehaviorContext context{
-        snapshot, blackboard, role_manager, enable_pass_strategy};
+        snapshot, blackboard, role_manager, enable_pass_strategy,
+        enable_targeted_kick};
     static const NodePtr top_level_tree = make_top_level_tree();
     const auto result = top_level_tree->tick(context);
     return result.command.value_or(NeutralCommand{});

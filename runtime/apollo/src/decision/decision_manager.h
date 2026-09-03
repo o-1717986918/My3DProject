@@ -15,7 +15,9 @@ namespace decision {
 /// Owns persistent decision state and evaluates one command per world snapshot.
 class DecisionManager {
 public:
-    explicit DecisionManager(bool enable_pass_strategy = true);
+    explicit DecisionManager(
+        bool enable_pass_strategy = true,
+        bool enable_targeted_kick = false);
 
     HighLevelCommand decide(const world::WorldSnapshot& snapshot);
     const Blackboard& blackboard() const;
@@ -27,6 +29,7 @@ private:
     RoleManager role_manager_;
     BehaviorTree behavior_tree_;
     bool enable_pass_strategy_{true};
+    bool enable_targeted_kick_{false};
 };
 
 }  // namespace decision

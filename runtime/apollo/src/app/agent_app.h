@@ -50,6 +50,8 @@ private:
     std::unique_ptr<server::TcpLpmClient> client_;
     std::size_t last_command_variant_index_{static_cast<std::size_t>(-1)};
     std::string last_active_motion_{"Neutral"};
+    behavior::SkillExecutionStatus last_execution_status_{
+        behavior::SkillExecutionStatus::Running};
 };
 
 }  // namespace app

@@ -30,8 +30,8 @@ struct KickExecutionProfile {
 };
 
 /// Converts a target-aware high-level kick into a conservative, bounded
-/// contact profile. Unsupported, non-finite, or out-of-envelope requests use
-/// the exact previously validated stable fallback.
+/// contact profile. A fallback result is executable only for ForwardContact;
+/// MotionManager rejects targeted modes that cannot start the residual runner.
 KickExecutionProfile make_kick_execution_profile(
     const world::WorldSnapshot& snapshot,
     const decision::KickCommand& command,

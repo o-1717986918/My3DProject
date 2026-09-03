@@ -37,7 +37,7 @@ MotionStepResult MotionManager::step(
     bool reset) {
     if (std::holds_alternative<decision::BeamCommand>(command)) {
         reset_get_up_state();
-        return {false, "BeamBypass", {}};
+        return {false, "BeamBypass", {}, SkillExecutionStatus::Completed};
     }
 
     if (get_up_phase_ != GetUpPhase::Idle) {
@@ -68,7 +68,7 @@ MotionStepResult MotionManager::step(
         return step_get_up(snapshot, reset);
     }
 
-    return {false, "Idle", {}};
+    return {false, "Idle", {}, SkillExecutionStatus::Rejected};
 }
 
 MotionStepResult MotionManager::step_kick(
@@ -82,9 +82,19 @@ MotionStepResult MotionManager::step_kick(
         kick_residual_active_ = parameterized_kick_enabled_ &&
             kick_residual_runner_.has_value() &&
             kick_residual_runner_->begin(snapshot, kick_profile_);
-        if (parameterized_kick_enabled_ && !kick_residual_active_) {
-            kick_profile_ = make_kick_execution_profile(snapshot, command, false);
-        }
+    }
+
+    const bool targeted = command.mode == decision::KickMode::TargetedPass ||
+         command.mode == decision::KickMode::Shot ||
+         command.mode == decision::KickMode::Clear;
+    if (targeted && (!parameterized_kick_enabled_ || !kick_residual_active_)) {
+        kick_residual_active_ = false;
+        const auto hold = neutral_runner_.step(reset, snapshot.server_time);
+        return {
+            true,
+            "RejectedTargetedKickHold",
+            hold.joint_targets,
+            SkillExecutionStatus::Rejected};
     }
 
     const double elapsed = std::max(0.0, snapshot.server_time - kick_start_time_);
@@ -130,6 +140,9 @@ MotionStepResult MotionManager::step_kick(
                     ? "ParameterizedResidualKickStabilize"
                     : (parameterized ? "ParameterizedKickStabilize" : "KickStabilize"))),
         result.joint_targets,
+        macro_complete
+            ? SkillExecutionStatus::Completed
+            : SkillExecutionStatus::Running,
     };
 }
 
@@ -149,10 +162,15 @@ MotionStepResult MotionManager::step_get_up(
     const auto result = getup_runner_.step(snapshot, consume_phase_reset());
     const bool timed_out =
         snapshot.server_time - get_up_start_time_ >= kGetUpTimeoutS;
+    const SkillExecutionStatus status = timed_out
+        ? SkillExecutionStatus::TimedOut
+        : (result.upright
+            ? SkillExecutionStatus::Completed
+            : SkillExecutionStatus::Running);
     if (result.upright || timed_out) {
         reset_get_up_state();
     }
-    return {true, "GetUpRL", result.joint_targets};
+    return {true, "GetUpRL", result.joint_targets, status};
 }
 
 void MotionManager::enter_get_up_phase(

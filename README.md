@@ -90,7 +90,8 @@ To exercise the complete strategy-to-contact pass contract in a deterministic
 full 7v7 process:
 
 ```bash
-MATCH_PASS_SCENARIO=1 MATCH_REQUIRE_PASS=1 MATCH_REQUIRE_KICK=1 \
+APOLLO_ENABLE_PARAMETERIZED_KICK=1 MATCH_PASS_SCENARIO=1 \
+  MATCH_REQUIRE_PASS=1 MATCH_REQUIRE_KICK=1 \
   APOLLO_STATUS_INTERVAL=5 KEEP_MATCH_LOGS=1 \
   scripts/run_apollo_acceptance_match.sh 600
 ```

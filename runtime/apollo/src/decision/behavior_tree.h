@@ -17,7 +17,8 @@ public:
         const world::WorldSnapshot& snapshot,
         Blackboard& blackboard,
         RoleManager& role_manager,
-        bool enable_pass_strategy) const;
+        bool enable_pass_strategy,
+        bool enable_targeted_kick = false) const;
 };
 
 }  // namespace decision

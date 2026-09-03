@@ -2,6 +2,7 @@
 
 #include "src/decision/role_behaviors.h"
 
+#include <cmath>
 #include <iostream>
 #include <variant>
 
@@ -36,13 +37,30 @@ world::WorldSnapshot make_open_pass_snapshot() {
 }  // namespace
 
 int main() {
+    world::WorldSnapshot misaligned_snapshot = make_open_pass_snapshot();
+    constexpr double kYaw30HalfRadians = 0.2617993877991494;
+    misaligned_snapshot.self.orientation_wxyz = {
+        std::cos(kYaw30HalfRadians), 0.0, 0.0,
+        std::sin(kYaw30HalfRadians)};
+    decision::APBehavior misaligned_behavior;
+    decision::Blackboard misaligned_blackboard;
+    decision::RoleManager misaligned_role_manager;
+    misaligned_behavior.make_command(
+        misaligned_snapshot, misaligned_blackboard, misaligned_role_manager,
+        true, true);
+    if (misaligned_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "misaligned targeted pass bypassed the angle envelope\n";
+        return 1;
+    }
+
     world::WorldSnapshot snapshot = make_open_pass_snapshot();
     decision::APBehavior behavior;
     decision::Blackboard blackboard;
     decision::RoleManager role_manager;
 
     const decision::HighLevelCommand waiting = behavior.make_command(
-        snapshot, blackboard, role_manager, true);
+        snapshot, blackboard, role_manager, true, true);
     if (!std::holds_alternative<decision::WalkCommand>(waiting) ||
         !blackboard.exists(decision::Blackboard::kKeySelectedCooperativeAction)) {
         std::cerr << "passer did not wait for a ready acknowledgement\n";
@@ -59,7 +77,7 @@ int main() {
     snapshot.teammates[5].last_seen_time = -1.0;
     snapshot.teammates[5].position_m = {0.0, 0.0, 0.8};
     const decision::HighLevelCommand occluded_wait = behavior.make_command(
-        snapshot, blackboard, role_manager, true);
+        snapshot, blackboard, role_manager, true, true);
     if (std::holds_alternative<decision::KickCommand>(occluded_wait)) {
         std::cerr << "passer released while receiver was occluded and not ready\n";
         return 1;
@@ -71,7 +89,7 @@ int main() {
     snapshot.teammates[5].position_m = {4.0, 0.0, 0.8};
     snapshot.self.position_m = {-0.35, 0.3, 0.8};
     const decision::HighLevelCommand still_waiting = behavior.make_command(
-        snapshot, blackboard, role_manager, true);
+        snapshot, blackboard, role_manager, true, true);
     if (std::holds_alternative<decision::KickCommand>(still_waiting)) {
         std::cerr << "passer released after setup drift without ready acknowledgement\n";
         return 1;
@@ -92,14 +110,14 @@ int main() {
         selected.predicted_ball_time_s,
     });
     const decision::HighLevelCommand stabilizing = behavior.make_command(
-        snapshot, blackboard, role_manager, true);
+        snapshot, blackboard, role_manager, true, true);
     if (std::holds_alternative<decision::KickCommand>(stabilizing)) {
         std::cerr << "ready pass skipped the stable setup hold\n";
         return 1;
     }
     snapshot.server_time = 1.63;
     const decision::HighLevelCommand released = behavior.make_command(
-        snapshot, blackboard, role_manager, true);
+        snapshot, blackboard, role_manager, true, true);
     if (!std::holds_alternative<decision::KickCommand>(released)) {
         std::cerr << "ready pass was not released as a kick\n";
         return 1;

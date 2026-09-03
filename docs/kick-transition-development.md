@@ -43,7 +43,8 @@ APOLLO_BINARY=runtime/apollo/build/ApolloCodeBase \
   scripts/run_apollo_acceptance_match.sh 600
 
 APOLLO_BINARY=runtime/apollo/build/ApolloCodeBase \
-  MATCH_PASS_SCENARIO=1 MATCH_REQUIRE_PASS=1 \
+  APOLLO_ENABLE_PARAMETERIZED_KICK=1 MATCH_PASS_SCENARIO=1 \
+  MATCH_REQUIRE_PASS=1 \
   scripts/run_apollo_acceptance_match.sh 900
 ```
 

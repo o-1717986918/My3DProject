@@ -121,6 +121,17 @@ Available now:
 - strict 7v7 evidence that the strategy-to-contact path runs without breaking
   the existing team loop.
 
+The runtime now exposes an explicit `ActionCapabilityRegistry`. Stable walk,
+turn, get-up, approach/recover, and forward-contact actions are available to
+the strategy layer. Targeted pass is experimental and only executable when
+parameterized kick is explicitly enabled; shot and clear remain unavailable.
+An unsupported target request is rejected before commitment, and a defensive
+motion-layer guard rejects it into a neutral no-contact hold and reports
+`RejectedTargetedKickHold`, so it cannot silently become a fixed kick.
+Motion execution also reports `Running`, `Completed`, `Rejected`, or `TimedOut`
+in `MY3D_STATUS`, giving strategy and acceptance tooling an explicit result
+contract for the retained walk, contact, neutral, and get-up actions.
+
 Binding capability gaps, in priority order:
 
 1. the current contact moves the ball only about 0.186--0.644 m in preserved
