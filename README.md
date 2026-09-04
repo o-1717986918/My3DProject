@@ -106,14 +106,26 @@ conda run -n my3d-team python scripts/analyze_apollo_pass.py \
 This gate requires a targeted command and measurable target-direction ball
 progress. It is not yet a claim of useful pass distance or receiver control.
 
-Launch the same Apollo runtime with WSLg visualization:
+For the preferred visualization path, keep the simulator in WSL and open the
+local console in a normal Windows Edge or Chrome window. This path uses EGL
+off-screen rendering and does not depend on WSLg:
 
 ```bash
-scripts/run_visual_match.sh 3000
+/home/win98/.local/pipx/venvs/rcsssmj/bin/python -m pip install \
+  -r requirements-web-match.txt
+scripts/run_web_match.sh 30000
 ```
 
-Logs are written below `artifacts/apollo-visual-match-<timestamp>/` and are
-ignored by Git.
+Then open `http://127.0.0.1:8765/` in Windows. The browser reproduces the
+native MuJoCo camera controls (left-drag rotate, right-drag pan, wheel zoom,
+Tab camera switch, K/J kickoff, and B drop-ball) and adds pause, single-step,
+bounded 0.5--4x pacing, fullscreen, and a live scoreboard. Logs remain on the
+Linux filesystem below `$HOME/rl_runs/apollo-web-match-*`, avoiding C-drive
+growth. See `docs/web-match-console.md` for architecture and controls.
+
+`scripts/run_visual_match.sh` remains available as a WSLg compatibility path.
+It is not recommended when the window title contains `[WARN:COPY MODE]` or
+`/mnt/shared_memory` is unavailable.
 
 ### Experimental full high-speed walk
 
@@ -133,7 +145,7 @@ the stable Apollo walk/get-up fallback. The local model is SHA-256 locked to
 export APOLLO_ENABLE_FAST_WALK=1
 export APOLLO_FAST_WALK_MODEL="$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx"
 export MATCH_REQUIRE_FAST_WALK=1
-scripts/run_visual_match.sh 3000
+scripts/run_web_match.sh 30000
 ```
 
 This remains an opt-in experimental capability, not the packaged default. A

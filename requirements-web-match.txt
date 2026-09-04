@@ -1,0 +1,2 @@
+# Installed into the same environment as rcsssmj.
+Pillow>=10.0,<13.0

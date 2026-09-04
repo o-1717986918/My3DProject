@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My3D 7v7 · 比赛教练台</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #090d0c;
+      --panel: #111816;
+      --panel-raised: #18231f;
+      --pitch: #1a4636;
+      --chalk: #e8f1e8;
+      --muted: #9baba2;
+      --line: #31443c;
+      --amber: #f0b650;
+      --home: #ff7065;
+      --away: #65a9ff;
+      --ok: #6ed69a;
+      --danger: #ff887d;
+      --display: "Bahnschrift Condensed", "DIN Condensed", "Arial Narrow", sans-serif;
+      --body: "Aptos", "Segoe UI", sans-serif;
+      --data: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--ink);
+      color: var(--chalk);
+      font-family: var(--body);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .16;
+      background-image:
+        linear-gradient(90deg, transparent 49.9%, rgba(232,241,232,.13) 50%, transparent 50.1%),
+        repeating-linear-gradient(0deg, transparent 0 46px, rgba(232,241,232,.035) 47px 48px);
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #151f1c;
+      color: var(--chalk);
+      min-height: 38px;
+      padding: 8px 11px;
+      font: 650 13px/1 var(--body);
+      letter-spacing: .01em;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+
+    button:hover { background: #22322c; border-color: #526d61; }
+    button:active { transform: translateY(1px); }
+    button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+    button[aria-pressed="true"], button.active { background: var(--chalk); color: var(--ink); }
+    button.primary { background: var(--amber); color: #171109; border-color: var(--amber); }
+    button.home { border-color: color-mix(in srgb, var(--home), transparent 30%); }
+    button.away { border-color: color-mix(in srgb, var(--away), transparent 30%); }
+
+    .shell {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: 62px minmax(0, 1fr) 42px;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .scorebar {
+      display: grid;
+      grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 1fr);
+      align-items: stretch;
+      border-bottom: 1px solid var(--line);
+      background: rgba(9,13,12,.94);
+    }
+
+    .team {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      padding: 0 22px;
+      font-family: var(--display);
+      font-size: clamp(20px, 2vw, 30px);
+      font-weight: 750;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .team.right { justify-content: flex-end; text-align: right; }
+    .team::before, .team.right::after {
+      content: "";
+      width: 7px;
+      height: 28px;
+      flex: 0 0 auto;
+      background: var(--home);
+    }
+    .team.right::before { display: none; }
+    .team.right::after { background: var(--away); }
+    .team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .score-center {
+      display: grid;
+      grid-template-columns: 46px 24px 46px;
+      grid-template-rows: 37px 18px;
+      align-content: center;
+      align-items: center;
+      justify-items: center;
+      min-width: 190px;
+      padding-top: 3px;
+      border-inline: 1px solid var(--line);
+      background: #0c1210;
+    }
+
+    .score, .score-separator {
+      font: 800 31px/1 var(--data);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .clock {
+      grid-column: 1 / 4;
+      color: var(--amber);
+      font: 650 12px/1 var(--data);
+      letter-spacing: .14em;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 306px;
+      min-height: 0;
+    }
+
+    .stage {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 44%, rgba(45,101,77,.24), transparent 58%),
+        #050706;
+      user-select: none;
+    }
+
+    .stage img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      cursor: grab;
+      -webkit-user-drag: none;
+    }
+
+    .stage.dragging img { cursor: grabbing; }
+
+    .feed-state {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border: 1px solid rgba(232,241,232,.2);
+      border-radius: 4px;
+      background: rgba(5,9,7,.78);
+      backdrop-filter: blur(8px);
+      color: var(--muted);
+      font: 600 11px/1 var(--data);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .signal {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 0 4px rgba(240,182,80,.12);
+    }
+    .signal.live { background: var(--ok); box-shadow: 0 0 0 4px rgba(110,214,154,.12); }
+    .signal.dead { background: var(--danger); }
+
+    .gesture-hint {
+      position: absolute;
+      left: 50%;
+      bottom: 14px;
+      transform: translateX(-50%);
+      padding: 7px 10px;
+      border-radius: 4px;
+      background: rgba(5,9,7,.74);
+      color: #c6d2cc;
+      font-size: 11px;
+      pointer-events: none;
+      opacity: .82;
+      transition: opacity 200ms ease;
+    }
+    .stage.dragging .gesture-hint { opacity: 0; }
+
+    .rail {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow-y: auto;
+      border-left: 1px solid var(--line);
+      background: rgba(17,24,22,.97);
+      scrollbar-color: #40564c transparent;
+    }
+
+    .rail-section { padding: 17px 18px 18px; border-bottom: 1px solid var(--line); }
+    .rail-section:last-child { border-bottom: 0; }
+
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin: 0 0 12px;
+      color: var(--muted);
+      font: 700 11px/1 var(--data);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .section-title span:last-child { color: #65776e; font-weight: 500; }
+    .button-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .button-grid.four { grid-template-columns: repeat(4, 1fr); }
+    .button-grid.four button { padding-inline: 4px; font-family: var(--data); }
+    .button-grid + .button-grid { margin-top: 8px; }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--line);
+    }
+
+    .metric { min-width: 0; padding: 11px; background: #101714; }
+    .metric-label { display: block; margin-bottom: 6px; color: #71827a; font: 600 10px/1 var(--data); text-transform: uppercase; }
+    .metric-value { display: block; overflow: hidden; color: var(--chalk); font: 650 13px/1.2 var(--data); text-overflow: ellipsis; white-space: nowrap; }
+
+    .keymap { display: grid; grid-template-columns: auto 1fr; gap: 8px 11px; margin: 0; font-size: 12px; }
+    .keymap dt { margin: 0; color: var(--amber); font: 700 11px/1.3 var(--data); }
+    .keymap dd { margin: 0; color: var(--muted); line-height: 1.3; }
+
+    .statusline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 16px;
+      border-top: 1px solid var(--line);
+      background: #0c1210;
+      color: var(--muted);
+      font: 600 11px/1 var(--data);
+    }
+    .statusline strong { color: var(--chalk); font-weight: 650; }
+    .status-right { display: flex; gap: 18px; }
+
+    .toast {
+      position: fixed;
+      z-index: 10;
+      right: 18px;
+      bottom: 55px;
+      max-width: 380px;
+      padding: 11px 13px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #18231f;
+      box-shadow: 0 12px 30px rgba(0,0,0,.38);
+      color: var(--chalk);
+      font-size: 13px;
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.error { border-color: var(--danger); }
+
+    body.hud-hidden .scorebar,
+    body.hud-hidden .rail,
+    body.hud-hidden .statusline,
+    body.hud-hidden .feed-state,
+    body.hud-hidden .gesture-hint { display: none; }
+    body.hud-hidden .shell { display: block; }
+    body.hud-hidden .workspace, body.hud-hidden .stage { width: 100vw; height: 100vh; }
+
+    @media (max-width: 920px) {
+      html, body { overflow: auto; }
+      .shell { min-height: 100vh; height: auto; grid-template-rows: 58px auto 42px; }
+      .workspace { grid-template-columns: 1fr; }
+      .stage { aspect-ratio: 16 / 9; }
+      .rail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-left: 0; border-top: 1px solid var(--line); }
+      .rail-section { border-right: 1px solid var(--line); }
+      .team { padding-inline: 12px; font-size: 18px; }
+      .score-center { min-width: 150px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="scorebar" aria-label="比赛记分牌">
+      <div class="team"><span class="team-name" id="leftTeam">Waiting</span></div>
+      <div class="score-center">
+        <span class="score" id="leftScore">0</span>
+        <span class="score-separator">:</span>
+        <span class="score" id="rightScore">0</span>
+        <span class="clock" id="clock">00:00 · CONNECTING</span>
+      </div>
+      <div class="team right"><span class="team-name" id="rightTeam">Waiting</span></div>
+    </header>
+
+    <div class="workspace">
+      <section class="stage" id="stage" aria-label="MuJoCo实时比赛画面">
+        <img id="stream" src="/stream.mjpg" alt="My3D 7v7 实时比赛画面" draggable="false">
+        <div class="feed-state"><span class="signal" id="signal"></span><span id="feedLabel">等待首帧</span></div>
+        <div class="gesture-hint">左键拖动旋转 · 右键拖动平移 · 滚轮缩放</div>
+      </section>
+
+      <aside class="rail" aria-label="比赛控制台">
+        <section class="rail-section">
+          <h2 class="section-title"><span>仿真节奏</span><span>Space</span></h2>
+          <div class="button-grid">
+            <button id="pauseButton" class="primary" data-action="toggle_pause">暂停</button>
+            <button data-action="step">单步</button>
+          </div>
+          <div class="button-grid four" aria-label="仿真倍速">
+            <button data-speed="0.5">½×</button>
+            <button data-speed="1">1×</button>
+            <button data-speed="2">2×</button>
+            <button data-speed="4">4×</button>
+          </div>
+        </section>
+
+        <section class="rail-section">
+          <h2 class="section-title"><span>比赛命令</span><span>K / J / B</span></h2>
+          <div class="button-grid">
+            <button class="home" data-kickoff="left">左队开球</button>
+            <button class="away" data-kickoff="right">右队开球</button>
+          </div>
+          <div class="button-grid">
+            <button data-action="drop_ball">落球继续</button>
+            <button data-action="reset_ball">球归中圈</button>
+          </div>
+        </section>
+
+        <section class="rail-section">
+          <h2 class="section-title"><span>镜头</span><span>Tab / F / H</span></h2>
+          <div class="button-grid">
+            <button id="staticCamera" data-camera="static">全场战术</button>
+            <button id="followCamera" data-camera="follow">跟随足球</button>
+          </div>
+          <div class="button-grid">
+            <button id="fullscreenButton">全屏</button>
+            <button id="hudButton">隐藏面板</button>
+          </div>
+        </section>
+
+        <section class="rail-section">
+          <h2 class="section-title"><span>实时遥测</span><span>WSL → Windows</span></h2>
+          <div class="metric-grid">
+            <div class="metric"><span class="metric-label">比赛状态</span><span class="metric-value" id="playMode">—</span></div>
+            <div class="metric"><span class="metric-label">镜头</span><span class="metric-value" id="cameraMode">—</span></div>
+            <div class="metric"><span class="metric-label">渲染帧率</span><span class="metric-value" id="renderFps">0 fps</span></div>
+            <div class="metric"><span class="metric-label">仿真周期</span><span class="metric-value" id="frameId">0</span></div>
+          </div>
+        </section>
+
+        <section class="rail-section">
+          <h2 class="section-title"><span>原生操作映射</span><span>LOCAL ONLY</span></h2>
+          <dl class="keymap">
+            <dt>拖动</dt><dd>左键旋转，右键平移</dd>
+            <dt>滚轮</dt><dd>连续缩放镜头</dd>
+            <dt>Tab</dt><dd>全场 / 跟球切换</dd>
+            <dt>K · J</dt><dd>左队 / 右队开球</dd>
+            <dt>B</dt><dd>落球恢复比赛</dd>
+            <dt>Space</dt><dd>暂停或继续</dd>
+          </dl>
+        </section>
+      </aside>
+    </div>
+
+    <footer class="statusline">
+      <span><strong id="connectionText">连接 WSL 仿真服务</strong></span>
+      <span class="status-right"><span id="viewerCount">0 viewer</span><span id="speedText">1× realtime</span></span>
+    </footer>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const stage = $('#stage');
+    const stream = $('#stream');
+    const toast = $('#toast');
+    let status = null;
+    let lastFrame = -1;
+    let stalePolls = 0;
+    let toastTimer = null;
+    let drag = null;
+    let dragPending = {dx: 0, dy: 0, mode: 'orbit'};
+    let dragTimer = null;
+
+    function showToast(message, isError = false) {
+      toast.textContent = message;
+      toast.classList.toggle('error', isError);
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
+    }
+
+    async function control(payload, quiet = false) {
+      try {
+        const response = await fetch('/api/control', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        status = result.status;
+        renderStatus(status);
+        if (!quiet) showToast(`已执行：${labelFor(payload)}`);
+      } catch (error) {
+        showToast(`控制失败：${error.message}`, true);
+      }
+    }
+
+    function labelFor(payload) {
+      const labels = {
+        pause: '暂停', resume: '继续', toggle_pause: '暂停/继续', step: '单步',
+        speed: `${payload.speed}× 倍速`, camera_cycle: '切换镜头',
+        camera_mode: payload.mode === 'static' ? '全场战术镜头' : '跟随足球镜头',
+        kickoff: payload.side === 'left' ? '左队开球' : '右队开球',
+        drop_ball: '落球继续', reset_ball: '球归中圈',
+      };
+      return labels[payload.action] || payload.action;
+    }
+
+    function formatClock(seconds) {
+      const safe = Math.max(0, Number(seconds) || 0);
+      return `${String(Math.floor(safe / 60)).padStart(2, '0')}:${String(Math.floor(safe % 60)).padStart(2, '0')}`;
+    }
+
+    function renderStatus(next) {
+      $('#leftTeam').textContent = next.left_team || 'Left';
+      $('#rightTeam').textContent = next.right_team || 'Right';
+      $('#leftScore').textContent = next.left_score ?? 0;
+      $('#rightScore').textContent = next.right_score ?? 0;
+      $('#clock').textContent = `${formatClock(next.play_time)} · ${String(next.play_mode || 'WAITING').toUpperCase()}`;
+      $('#playMode').textContent = next.paused ? 'Paused' : (next.play_mode || '—');
+      $('#cameraMode').textContent = next.camera_mode === 'follow' ? '跟随足球' : '全场战术';
+      $('#renderFps').textContent = `${Number(next.render_fps || 0).toFixed(1)} fps`;
+      $('#frameId').textContent = next.frame_id ?? 0;
+      $('#viewerCount').textContent = `${next.stream_clients || 0} viewer`;
+      $('#speedText').textContent = `${next.speed || 1}× realtime`;
+      $('#pauseButton').textContent = next.paused ? '继续' : '暂停';
+      $('#pauseButton').setAttribute('aria-pressed', String(Boolean(next.paused)));
+      document.querySelectorAll('[data-speed]').forEach((button) => {
+        button.classList.toggle('active', Number(button.dataset.speed) === Number(next.speed));
+      });
+      $('#staticCamera').classList.toggle('active', next.camera_mode === 'static');
+      $('#followCamera').classList.toggle('active', next.camera_mode === 'follow');
+    }
+
+    async function pollStatus() {
+      try {
+        const response = await fetch('/api/status', {cache: 'no-store'});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        status = await response.json();
+        renderStatus(status);
+        if (status.frame_sequence === lastFrame) stalePolls += 1;
+        else stalePolls = 0;
+        lastFrame = status.frame_sequence;
+        const live = status.frame_sequence > 0 && stalePolls < 5 && !status.stopped;
+        $('#signal').className = `signal ${live ? 'live' : status.stopped ? 'dead' : ''}`;
+        $('#feedLabel').textContent = live ? 'LIVE · EGL' : status.stopped ? '仿真已结束' : '等待新帧';
+        $('#connectionText').textContent = status.stopped ? 'WSL 仿真已结束' : 'WSL 离屏渲染已连接';
+      } catch (_error) {
+        $('#signal').className = 'signal dead';
+        $('#feedLabel').textContent = '连接中断';
+        $('#connectionText').textContent = '无法连接 WSL 仿真服务';
+      }
+    }
+
+    document.querySelectorAll('[data-action]').forEach((button) => {
+      button.addEventListener('click', () => control({action: button.dataset.action}));
+    });
+    document.querySelectorAll('[data-speed]').forEach((button) => {
+      button.addEventListener('click', () => control({action: 'speed', speed: Number(button.dataset.speed)}));
+    });
+    document.querySelectorAll('[data-kickoff]').forEach((button) => {
+      button.addEventListener('click', () => control({action: 'kickoff', side: button.dataset.kickoff}));
+    });
+    document.querySelectorAll('[data-camera]').forEach((button) => {
+      button.addEventListener('click', () => control({action: 'camera_mode', mode: button.dataset.camera}));
+    });
+
+    $('#fullscreenButton').addEventListener('click', async () => {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    });
+    $('#hudButton').addEventListener('click', () => document.body.classList.toggle('hud-hidden'));
+
+    stage.addEventListener('contextmenu', (event) => event.preventDefault());
+    stage.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 && event.button !== 2) return;
+      drag = {x: event.clientX, y: event.clientY, mode: event.button === 0 ? 'orbit' : 'pan'};
+      dragPending.mode = drag.mode;
+      stage.setPointerCapture(event.pointerId);
+      stage.classList.add('dragging');
+    });
+    stage.addEventListener('pointermove', (event) => {
+      if (!drag) return;
+      dragPending.dx += event.clientX - drag.x;
+      dragPending.dy += event.clientY - drag.y;
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      if (!dragTimer) {
+        dragTimer = setTimeout(() => {
+          const payload = {action: 'camera_drag', ...dragPending};
+          dragPending = {dx: 0, dy: 0, mode: payload.mode};
+          dragTimer = null;
+          control(payload, true);
+        }, 45);
+      }
+    });
+    function endDrag() { drag = null; stage.classList.remove('dragging'); }
+    stage.addEventListener('pointerup', endDrag);
+    stage.addEventListener('pointercancel', endDrag);
+    stage.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      control({action: 'camera_zoom', delta: Math.sign(event.deltaY)}, true);
+    }, {passive: false});
+
+    window.addEventListener('keydown', (event) => {
+      if (event.target.matches('input, textarea, select, button')) return;
+      const key = event.key.toLowerCase();
+      if (event.code === 'Space') { event.preventDefault(); control({action: 'toggle_pause'}); }
+      else if (key === 'tab') { event.preventDefault(); control({action: 'camera_cycle'}); }
+      else if (key === 'k') control({action: 'kickoff', side: 'left'});
+      else if (key === 'j') control({action: 'kickoff', side: 'right'});
+      else if (key === 'b') control({action: 'drop_ball'});
+      else if (key === 'h') document.body.classList.toggle('hud-hidden');
+      else if (key === 'f') $('#fullscreenButton').click();
+      else if (['1', '2', '4'].includes(key)) control({action: 'speed', speed: Number(key)});
+    });
+
+    stream.addEventListener('error', () => {
+      $('#signal').className = 'signal dead';
+      $('#feedLabel').textContent = '画面断开，正在重连';
+      setTimeout(() => { stream.src = `/stream.mjpg?reconnect=${Date.now()}`; }, 1200);
+    });
+
+    setInterval(pollStatus, 400);
+    pollStatus();
+  </script>
+</body>
+</html>

@@ -7,6 +7,7 @@ poetry.toml
 **/*.txt
 !**/CMakeLists.txt
 !training/locks/*.txt
+!requirements-web-match.txt
 **/build/
 **/install/
 **/log/

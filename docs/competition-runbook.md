@@ -84,7 +84,36 @@ server's simultaneous ONNX-client connection race. It forwards interruption
 and waits for every player. Use `./kill.sh` from another terminal for explicit
 team shutdown.
 
-## 5. Visual 7v7
+## 5. Visual 7v7 in a Windows browser
+
+Install the one stream-encoding dependency into the existing RCSSServerMJ
+pipx environment:
+
+```bash
+/home/win98/.local/pipx/venvs/rcsssmj/bin/python -m pip install \
+  -r requirements-web-match.txt
+```
+
+Launch the complete Apollo self-play match in WSL:
+
+```bash
+scripts/run_web_match.sh 30000
+```
+
+Open `http://127.0.0.1:8765/` in Windows Edge or Chrome. MuJoCo renders through
+EGL without creating an X window; the browser receives an MJPEG stream and
+transmits only validated local controls. It supports mouse camera operations,
+the native Tab/K/J/B keys, pause, single-step, 0.5--4x pacing, HUD hiding, and
+fullscreen. Match logs are written to `$HOME/rl_runs`, not the C drive.
+At `GameOver`, the launcher holds the final frame for 15 seconds and then
+reaps all fourteen players and the server; it does not wait for the remaining
+client cycle budget.
+
+The browser endpoint binds to `127.0.0.1` by default. Do not change
+`--web-host` to a non-loopback address without adding authentication and a
+network access policy. Full details are in `web-match-console.md`.
+
+### WSLg compatibility path
 
 With WSLg available:
 
@@ -94,6 +123,15 @@ scripts/run_visual_match.sh 3000
 
 This is the same strict Apollo self-play path with rendering enabled. Evidence
 is retained under `artifacts/apollo-visual-match-<timestamp>/`.
+When `rcssservermj` works from an interactive WSL terminal, this native path
+remains fully supported and retains GLFW's direct window controls. A process
+launched by a background Windows host may enter a different WSLg/RDP window
+session even on the same machine; that does not imply the interactive WSLg
+session is broken.
+
+If the taskbar entry exists but no window is visible and the title contains
+`[WARN:COPY MODE]`, use the browser path. That symptom is below the project at
+the WSLg RDP/RAIL shared-memory layer; restarting the match does not repair it.
 
 To opt into the complete phase-v2 high-speed walking backend while retaining
 stable near-ball/turning fallback:
@@ -101,7 +139,7 @@ stable near-ball/turning fallback:
 ```bash
 APOLLO_ENABLE_FAST_WALK=1 \
 APOLLO_FAST_WALK_MODEL="$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx" \
-MATCH_REQUIRE_FAST_WALK=1 scripts/run_visual_match.sh 3000
+MATCH_REQUIRE_FAST_WALK=1 scripts/run_web_match.sh 30000
 ```
 
 `run_policy_v2` is a historical artifact/contract identifier. Its locked
