@@ -31,6 +31,18 @@ decision::KickCommand make_targeted(double speed, double angle_deg) {
     return command;
 }
 
+decision::KickCommand make_dribble(double angle_deg = 0.0) {
+    decision::KickCommand command;
+    const double angle_rad = angle_deg * 3.14159265358979323846 / 180.0;
+    command.target_point_m = std::array<double, 2>{
+        1.0 + 0.55 * std::cos(angle_rad),
+        2.0 + 0.55 * std::sin(angle_rad),
+    };
+    command.requested_ball_speed_mps = 0.90;
+    command.mode = decision::KickMode::DribbleTouch;
+    return command;
+}
+
 bool near(double lhs, double rhs, double tolerance = 1.0e-9) {
     return std::abs(lhs - rhs) <= tolerance;
 }
@@ -50,25 +62,29 @@ int main() {
         return 1;
     }
 
-    const auto slow = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(0.8, 0.0), true);
-    const auto fast = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(3.0, 0.0), true);
-    if (slow.kind != behavior::KickProfileKind::ParameterizedContact ||
-        fast.kind != behavior::KickProfileKind::ParameterizedContact ||
-        !near(slow.local_drive_target_m[0], 0.50) ||
-        !near(fast.local_drive_target_m[0], 0.85) ||
-        !near(slow.target_distance_m, 2.0) ||
-        slow.mode != decision::KickMode::TargetedPass ||
-        !(fast.drive_duration_s > slow.drive_duration_s)) {
-        std::cerr << "speed request was not mapped monotonically and boundedly\n";
+    const auto pass = behavior::make_kick_execution_profile(
+        snapshot, make_targeted(1.43, 0.0), true);
+    if (pass.kind != behavior::KickProfileKind::ParameterizedContact ||
+        !near(pass.target_distance_m, 2.0) ||
+        pass.mode != decision::KickMode::TargetedPass) {
+        std::cerr << "validated pass profile was not accepted\n";
+        return 1;
+    }
+
+    const auto dribble = behavior::make_kick_execution_profile(
+        snapshot, make_dribble(), true);
+    if (dribble.kind != behavior::KickProfileKind::ProceduralContact ||
+        !near(dribble.target_distance_m, 0.55) ||
+        !near(dribble.requested_speed_mps, 0.90) ||
+        dribble.mode != decision::KickMode::DribbleTouch) {
+        std::cerr << "validated procedural short-touch profile was not accepted\n";
         return 1;
     }
 
     const auto left = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(10.0 / 9.0, 1.5), true);
+        snapshot, make_targeted(1.43, 1.5), true);
     const auto right = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(10.0 / 9.0, -1.5), true);
+        snapshot, make_targeted(1.43, -1.5), true);
     if (!(left.local_drive_target_m[1] > -0.04) ||
         !(right.local_drive_target_m[1] < -0.04) ||
         !near(left.relative_target_angle_deg, 1.5, 1.0e-8) ||
@@ -86,9 +102,15 @@ int main() {
         snapshot, make_targeted(1.43, 16.0), true);
     const auto outside_speed = behavior::make_kick_execution_profile(
         snapshot, make_targeted(3.01, 0.0), true);
+    const auto unsupported_pass_speed = behavior::make_kick_execution_profile(
+        snapshot, make_targeted(1.42, 0.0), true);
+    const auto outside_dribble_angle = behavior::make_kick_execution_profile(
+        snapshot, make_dribble(3.01), true);
     if (invalid_profile.kind != behavior::KickProfileKind::StableFallback ||
         outside_angle.kind != behavior::KickProfileKind::StableFallback ||
-        outside_speed.kind != behavior::KickProfileKind::StableFallback) {
+        outside_speed.kind != behavior::KickProfileKind::StableFallback ||
+        unsupported_pass_speed.kind != behavior::KickProfileKind::StableFallback ||
+        outside_dribble_angle.kind != behavior::KickProfileKind::StableFallback) {
         std::cerr << "unsupported requests did not use the stable fallback\n";
         return 1;
     }

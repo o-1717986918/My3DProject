@@ -1,228 +1,438 @@
-# Reinforcement-learning motion plan
+# 动作学习方案与运行时能力清单
 
-Status: implementation started 2026-08-30
-Target platform: WSL2 Ubuntu 22.04, Booster T1, RCSSServerMJ 0.2.1
-Primary task: a stronger upright kick that fits the existing competition FSM
+状态：当前动作学习与挂载的权威记录
 
-Update 2026-08-30: the user promoted fast locomotion to the active development
-milestone. The versioned running-policy plan, current-source audit, and explicit
-running acceptance gates are maintained in `docs/run-policy-training.md`. The
-kick environment remains supported and is not overwritten by this work.
+审计日期：2026-09-04
 
-## 1. Decision
+适用环境：WSL2 Ubuntu 22.04、Booster T1、RCSSServerMJ、`my3d-rl`
 
-Train low-level skills separately and keep the deterministic team controller.
-Do not train an end-to-end soccer policy. The first new policy is a ball-aware
-kick; robust walking follows only after the kick has crossed its acceptance
-gate. Apollo get-up remains the current recovery backend and is not used as a
-training initialization.
+训练产物目录：`/home/win98/rl_runs`
 
-Priority:
+## 1. 结论
 
-1. ball-aware kick;
-2. robust turning and perturbation-resistant running (active milestone);
-3. dribble/push control;
-4. independently trained get-up only if the project needs to remove its GPL
-   runtime dependency.
+动作学习采用“分层决策 + 可替换低层技能”，不训练一个端到端七人球队模型：
 
-## 2. Why the kick comes first
+1. 比赛规则、球队策略、职责分配和动作选择保持确定性；
+2. 学习模型只实现有明确输入、输出和物理包线的运动技能；
+3. ONNX 是目标主执行器，程序化轨迹和现有稳定动作是回退；
+4. 训练资产只有经过 C++ runner 和服务器链路后才算“已挂载”；
+5. 当前最高价值训练目标是可部署的目标条件短传，其次是接球、射门/解围和
+   高速多方向行走；
+6. 动作训练与 `docs/team-excellence-roadmap.md` 的 D1/D2 球队决策开发并行，
+   不阻塞能利用现有动作完成的策略代码。
 
-The current learned-walk burst completes `ALIGN -> KICK -> RECOVER` reliably,
-but produces only small ball displacement. The previous hand-authored
-high-energy keyframe moved the ball and then fell. A contact-rich kick policy is
-therefore the clearest case where reinforcement learning can improve the main
-competition metric without replacing the stable decision and recovery layers.
+“队伍决策优先”只决定主开发队列，不代表冻结或删除训练。当前采用双轨：决策轨
+优先完成共享比赛状态、职责和动作生命周期；动作轨持续完成教师搜索、数据生成、
+监督初始化、ONNX runner 和服务器域适配。两轨通过能力注册表与物理结果反馈汇合。
 
-## 3. Host constraints
+当前不应继续直接延长 K2-B 的 PPO。它在固定 2 m smoke checkpoint 上虽然有
+正确脚触球，但 `target_success=0.0`、评估跌倒比例为 `0.375`，说明缺少可学习的
+目标动作先验。正确顺序是先产生稳定、覆盖目标空间的教师轨迹，再做监督初始化，
+最后使用受约束强化学习微调。
 
-Measured host resources:
+## 2. 状态定义
 
-- NVIDIA GeForce RTX 5060 Laptop GPU, 8,151 MiB VRAM;
-- AMD Ryzen AI 7 H 350, 8 cores / 16 threads;
-- 15 GiB WSL memory plus 4 GiB swap;
-- approximately 893 GiB free in the WSL virtual disk;
-- approximately 68 GiB free on the Windows C drive.
+本文严格区分以下状态：
 
-Training runs and checkpoints must live under `/home/win98/rl_runs`, not
-`/mnt/c`. Start with 512 parallel environments and increase only after recording
-peak device memory and simulation throughput.
+| 状态 | 含义 |
+| --- | --- |
+| 默认挂载 | 标准启动无需额外开关，决策能够到达且运动层真实执行 |
+| 可选挂载 | C++ 调用链已接通，但必须显式配置，不能视为正式默认能力 |
+| 工作树挂载 | 当前未提交工作树可运行，尚未进入远端接受基线 |
+| 训练候选 | 有 checkpoint/ONNX/轨迹和评估工具，但 C++ 正式链路没有使用 |
+| 教师/证据 | 可指导训练或证明物理动作存在，不是可部署策略 |
+| 仅有接口 | 枚举、命令或能力类型存在，但没有可执行资产或选择路径 |
 
-## 4. Environment isolation
+“有 ONNX 文件”“训练 reward 上升”“精确物理某个固定窗口成功”都不自动等于
+已挂载能力。
 
-The competition environment `my3d-team` stays on Python 3.13 and must not gain
-training dependencies. Training uses a separate Python 3.12 environment named
-`my3d-rl`.
+## 3. 当前实际挂载进度
 
-The initial stack is pinned MuJoCo Playground with JAX PPO and CUDA 12. This
-preserves a MuJoCo-to-MuJoCo transfer path and already provides a Booster T1
-locomotion baseline. MJX-JAX and MJX-Warp are both installed; the main backend
-is selected from local 256/512-environment speed, memory, contact, and NaN
-benchmarks rather than from generic framework claims.
+### 3.1 默认挂载
 
-Repository layout:
+| 能力 | 实现与资产 | 决策/运动链路 | 当前事实 |
+| --- | --- | --- | --- |
+| 稳定行走/转向/停止 | `runtime/apollo/assets/networks/walk/policy.onnx`，`[1,78] -> [1,23]` | 所有 `WalkCommand` 经 `WalkRunner` 执行 | 正式默认步态；仍是比赛运动基线 |
+| 四向起身 | `runtime/apollo/assets/networks/getup/policy.onnx` | 跌倒检测产生 `GetUpCommand`，`MotionManager` 返回完成或超时 | 正式默认恢复能力 |
+| 原地保持 | `keyframes/neutral.yaml` | `NeutralCommand -> NeutralRunner` | 用于安全保持和不支持动作拒绝 |
+| 接近/绕障/触球前对准 | 确定性步行规划、球后槽位和稳定驻留 | AP、定位球和门将路径共用 | 已使用，但最终精度受步态摆动和观测遮挡影响 |
+| 固定前向触球 | 无独立踢球模型；使用稳定步态前推、稳定和恢复宏 | `ForwardContact -> MotionManager -> WalkRunner` | 可触球、可完成定位球回退，但距离弱，不能称为短传/射门 |
+| 起身和动作反馈 | `Running/Completed/Rejected/TimedOut` | 下一决策周期回传 | 失败的匹配传球会取消并重规划 |
+
+两个上游 ONNX 的 SHA-256 分别为：
+
+- walk：`6df65fa7d36fd4989fcb022e385de797d51f35c8375532841034716e4bc0d850`；
+- get-up：`ae6ade761e50fccb432e118cebd456d9e96e87de0fa3a3adc2d5f92ef496a83d`。
+
+### 3.2 可选或工作树挂载
+
+| 能力 | 启用方式 | 证据 | 限制与结论 |
+| --- | --- | --- | --- |
+| `FastWalkV2` 高速行走 | `--enable-fast-walk --fast-walk-model <path>`；比赛脚本对应 `APOLLO_ENABLE_FAST_WALK=1` | 指定候选 CPU 32/32 直立、中位速度 1.499 m/s；7v7 调用链可运行 | 10 秒横向漂移中位 5.452 m，服务器起身次数偏高；已接线但非默认、不能称为跑步 |
+| 残差表目标传球 | `--enable-parameterized-kick`；脚本对应 `APOLLO_ENABLE_PARAMETERIZED_KICK=1` | 152/153 条件表的精确评估三种子约 94.7%–96.3% | 服务器保存结果的实际出球仍弱；仅实验传球，默认关闭 |
+| 程序化 `DribbleTouch` | 当前工作树中同一参数化踢球开关；AP 无传球提交时可发出短触 | 精确 MuJoCo 球位扰动 20/20；一次干净服务器事件约前进 0.831 m、横向 0.016 m、方向误差约 1.08°、无起身 | 只有右脚、近零角度和一个 0.55 m 锚点；资产与 C++ runner 尚未提交，服务器只证明一次触球 |
+| 学习目标传球 runner | `--enable-parameterized-kick --shadow-learned-kick --learned-kick-model <path>`；主动实验把 shadow 换为 `--enable-learned-kick` | `kick_policy_v3` 的 98→23 观测、推理、残差解码、限位和同周期回退已接通；外部 r2 ONNX 加载/推理通过 | r2 冻结评估仅 27/92 且 1 次跌倒，只允许 shadow 或显式实验；不覆盖证据更强的残差/程序化默认回退 |
+| 目标动作安全拒绝 | 参数化动作默认关闭，或请求超出共享包线 | 运动层返回 `RejectedTargetedKickHold` | 已实现且正确；不会把目标传球静默变成固定前踢 |
+
+当前工作树验证：
+
+- Apollo C++ 构建成功；
+- 15/15 CTest 通过；
+- `test_kick_teacher.py` 与 `test_analyze_apollo_pass.py` 共 14 个 Python
+  测试通过；
+- 当前最佳 transition r2 ONNX 已通过真实 C++ `LearnedKickRunner` 外部模型加载和
+  一次完整 98→23 推理；
+- 7v7 shadow 启动样本 14/14 客户端完成连接、入场和退出，但旧定点场景未产生
+  `KickCommand`，因此只能证明进程级加载，不能写成比赛内 shadow 已触发；
+- 程序化短触资产仍是 `server_status: contact_observed`，不是正式晋级状态。
+
+### 3.3 只有接口、没有实际动作
+
+| 能力 | 已有表面 | 实际缺口 |
+| --- | --- | --- |
+| `Shot` | `KickMode::Shot`、`SkillCapability::Shot`、动作分类 | 能力注册表为 `Unavailable`；无候选生成器、无已发布轨迹、无 runner 可接受锚点 |
+| `Clear` | `KickMode::Clear`、`SkillCapability::Clear`、动作分类 | 同样为 `Unavailable`，不能由门将或后卫实际选择 |
+| 学习版 `Dribble` | 动作类型和程序化短触存在 | 没有连续闭环学习策略；当前只是“接近—短触—重获球”的确定性循环基础 |
+| `Receive/FirstTouch` | 接球者能走到目标并面球 | 没有接触模型、缓冲/停球策略和学习 runner |
+| 学习版门将扑挡 | 门将有门线交点与步行拦截 | 没有侧扑、前扑或封堵模型 |
+| 通用学习踢球能力 | `LearnedKickRunner` 已支持 v3 传球 actor | runner 已存在，但尚无达到比赛默认质量的 ONNX；Shot/Clear/Dribble 还需版本化动作模式、教师和能力包线 |
+
+## 4. 已有但未实际挂载的能力和资产
+
+### 4.1 可以继续利用的高价值资产
+
+| 资产/能力 | 位置与证据 | 为什么未挂载 | 正确复用方式 |
+| --- | --- | --- | --- |
+| PAiD K1-D 动作跟踪 actor | `/home/win98/rl_runs/paid-k1/k1d-crossfit-bc-s20260982-v2/checkpoints/000000001000` | 依赖外部有限动作参考；只通过动作跟踪选择/确认，未通过 Apollo 服务器动作链 | 作为教师、初始化和轨迹结构参考，不直接替换运行时 |
+| K2-A 固定强触球窗口 | motion 12、帧 113–118；精确 MuJoCo 360/360 正确脚触球、稳定、零跌倒，中位前进约 4.1 m | 只证明固定窗口；未证明目标距离/方向、接近入口、移动球和服务器执行；参考资产受本地非再分发约束 | 用于验证接触/恢复设计、教师搜索和训练诊断，不冒充参数化射门 |
+| K2-B 球/目标条件 checkpoint | `/home/win98/rl_runs/paid-k2/k2b-fixed2m-smoke-s20260990-v1/checkpoints/000000001024` | `target_success=0.0`，跌倒与恢复均不合格；无 ONNX runtime | 保留为失败基线和环境回归，不从该 checkpoint 继续长训 |
+| 高速行走候选 | `/home/win98/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx` | 横向漂移和服务器跌倒/起身问题 | 作为域适配初始化，训练方向、制动、转弯和扰动，不再优化纯直线速度 |
+| 程序化短触轨迹 | `/home/win98/rl_runs/procedural-kick/` 与工作树 YAML | 只有一个窄锚点和一次服务器触球 | 立即保留为 fallback，并生成监督学习教师数据 |
+| 残差表目标传球 | `kick_residual_table.yaml` | 精确评估与真实服务器出球差距大，表还缺一个条件 | 用作球位敏感性数据、teacher/ablation 和短期实验回退 |
+
+### 4.2 已挂载为 shadow 的 ONNX 与仍不应执行的 ONNX
+
+当前将 r2 transition 候选挂到通用 runner：
+
+- `/home/win98/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx`；
+- SHA-256：`b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1`；
+- 冻结 exact CPU：27/92（29.35%）、92 次触球、1 次跌倒；
+- runner 只接受 1.90–2.10 m、相对方向 ±12° 和 transition corpus 实际球槽位，
+  不能把固定 2 m 候选外推到整个残差表包线；
+- 用途：shadow、观测契约验证和显式受控实验，不作为比赛默认执行器；
+- 锁定记录：`training/locks/learned_kick_runtime_candidates_2026_09_04.yaml`。
+
+其余 `/home/win98/rl_runs` 导出家族：
+
+- `kick-bc/*.onnx`：v2 行为克隆、角度网格和 DAgger 候选；
+- `kick-transition-*/policy.onnx`：接近到触球的切换候选；
+- `kick-physical-residual-*/correction-*.onnx`：残差 PPO 候选；
+- `kick-switch-selector-*/selector.onnx`：动作/时机选择器；
+- `striker-action-bank-*/selector*.onnx`、`outcome-selector*.onnx`：前锋动作库
+  选择器；
+- 多个 `run-*/*.onnx`：不同参考、相位和 curriculum 的高速运动候选。
+
+不授予关节控制权不是因为文件格式不可用，而是因为结果不足：
+
+- 五动作前锋库的 oracle 为 928/1023（90.71%），说明动作库中通常存在可行动作；
+- 当前状态选择器在冻结验证上为 153/205（74.63%）；
+- privileged/history 选择器约 71%–72%；
+- 连续 outcome selector 为 128/205（62.44%）；
+- 这证明主要瓶颈是稳定动作表示、状态可辨识性和切换，而不是缺少一个更大
+  MLP；
+- v3/残差 PPO 多轮精确评估没有稳定超过冻结先验；
+- 除 `FastWalkV2` 外，多数 run ONNX 已因转向模式、漂移、飞行相位或完成率
+  被明确拒绝。
+
+这些 ONNX 的最佳用途是离线对照、hard-negative 数据和消融实验。正式运行时不
+应扫描目录自动选“最好看的模型”。
+
+### 4.3 不是能力的资产
+
+以下内容有价值，但不能列入机器人现有动作：
+
+- PAiD/GMR/Holosoma 动作片段和重定向 corpus；
+- PPO smoke checkpoints；
+- 只有 checkpoint 迁移奇偶性的 bootstrap；
+- action-bank oracle；
+- TensorBoard 曲线；
+- 尚未通过 held-out 或服务器检查的 teacher manifest。
+
+## 5. 统一动作学习架构
+
+### 5.1 运行时接口
+
+每个学习动作必须服从同一契约：
 
 ```text
-training/
-├── README.md
-├── contracts/          # observation/action/model manifests
-├── envs/               # MJX task definitions
-├── evaluation/         # deterministic policy and physics checks
-├── export/             # checkpoint-to-ONNX tools
-└── tests/              # training-interface tests
+ActionRequest
+  mode, target point/range, requested launch/arrival speed,
+  action id, participant, deadline
+        |
+        v
+ActionCapabilityRegistry
+  state + measured envelope + model/asset revision
+        |
+        v
+Learned runner (ONNX, preferred)
+        |
+        +-- invalid/unavailable --> procedural or retained stable fallback
+        |
+        +-- no executable fallback --> Neutral + Rejected
+        v
+Motion feedback + observed ball/body outcome
 ```
 
-Large generated files go to `/home/win98/rl_runs` and are never committed.
+当前工作树已新增通用 `LearnedKickRunner`，后续还要补齐：
 
-## 5. Physics-parity gate
+- 加载模型和 manifest，而不是只接收一个裸 ONNX 路径；
+- 校验输入/输出 shape、观察顺序、单位、归一化、关节顺序、PD gain 和 SHA-256；
+- 已支持 shadow inference、显式 active、球/姿态/有限值检查、关节限位以及
+  同周期残差/程序化回退；
+- 待增加 companion manifest 的自动散列校验，而不是只由比赛脚本锁定 SHA；
+- 待输出动作 ID、阶段、模型散列、fallback 原因和观测到的物理结果；
+- 待把 shadow 输出与执行回退的实际球结果写成可训练的 paired trace。
 
-No policy training starts until a direct MuJoCo scene and RCSSServerMJ agree on
-the action contract:
+### 5.2 学习边界
 
-- exact 23-joint order and radian/degree conversions;
-- joint limits, actuator force limits, PD gains, and action scaling;
-- 50 Hz policy control with the server-equivalent physics substeps;
-- T1 root height and neutral-pose equilibrium;
-- ball radius, mass, friction, restitution, and ground contact;
-- quaternion convention and projected-gravity calculation.
+短期不学习球队战术。模型只处理低层难以手工稳定实现的部分：
 
-The parity test replays a fixed open-loop joint-target sequence in both systems
-and compares joint trajectories, torso pose, contacts, and ball displacement.
-Differences are documented rather than tuned away silently.
+- 全身接触轨迹与平衡；
+- 球位/目标变化下的关节残差；
+- 接近、制动、触球和恢复之间的短时切换；
+- 移动球 first touch；
+- 方向相关高速步态和门将快速封堵。
 
-## 6. Kick task contract
+规则合法性、传球对象、射门时机、职责归属、定位球双触规则和不支持动作拒绝
+继续由 C++ 决定。
 
-### Actor observations
+## 6. 目标条件球动作训练方案
 
-Only deployable signals are allowed:
+### B0：冻结证据与基线
 
-- body angular velocity and projected gravity;
-- 23 joint positions and 23 joint velocities;
-- previous 23-value action;
-- ball position and velocity in the torso/yaw-local frame;
-- target shot direction in the same frame;
-- observation age/mask for ball freshness;
-- optional phase sine/cosine.
+在新训练前固定以下不可变对照：
 
-The critic may receive simulator-only contact and exact velocity state during
-training. These privileged values must never enter the exported actor.
+- 默认 walk/get-up/fixed-contact；
+- 程序化 0.55 m 右脚短触；
+- 实验 residual table；
+- K2-A 固定窗口（教师证据，不是运行时）；
+- K2-B 1024-step 失败 checkpoint；
+- 五动作 action-bank 和所有被冻结的选择器结果。
 
-### Actions
+每次新候选使用同一批未参与训练的球位、方向、摩擦和入口状态对比。
 
-The actor outputs 23 bounded residual joint targets. Targets are applied through
-the same position/PD protocol as the competition client. The initial policy is
-residual around a stable nominal pose or stable locomotion target, not an
-unbounded torque policy.
+### B1：程序化教师覆盖
 
-### Episode initialization
+先扩展确定性 CEM/轨迹搜索，不直接启动长 PPO：
 
-- upright T1 with randomized joint and base perturbations;
-- stationary ball in a reachable region near either foot;
-- randomized target heading;
-- randomized friction, ball properties, PD gains, action latency, sensor noise,
-  and light external pushes;
-- a curriculum that widens these ranges only after the preceding stage passes.
+1. 保持当前 0.55 m 短触锚点；
+2. 改进轨迹表示后重新搜索 1.5–2.5 m 短传；
+3. 当前两次 2 m 搜索一个触球后跌倒且仅约 1.15 m，另一个完全未触球，不能
+   直接发布；
+4. 增加支撑腿屈伸、分阶段时长、足端高度/摆幅和恢复姿态等自由度；
+5. 先做右脚 0°，再开 ±10°/±20°，最后做左脚镜像和独立确认；
+6. 分别搜索短触、传球、射门和解围，不用同一轨迹改名；
+7. 保存完整 joint/ball/body/contact 轨迹，作为监督数据和 deterministic fallback。
 
-### Reward families
+工具基线：
 
-Positive terms:
+- `training/tools/optimize_kick_teacher.py`；
+- `training/tools/evaluate_kick_teacher.py`；
+- `training/tools/generate_kick_teacher_dataset.py`；
+- `training/tools/export_kick_residual_table.py`。
 
-- ball velocity and displacement along the requested direction;
-- useful contact followed by separation;
-- upright torso and successful post-kick stabilization.
+### B2：监督初始化
 
-Penalties:
+从成功教师轨迹建立目标条件数据集：
 
-- falling, unstable angular velocity, and low torso height;
-- support-foot slip and self-collision;
-- joint-limit proximity, actuator effort, and action-rate spikes;
-- lateral/backward ball motion and repeated weak contacts.
+- 输入只使用可部署信号：关节位置/速度、身体角速度、重力投影、上一动作、球在
+  torso-yaw 坐标系的位置/速度、目标方向/距离、请求初速/到达速度、动作模式、
+  球观测 age/mask、动作进度和支撑脚提示；
+- critic 可使用精确接触、身体速度和无噪球状态，actor 不可使用；
+- 输出为 23 维有界关节残差；
+- 初始候选复用 `kick_policy_v3` 的 `[1,98] -> [1,23]` 工具链；需要把
+  `DribbleTouch` 纳入统一模型时再版本化为四模式契约，不静默改变 v3；
+- 首先行为克隆教师，再用 DAgger 收集模型偏离后的状态；
+- action-bank 失败状态作为 hard negative，训练是否执行、选脚和 fallback，
+  不直接训练其已失败的选择器标签。
 
-Reward components must be logged separately. A high total reward is not an
-acceptance result by itself.
+已有 `train_kick_bc.py` 和 ONNX 导出器可复用。K2 的 126 维外部参考 actor 保留为
+teacher/ablation；正式目标应是自包含或只依赖可随运行时合法分发资产的 ONNX。
 
-## 7. Curriculum and teacher/student stages
+### B3：受约束 PPO 微调
 
-1. fixed ball, fixed target, no randomization;
-2. small ball-position and base-pose randomization;
-3. variable target direction and both-foot opportunities;
-4. physics, latency, sensor, and external-push randomization;
-5. moving ball and transition from a slow approach;
-6. optional nearby static/dynamic obstacle, only after the isolated kick works.
+只有监督模型在精确 CPU 上已经能稳定触球、保持直立并回到可控姿态后才开始：
 
-If the deployable actor is limited by delayed or missing ball observations,
-continue with a corrected version of the 2026 T1 striker pipeline:
+1. 固定 2 m、0°、静止球；
+2. 打开 1.5–2.5 m 距离；
+3. 打开方向和球位偏差；
+4. 打开到达速度与 pass/shot/clear 模式；
+5. 打开摩擦、质量、PD、延迟、观测噪声和轻推；
+6. 最后加入移动球与慢速接近入口。
 
-1. train a privileged chase/kick teacher;
-2. collect an actual aggregate dataset with a gradual teacher-to-student mix;
-3. distil into a student using measured observation latency, field of view,
-   dropouts, and noise;
-4. only then evaluate constrained RL with non-negative safety costs.
+采用 progressive unfreeze：先冻结已学好的动作主干，只训练新增球/目标输入行和
+小残差头；确认目标信号能改变物理结果后再逐步解冻。每轮同时记录：
 
-The public reference implementation is not run unchanged: its released
-configuration has a 21-versus-23 privileged-input mismatch, its DAgger beta
-collapses after one iteration, and its stated goal occlusion does not match the
-code. The method is valuable; the release is not a ready-to-run baseline.
+- 正确脚/错误脚/无触球；
+- 方向、距离和到达速度误差分布；
+- 摔倒、最低躯干高度、支撑脚滑移和恢复完成；
+- 动作变化、限位/力矩成本和非有限输出；
+- 对基线新增成功、基线独有成功和灾难性回归。
 
-## 8. Acceptance gates
+不再用单一总 reward 或在线小批次成功率决定继续训练。
 
-### Simulator evaluation
+### B4：接近与切换
 
-- at least 200 held-out randomized episodes per seed;
-- at least three independent training seeds;
-- upright success rate >= 95%;
-- median shot-direction error <= 15 degrees;
-- forward ball displacement >= 0.8 m within two seconds for the first MVP;
-- no NaN, joint-limit violation, or invalid motor packet;
-- exported ONNX output matches its source checkpoint within a documented
-  numerical tolerance.
+静态触球模型稳定后，先保持确定性 FSM：
 
-### RCSSServerMJ evaluation
+```text
+Walk/fast-walk -> precision approach -> neutral settle
+-> learned/procedural contact -> recovery -> walk/get-up
+```
 
-1. deterministic single-player kick matrix across ball offsets and headings;
-2. no fall in the post-kick stabilization window;
-3. repeatable ball displacement and direction from the server state/log;
-4. four-direction get-up regression remains green;
-5. `scripts/run_acceptance_match.sh 600` still observes
-   `ALIGN -> KICK -> RECOVER`, 14 connections, and clean shutdown.
+然后才训练 `striker_policy_v1` 类的短时切换残差。动作开始前仍由 C++ 检查
+球槽位、朝向、平面速度、比赛状态和 cooldown。旧 action-bank 已证明开环窗口
+选择难以从当前状态可靠辨识，因此不能再以“训练一个 selector”替代闭环切换。
 
-The old policy remains selectable until the new policy passes every gate.
+### B5：ONNX 与服务器挂载
 
-## 9. Export and runtime integration
+1. 导出 ONNX、manifest、SHA、训练 revision、seed 和数据散列；
+2. C++/Python 固定 observation corpus 做数值一致性；
+3. 使用现有 `LearnedKickRunner` 先 shadow inference；
+4. 单人服务器按球位/方向/入口速度重复执行；
+5. 发布最小可靠子包线到 `ActionCapabilityRegistry`；
+6. 选择顺序为 learned ONNX、程序化/残差回退、固定动作或安全拒绝；
+7. 再让 AP、传球、射门、解围和门将分配使用该子包线。
 
-Each model release includes:
+## 7. 其他动作学习路线
 
-- ONNX model and SHA-256 checksum;
-- observation names, order, units, normalization, and clipping;
-- action order, scale, PD gains, and limits;
-- training code revision, environment revision, seeds, and curriculum stage;
-- training and held-out metrics;
-- licence and source provenance;
-- RCSSServerMJ validation record.
+### L：高速、多方向行走
 
-The runtime adapter validates tensor shapes and finite output. Any loading or
-inference failure falls back to the existing stable kick.
+不重新追求更高直线标称速度。以 `FastWalkV2` 为初始化，优先解决：
 
-## 10. Stop conditions
+1. 服务器横向漂移；
+2. 横移、倒退、转向、制动和 command switch；
+3. 从高速到触球槽位的稳定过渡；
+4. 推扰、轻碰撞、观测噪声和不同角色速度限制；
+5. 方向相关到达时间与跌倒概率标定。
 
-Stop or revise the experiment when:
+训练数据应加入真实服务器中触发 fallback/get-up 的入口状态。默认 walk 继续负责
+近球、门将、横移、急转和任何失败回退。
 
-- training exploits simulator artifacts rather than kicking;
-- performance collapses after modest physics randomization;
-- the actor requires state unavailable to the competition client;
-- ONNX deployment materially changes actions;
-- stronger displacement reduces upright success below 95%;
-- direct MuJoCo and RCSSServerMJ parity cannot be bounded.
+### R：接球与 first touch
 
-## 11. Implementation sequence
+先完成 D2 的接球意图和来球轨迹预测，再建立确定性接球姿态。只有失败主要来自
+接触与平衡而不是通信/站位时才训练模型：
 
-- [x] record hardware and current competition baseline;
-- [x] define task scope, policy contract, and acceptance gates;
-- [x] create and lock `my3d-rl`;
-- [x] verify the JAX GPU backend;
-- [x] record JAX/Warp throughput and initial allocator telemetry;
-- [x] hash the exact permitted T1 and soccer physics inputs;
-- [x] implement the direct-MuJoCo scene and action-contract tests;
-- [x] implement the fixed-ball kick environment;
-- [x] run a short PPO smoke training and persist a checkpoint;
-- [ ] export ONNX and integrate behind a feature flag;
-- [ ] execute the full simulator and match acceptance matrix.
+- 输入为来球相对位置/速度、期望停球或下一动作方向、身体状态和观测 age；
+- 动作为短时全身残差；
+- 结果按控球、反弹距离、下一动作可执行时间、直立和边界风险评估；
+- 训练来球由已经标定的传球分布产生，不能使用理想直线球替代。
+
+### G：门将封堵
+
+步行门线拦截、前出和站位保持确定性。只有不可步行覆盖的射门样本足够后，训练
+左/右侧扑或前扑封堵；恢复继续复用 get-up。模型输出不得决定是否离开禁区、是否
+接球或传给谁。
+
+### 不单独重训 get-up
+
+现有四向起身已挂载。除非出现明确机器人姿态缺口或需要消除上游 GPL 资产依赖，
+不把计算资源投入一个已可用的动作。
+
+## 8. 证据与发布原则
+
+这里的检查用于说明能力边界，不作为阻塞其他策略开发的总门槛。
+
+每个动作至少回答：
+
+- 哪些目标、球位、入口速度、左右脚和比赛状态可执行；
+- 物理结果的中位数、分位数和失败类型；
+- 与当前 fallback 相比新增了什么，破坏了什么；
+- ONNX 与训练 checkpoint 是否一致；
+- RCSSServerMJ 是否观察到相同动作类别；
+- 请求超出包线或推理失败时会执行什么；
+- 决策层是否真正能选择它。
+
+固定 90% 不适合所有动作：短传、短触和起身需要高可靠性，远射可接受较低命中
+但必须保持直立和方向安全，解围重视离开危险区而非精确落点。阈值按动作用途和
+基线风险设定，并同时报告原始计数与置信区间。
+
+## 9. 产物和磁盘规则
+
+- 所有 checkpoint、ONNX 候选、NPZ、TensorBoard、服务器日志和大报告写入
+  `/home/win98/rl_runs`；
+- C 盘仓库只保存代码、小型契约、通过审核的运行时资产和摘要；
+- 每个 run 必须有 `run-manifest.json`、git revision、环境/数据/源 checkpoint
+  散列、seed、状态和明确的 `runtime_promotion`；
+- `failed`、`teacher_only`、`training_candidate`、`shadow`、`experimental`、
+  `stable` 不得混用；
+- 不删除失败模型，但从活动清单移入实验日志，避免下轮再次误用；
+- 受许可限制的参考动作不得提交或作为运行时隐式依赖。
+
+## 10. 完整并行实施计划
+
+### 主线 S：球队策略与动作利用
+
+1. 完成共享 possession owner、全队计划 revision 和唯一职责分配；
+2. 完成传球 `Committed -> Commanded -> 物理结果 -> Cancelled/Timeout` 生命周期；
+3. 让 AP 在能力包线内选择 `DribbleTouch`、TargetedPass 或 ForwardContact，超出
+   包线时显式重规划；
+4. 接入进攻宽度/深度、二过一支持、丢球反抢、退防、门将出球和定位球执行者；
+5. 将动作完成、拒绝、跌倒、球是否进入接收区反馈给下一周期决策。
+
+### 并行线 M：动作训练与部署
+
+1. 冻结已挂载动作和 ONNX 候选清单，保留所有失败基线；
+2. 扩展程序化教师：右脚 0.55 m 短触之后优先完成稳定 2 m 传球，再扩方向与左脚；
+3. 从成功轨迹做 BC/DAgger；现有 29.35% r2 只作基线，不再直接长训；
+4. 收集 `LearnedKickRunner` shadow 的服务器 observation/action/fallback/outcome
+   paired trace，缩小 exact CPU 与服务器差异；
+5. 监督模型稳定后再做受约束 PPO，并分别训练 pass、shot、clear；
+6. 用实际传球分布训练 receive/first-touch；
+7. 同步进行 FastWalkV2 的漂移、制动、转向和进入精确接近的域适配；
+8. 最后扩展门将非步行可覆盖区域的扑挡模型。
+
+### 依赖关系和算力顺序
+
+```text
+程序化成功教师 -> BC/DAgger -> shadow trace -> 受约束 PPO -> 最小可靠包线
+        |                                                |
+        +-------------- 策略能力注册表 <----------------+
+
+真实传球包线 -> 接球来球分布 -> first-touch 模型
+FastWalk 域适配 -> 更准 ReachTime -> 球队职责/传球时机修正
+```
+
+- 日常 CPU 优先用于 C++/服务器回归、教师优化和数据检查；
+- GPU/JAX 长训只在教师覆盖、数据散列和冻结评估集已准备后启动；
+- 每个长任务必须能从 `/home/win98/rl_runs` checkpoint 恢复，日志和模型不写 C 盘；
+- 决策开发不等待长训；训练完成后通过能力包线替换执行器，而不是重写高层策略。
+
+### 交付批次
+
+| 批次 | 必须交付 | 训练结果进入比赛的方式 |
+| --- | --- | --- |
+| M0 已完成/工作树 | 稳定 walk/get-up、FastWalk 可选、残差传球、程序化短触、LearnedKickRunner | 能力注册表 + 显式开关 + fallback |
+| M1 | 2 m 教师覆盖、数据集、三种子 BC/DAgger、shadow paired trace | 先发布一个窄 TargetedPass 子包线 |
+| M2 | 距离/角度/左右脚课程、有限 PPO、服务器重复结果 | 扩展传球包线并校准 ReachTime/接球目标 |
+| M3 | shot/clear 独立教师与模型 | Shot/Clear 从 `Unavailable` 变为有界能力 |
+| M4 | receive/first-touch + FastWalk 域适配 | 提升完整传接闭环和攻防转换速度 |
+| M5 | 门将封堵与高级移动球动作 | 只补步行/现有动作无法覆盖的低层缺口 |
+
+## 11. 当前紧接的实施顺序
+
+1. 完成并提交当前程序化短触、`LearnedKickRunner`、共享契约、分析器和文档；
+2. 实现 D1/D2 球队决策工作的同时，扩展程序化教师表示并重新搜索稳定 2 m
+   短传；
+3. 生成目标条件教师数据，行为克隆一个自包含短传 actor；
+4. 使用已实现 runner 收集 shadow paired trace，并补 companion manifest 自动校验；
+5. 对监督模型做有限、逐阶段的 PPO 微调；
+6. 在服务器发布最小方向/距离子包线，接入完整传球生命周期；
+7. 用真实传球分布开发接球/first-touch；
+8. 在同一动作框架上增加 shot 和 clear 教师、模型与能力包线；
+9. 并行进行 `FastWalkV2` 的漂移/制动/方向域适配；
+10. 最后才考虑门将扑挡和更高层学习策略。
+
+详细程序化轨迹设计见 `docs/model-free-parameterized-kick-plan.md`；历史实验与拒绝
+原因见 `docs/rl-experiment-log.md` 和 `docs/kick-transition-development.md`。

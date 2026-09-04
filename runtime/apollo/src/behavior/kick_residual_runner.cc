@@ -3,6 +3,7 @@
 #include "src/behavior/kick_residual_runner.h"
 
 #include "src/math/math_utils.h"
+#include "src/robot/t1_joint_limits.h"
 #include "src/world/frame_normalizer.h"
 
 #include <yaml-cpp/yaml.h>
@@ -35,18 +36,6 @@ constexpr std::array<double, 23> kDefaultPoseRad{
     0.0, 0.0, 0.0, -1.4, 0.0, -0.4, 0.0, 1.4,
     0.0, 0.4, 0.0, -0.2, 0.0, 0.0, 0.4, -0.2,
     0.0, -0.2, 0.0, 0.0, 0.4, -0.2, 0.0,
-};
-
-constexpr std::array<double, 23> kJointLowerRad{
-    -1.57, -0.35, -3.31, -1.74, -2.27, -2.44, -3.31, -1.57,
-    -2.27, 0.0, -1.57, -1.8, -0.2, -1.0, 0.0, -0.87,
-    -0.44, -1.8, -1.57, -1.0, 0.0, -0.87, -0.44,
-};
-
-constexpr std::array<double, 23> kJointUpperRad{
-    1.57, 1.22, 1.22, 1.57, 2.27, 0.0, 1.22, 1.74,
-    2.27, 2.44, 1.57, 1.57, 1.57, 1.0, 2.34, 0.35,
-    0.44, 1.57, 0.2, 1.0, 2.34, 0.35, 0.44,
 };
 
 double smoothstep(double value) {
@@ -210,8 +199,8 @@ KickResidualRunner::residual_at(double elapsed_s) const {
         const double joint_limited =
             std::clamp(
                 kDefaultPoseRad[joint] + raw,
-                kJointLowerRad[joint],
-                kJointUpperRad[joint]) -
+                robot::t1_joint_limits::kLowerRad[joint],
+                robot::t1_joint_limits::kUpperRad[joint]) -
             kDefaultPoseRad[joint];
         residual[joint] = std::clamp(
             joint_limited / kActionScaleRad[joint], -1.0, 1.0) *

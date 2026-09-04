@@ -155,6 +155,28 @@ with 14/14 clean exits, but also 499 get-up samples at a two-cycle status
 interval. The deployment is complete enough for visual/domain-gap collection;
 its fall rate is not yet competition-release quality.
 
+### Mounted learned-kick path and all-capabilities profile
+
+The runtime accepts a `kick_policy_v3` `[1,98] -> [1,23]` actor in shadow or
+explicit active mode. The current best transition actor is only 27/92 on its
+frozen exact-CPU set with one fall, so the recommended profile evaluates it in
+shadow while the stronger residual/procedural path owns the joints:
+
+```bash
+export APOLLO_ENABLE_PARAMETERIZED_KICK=1
+export APOLLO_LEARNED_KICK_MODE=shadow
+export APOLLO_LEARNED_KICK_MODEL="$HOME/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx"
+export APOLLO_ENABLE_FAST_WALK=1
+export APOLLO_FAST_WALK_MODEL="$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx"
+scripts/run_web_match.sh 30000
+```
+
+This mounts every currently useful path: stable walk/get-up remain available,
+FastWalkV2 owns supported long forward travel, residual and procedural contact
+remain executable fallbacks, and the learned kick actor produces deployment
+evidence without silently replacing them. Set `APOLLO_LEARNED_KICK_MODE=active`
+only for controlled experiments; it is not a promotion claim.
+
 ## Package
 
 Build a self-contained competition archive:

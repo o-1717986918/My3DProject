@@ -11,7 +11,10 @@ namespace behavior {
 
 enum class KickProfileKind {
     StableFallback,
+    /// ONNX walk baseline plus a bounded exact-physics residual table.
     ParameterizedContact,
+    /// Complete 23-joint deterministic trajectory with no model invocation.
+    ProceduralContact,
 };
 
 /// Bounded parameters consumed by the current walk-backed contact executor.
@@ -31,7 +34,7 @@ struct KickExecutionProfile {
 
 /// Converts a target-aware high-level kick into a conservative, bounded
 /// contact profile. A fallback result is executable only for ForwardContact;
-/// MotionManager rejects targeted modes that cannot start the residual runner.
+/// MotionManager rejects target-aware modes unless a matching runner starts.
 KickExecutionProfile make_kick_execution_profile(
     const world::WorldSnapshot& snapshot,
     const decision::KickCommand& command,

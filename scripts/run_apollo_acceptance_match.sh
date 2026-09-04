@@ -30,6 +30,7 @@ pass_reassert_delay=0.05
 pass_reassert_settle_s=0.5
 kickoff_command_delay=0.5
 kick_calibration_scenario=0
+procedural_dribble_scenario=0
 
 case "${APOLLO_ENABLE_PASS_STRATEGY:-1}" in
     1) ;;
@@ -84,6 +85,44 @@ case "${MATCH_KICK_CALIBRATION_SCENARIO:-0}" in
         ;;
 esac
 
+case "${MATCH_PROCEDURAL_DRIBBLE_SCENARIO:-0}" in
+    1)
+        # Establish vision first, then place the AP in the exact independent
+        # trajectory slot: ball local x=0.32 m, y=+0.04 m. Pass planning must
+        # be disabled by the caller so the decision layer requests
+        # DribbleTouch rather than a TargetedPass.
+        pass_sender_x=-0.8
+        pass_sender_y=-0.04
+        pass_sender_qw=1
+        pass_sender_qz=0
+        pass_reassert_delay=0.01
+        pass_reassert_settle_s=0.05
+        kickoff_command_delay=0.05
+        procedural_dribble_scenario=1
+        ;;
+    0) ;;
+    *)
+        echo "MATCH_PROCEDURAL_DRIBBLE_SCENARIO must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+
+if [[ "$kick_calibration_scenario" == 1 &&
+      "$procedural_dribble_scenario" == 1 ]]; then
+    echo "kick calibration scenarios are mutually exclusive" >&2
+    exit 2
+fi
+if [[ "$procedural_dribble_scenario" == 1 &&
+      "${MATCH_PASS_SCENARIO:-0}" != 1 ]]; then
+    echo "MATCH_PROCEDURAL_DRIBBLE_SCENARIO requires MATCH_PASS_SCENARIO=1" >&2
+    exit 2
+fi
+if [[ "$procedural_dribble_scenario" == 1 &&
+      "${APOLLO_ENABLE_PASS_STRATEGY:-1}" != 0 ]]; then
+    echo "procedural dribble calibration requires APOLLO_ENABLE_PASS_STRATEGY=0" >&2
+    exit 2
+fi
+
 case "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" in
     1) client_strategy_args+=(--enable-parameterized-kick) ;;
     0) ;;
@@ -92,6 +131,44 @@ case "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" in
         exit 2
         ;;
 esac
+
+case "${APOLLO_LEARNED_KICK_MODE:-off}" in
+    active|shadow)
+        if [[ "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" != 1 ]]; then
+            echo "learned kick requires APOLLO_ENABLE_PARAMETERIZED_KICK=1" >&2
+            exit 2
+        fi
+        learned_kick_model=${APOLLO_LEARNED_KICK_MODEL:-}
+        # Current best transition candidate. It is mounted for shadow
+        # evidence and explicit experiments, not promoted as the default.
+        learned_kick_sha256=${APOLLO_LEARNED_KICK_SHA256:-b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1}
+        if [[ -z "$learned_kick_model" || ! -f "$learned_kick_model" ]]; then
+            echo "APOLLO_LEARNED_KICK_MODEL must name a kick_policy_v3 ONNX file" >&2
+            exit 2
+        fi
+        if [[ "$(sha256sum "$learned_kick_model" | cut -d " " -f 1)" != "$learned_kick_sha256" ]]; then
+            echo "APOLLO_LEARNED_KICK_MODEL failed the locked SHA-256 check" >&2
+            exit 2
+        fi
+        if [[ "${APOLLO_LEARNED_KICK_MODE}" == active ]]; then
+            client_strategy_args+=(--enable-learned-kick)
+        else
+            client_strategy_args+=(--shadow-learned-kick)
+        fi
+        client_strategy_args+=(--learned-kick-model "$learned_kick_model")
+        ;;
+    off) ;;
+    *)
+        echo "APOLLO_LEARNED_KICK_MODE must be off, shadow, or active" >&2
+        exit 2
+        ;;
+esac
+
+if [[ "$procedural_dribble_scenario" == 1 &&
+      "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" != 1 ]]; then
+    echo "procedural dribble scenario requires parameterized kick support" >&2
+    exit 2
+fi
 
 case "${APOLLO_ENABLE_FAST_WALK:-0}" in
     1)
@@ -270,6 +347,24 @@ if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
             "(agent (unum 6) (team My3D-A) (move3d $pass_receiver_x 0 0.8 1 0 0 0))" \
             "(agent (unum 7) (team My3D-A) (move3d -0.33 0 0.8 1 0 0 0))"
         sleep 0.05
+    elif [[ "$procedural_dribble_scenario" == 1 ]]; then
+        # Rebeam at rest so the standalone runner's measured-joint and body
+        # velocity guards, not an approach gait phase, own this calibration.
+        sleep 0.2
+        # Complete a short five-sample static placement inside the 0.08 s
+        # release debounce. Unlike the former long rebeam loop, this stops
+        # before the trajectory can start and therefore cannot overwrite the
+        # strike itself.
+        "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+            --host 127.0.0.1 \
+            --port "$monitor_port" \
+            --delay 0.01 \
+            "(agent (unum 7) (team My3D-A) (move3d -0.32 -0.04 0.8 1 0 0 0))" \
+            "(agent (unum 7) (team My3D-A) (move3d -0.32 -0.04 0.8 1 0 0 0))" \
+            "(agent (unum 7) (team My3D-A) (move3d -0.32 -0.04 0.8 1 0 0 0))" \
+            "(agent (unum 7) (team My3D-A) (move3d -0.32 -0.04 0.8 1 0 0 0))" \
+            "(agent (unum 7) (team My3D-A) (move3d -0.32 -0.04 0.8 1 0 0 0))"
+        sleep 0.05
     fi
 else
     "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
@@ -300,11 +395,23 @@ play_on=$(
 )
 illegal_defense=$(grep -c "Illegal defense" "$run_dir/server.log" || true)
 kick_samples=$(
-    { grep -Eh "MY3D_STATUS.*motion=(Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold)" \
+    { grep -Eh "MY3D_STATUS.*motion=((Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold)|ProceduralKick(Execute|Hold))" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
 parameterized_kick_samples=$(
-    { grep -Eh "MY3D_STATUS.*motion=Parameterized(Residual)?Kick(Forward|Stabilize|Hold)" \
+    { grep -Eh "MY3D_STATUS.*motion=(Parameterized(Residual)?Kick(Forward|Stabilize|Hold)|ProceduralKick(Execute|Hold))" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+learned_kick_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=LearnedKick(Execute|Hold)" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+learned_kick_shadow_samples=$(
+    { grep -Eh "MY3D_STATUS.*learned_kick_shadow_valid=1" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+procedural_kick_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=ProceduralKick(Execute|Hold).*kick_mode=DribbleTouch" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
 getup_samples=$(
@@ -330,6 +437,8 @@ targeted_pass_kick_samples=$(
 )
 pass_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
     --metric contacts "$run_dir"/My3D-*.log)
+procedural_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
+    --kick-mode DribbleTouch --metric contacts "$run_dir"/My3D-*.log)
 activation_warnings=0
 if [[ -f "$run_dir/MUJOCO_LOG.TXT" ]]; then
     activation_warnings=$(grep -c "Nan, Inf or huge value in CTRL" \
@@ -344,6 +453,11 @@ parameterized_kick_requirement_failed=0
 if [[ "${MATCH_REQUIRE_PARAMETERIZED_KICK:-0}" == 1 && \
     $parameterized_kick_samples -eq 0 ]]; then
     parameterized_kick_requirement_failed=1
+fi
+procedural_kick_requirement_failed=0
+if [[ "${MATCH_REQUIRE_PROCEDURAL_KICK:-0}" == 1 &&
+    ( $procedural_kick_samples -eq 0 || $procedural_contact_events -eq 0 ) ]]; then
+    procedural_kick_requirement_failed=1
 fi
 pass_requirement_failed=0
 if [[ "${MATCH_REQUIRE_PASS:-0}" == 1 ]] && \
@@ -360,11 +474,16 @@ if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
     || $play_on -ne 14 || $failures -ne 0 || $server_errors -ne 0 \
     || $illegal_defense -ne 0 || $kick_requirement_failed -ne 0 \
     || $parameterized_kick_requirement_failed -ne 0 \
+    || $procedural_kick_requirement_failed -ne 0 \
     || $pass_requirement_failed -ne 0 || $fast_walk_requirement_failed -ne 0 ]]; then
     echo "Apollo 7v7 acceptance failed: cycles=$max_cycles clean_exits=$clean_exits " \
         "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
         "server_errors=$server_errors illegal_defense=$illegal_defense " \
         "kick_samples=$kick_samples parameterized_kick_samples=$parameterized_kick_samples " \
+        "learned_kick_samples=$learned_kick_samples " \
+        "learned_kick_shadow_samples=$learned_kick_shadow_samples " \
+        "procedural_kick_samples=$procedural_kick_samples " \
+        "procedural_contact_events=$procedural_contact_events " \
         "getup_samples=$getup_samples " \
         "fast_walk_samples=$fast_walk_samples " \
         "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
@@ -382,6 +501,10 @@ echo "Apollo 7v7 acceptance passed: cycles=$max_cycles clean_exits=$clean_exits 
     "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
     "server_errors=$server_errors illegal_defense=$illegal_defense " \
     "kick_samples=$kick_samples parameterized_kick_samples=$parameterized_kick_samples " \
+    "learned_kick_samples=$learned_kick_samples " \
+    "learned_kick_shadow_samples=$learned_kick_shadow_samples " \
+    "procedural_kick_samples=$procedural_kick_samples " \
+    "procedural_contact_events=$procedural_contact_events " \
     "getup_samples=$getup_samples " \
     "fast_walk_samples=$fast_walk_samples " \
     "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \

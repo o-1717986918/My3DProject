@@ -29,11 +29,44 @@ def main() -> None:
     parser.add_argument("--requested-speed", type=float, default=1.43)
     parser.add_argument("--desired-arrival-speed", type=float, default=1.0)
     parser.add_argument("--mode", choices=("pass", "shot", "clear"), default="pass")
+    parser.add_argument(
+        "--motion-base",
+        choices=("walk", "stand"),
+        default="walk",
+        help="walk uses the Apollo ONNX base; stand is a model-free joint baseline",
+    )
+    parser.add_argument(
+        "--stand-support-crouch-rad",
+        type=float,
+        default=0.0,
+        help="model-free support-knee compliance used only by the stand base",
+    )
+    parser.add_argument(
+        "--stand-base-pose",
+        choices=("bent", "neutral"),
+        default="bent",
+        help="complete position-control base used by model-free trajectories",
+    )
     parser.add_argument("--ball-x-offset", type=float, default=0.0)
     parser.add_argument("--ball-y-offset", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=1701)
     parser.add_argument("--population", type=int, default=64)
     parser.add_argument("--generations", type=int, default=8)
+    parser.add_argument(
+        "--initial-manifest",
+        type=Path,
+        help="warm-start CEM from parameters in a previous teacher manifest",
+    )
+    parser.add_argument(
+        "--initial-parameters",
+        help="comma-separated 14-value warm start (exclusive with --initial-manifest)",
+    )
+    parser.add_argument(
+        "--initial-scale",
+        type=float,
+        default=1.0,
+        help="bounded scale applied to --initial-manifest parameters",
+    )
     parser.add_argument(
         "--robust-samples",
         type=int,
@@ -46,6 +79,29 @@ def main() -> None:
         default=Path("/home/win98/rl_runs/kick-teacher/kick-v2"),
     )
     args = parser.parse_args()
+    if args.initial_scale <= 0.0 or args.initial_scale > 1.0:
+        raise ValueError("--initial-scale must be in (0, 1]")
+
+    if args.initial_manifest is not None and args.initial_parameters is not None:
+        raise ValueError(
+            "--initial-manifest and --initial-parameters are mutually exclusive"
+        )
+    initial_parameters = None
+    if args.initial_manifest is not None:
+        source = json.loads(args.initial_manifest.read_text(encoding="utf-8"))
+        initial_parameters = (
+            np.asarray(source["parameters"], dtype=np.float64)
+            * args.initial_scale
+        )
+        if initial_parameters.shape != (len(PARAMETER_NAMES),):
+            raise ValueError("initial manifest has an incompatible parameter vector")
+    elif args.initial_parameters is not None:
+        initial_parameters = np.asarray(
+            [float(value) for value in args.initial_parameters.split(",")],
+            dtype=np.float64,
+        ) * args.initial_scale
+        if initial_parameters.shape != (len(PARAMETER_NAMES),):
+            raise ValueError("--initial-parameters must contain exactly 14 values")
 
     spec = KickTeacherSpec(
         target_distance_m=args.target_distance,
@@ -54,7 +110,12 @@ def main() -> None:
         desired_arrival_speed_mps=args.desired_arrival_speed,
         action_mode=args.mode,
     )
-    evaluator = KickTeacherEvaluator(spec)
+    evaluator = KickTeacherEvaluator(
+        spec,
+        motion_base=args.motion_base,
+        stand_base_pose=args.stand_base_pose,
+        stand_support_crouch_rad=args.stand_support_crouch_rad,
+    )
     result = evaluator.optimize(
         seed=args.seed,
         population=args.population,
@@ -62,6 +123,7 @@ def main() -> None:
         robust_samples=args.robust_samples,
         ball_x_offset_m=args.ball_x_offset,
         ball_y_offset_m=args.ball_y_offset,
+        initial_parameters=initial_parameters,
     )
     times, observations, actions, joint_targets, metrics = evaluator.demonstration(
         result.parameters,
@@ -88,14 +150,37 @@ def main() -> None:
         "promotion_blocker": "requires multi-seed envelope and RCSSServerMJ validation",
         "contract": str(DEFAULT_CONTRACT),
         "contract_sha256": _sha256(DEFAULT_CONTRACT),
-        "base_walk_policy": str(evaluator.walk_policy_path),
-        "base_walk_policy_sha256": _sha256(evaluator.walk_policy_path),
+        "motion_base": evaluator.motion_base,
+        "stand_base_pose": evaluator.stand_base_pose,
+        "stand_support_crouch_rad": evaluator.stand_support_crouch_rad,
+        "base_walk_policy": (
+            str(evaluator.walk_policy_path)
+            if evaluator.walk_policy_path is not None
+            else None
+        ),
+        "base_walk_policy_sha256": (
+            _sha256(evaluator.walk_policy_path)
+            if evaluator.walk_policy_path is not None
+            else None
+        ),
         "trajectory": str(trajectory_path),
         "trajectory_sha256": _sha256(trajectory_path),
         "seed": args.seed,
         "population": args.population,
         "generations": args.generations,
         "robust_samples": args.robust_samples,
+        "initial_manifest": (
+            str(args.initial_manifest.resolve())
+            if args.initial_manifest is not None
+            else None
+        ),
+        "initial_manifest_sha256": (
+            _sha256(args.initial_manifest)
+            if args.initial_manifest is not None
+            else None
+        ),
+        "initial_scale": args.initial_scale,
+        "initial_parameters_supplied": args.initial_parameters is not None,
         "spec": {
             "target_distance_m": spec.target_distance_m,
             "target_angle_deg": spec.target_angle_deg,

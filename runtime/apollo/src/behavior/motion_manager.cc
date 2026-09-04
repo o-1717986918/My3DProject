@@ -19,14 +19,27 @@ MotionManager::MotionManager(const app::RuntimeConfig& config)
               : std::nullopt),
       neutral_runner_(config.resolve_asset_path("keyframes/neutral.yaml")),
       getup_runner_(config.resolve_asset_path("networks/getup/policy.onnx")),
-      parameterized_kick_enabled_(config.enable_parameterized_kick) {
+      parameterized_kick_enabled_(config.enable_parameterized_kick),
+      learned_kick_enabled_(config.enable_learned_kick),
+      learned_kick_shadow_(config.shadow_learned_kick) {
     if (parameterized_kick_enabled_) {
         try {
             kick_residual_runner_.emplace(
                 config.resolve_asset_path("keyframes/kick_residual_table.yaml"));
         } catch (const std::exception&) {
-            parameterized_kick_enabled_ = false;
             kick_residual_runner_.reset();
+        }
+        try {
+            procedural_kick_runner_.emplace(
+                config.resolve_asset_path("keyframes/procedural_kick.yaml"));
+        } catch (const std::exception&) {
+            procedural_kick_runner_.reset();
+        }
+        if (learned_kick_enabled_ || learned_kick_shadow_) {
+            // An explicitly requested model must satisfy the tensor contract;
+            // unlike optional bundled fallbacks, load failure is configuration
+            // failure and must not be silently hidden.
+            learned_kick_runner_.emplace(config.learned_kick_model);
         }
     }
 }
@@ -35,6 +48,13 @@ MotionStepResult MotionManager::step(
     const world::WorldSnapshot& snapshot,
     const decision::HighLevelCommand& command,
     bool reset) {
+    if (!std::holds_alternative<decision::KickCommand>(command)) {
+        kick_residual_active_ = false;
+        procedural_kick_active_ = false;
+        learned_kick_active_ = false;
+        learned_kick_shadow_valid_ = false;
+        learned_kick_maximum_absolute_action_ = 0.0F;
+    }
     if (std::holds_alternative<decision::BeamCommand>(command)) {
         reset_get_up_state();
         return {
@@ -87,17 +107,29 @@ MotionStepResult MotionManager::step_kick(
     if (reset) {
         kick_start_time_ = snapshot.server_time;
         kick_profile_ = make_kick_execution_profile(
-            snapshot, command, parameterized_kick_enabled_);
+            snapshot, command,
+            parameterized_kick_enabled_);
         kick_residual_active_ = parameterized_kick_enabled_ &&
             kick_residual_runner_.has_value() &&
             kick_residual_runner_->begin(snapshot, kick_profile_);
+        procedural_kick_active_ = !kick_residual_active_ &&
+            parameterized_kick_enabled_ &&
+            procedural_kick_runner_.has_value() &&
+            procedural_kick_runner_->begin(snapshot, kick_profile_);
+        learned_kick_active_ = learned_kick_runner_.has_value() &&
+            learned_kick_runner_->begin(snapshot, kick_profile_);
+        learned_kick_shadow_valid_ = false;
+        learned_kick_maximum_absolute_action_ = 0.0F;
     }
 
-    const bool targeted = command.mode == decision::KickMode::TargetedPass ||
-         command.mode == decision::KickMode::Shot ||
-         command.mode == decision::KickMode::Clear;
-    if (targeted && (!parameterized_kick_enabled_ || !kick_residual_active_)) {
+    const bool target_aware = command.mode != decision::KickMode::ForwardContact;
+    if (target_aware &&
+        (!parameterized_kick_enabled_ ||
+         (!kick_residual_active_ && !procedural_kick_active_ &&
+          !(learned_kick_enabled_ && learned_kick_active_)))) {
         kick_residual_active_ = false;
+        procedural_kick_active_ = false;
+        learned_kick_active_ = false;
         const auto hold = neutral_runner_.step(reset, snapshot.server_time);
         return {
             true,
@@ -108,6 +140,19 @@ MotionStepResult MotionManager::step_kick(
     }
 
     const double elapsed = std::max(0.0, snapshot.server_time - kick_start_time_);
+    if (procedural_kick_active_ && procedural_kick_runner_.has_value()) {
+        const auto result = procedural_kick_runner_->step(elapsed);
+        return {
+            true,
+            result.finished ? "ProceduralKickHold" : "ProceduralKickExecute",
+            result.joint_targets,
+            result.finished
+                ? SkillExecutionStatus::Completed
+                : SkillExecutionStatus::Running,
+            decision::MotionRequestKind::Kick,
+        };
+    }
+
     decision::WalkCommand walk_command;
     walk_command.target_absolute = false;
     walk_command.orientation_deg = 0.0;
@@ -131,6 +176,27 @@ MotionStepResult MotionManager::step_kick(
         walk_command,
         reset,
         kick_residual_active_ ? std::nullopt : walk_command.role_id);
+    if (learned_kick_active_ && learned_kick_runner_.has_value()) {
+        const auto learned = learned_kick_runner_->step(
+            snapshot, kick_profile_, elapsed, result.joint_targets);
+        learned_kick_shadow_valid_ = learned.valid;
+        learned_kick_maximum_absolute_action_ =
+            learned.maximum_absolute_action;
+        if (learned_kick_enabled_ && learned.valid) {
+            return {
+                true,
+                learned.finished ? "LearnedKickHold" : "LearnedKickExecute",
+                learned.joint_targets,
+                learned.finished
+                    ? SkillExecutionStatus::Completed
+                    : SkillExecutionStatus::Running,
+                decision::MotionRequestKind::Kick,
+            };
+        }
+        if (!learned.valid) {
+            learned_kick_active_ = false;
+        }
+    }
     if (kick_residual_active_) {
         kick_residual_runner_->apply(elapsed, result.joint_targets);
     }

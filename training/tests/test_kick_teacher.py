@@ -59,6 +59,33 @@ def test_teacher_spec_rejects_unsupported_requests():
         KickTeacherSpec(control_dt_s=0.02, simulation_dt_s=0.006).validate()
 
 
+def test_stand_motion_base_does_not_require_or_create_onnx_session(tmp_path):
+    missing_policy = tmp_path / "missing.onnx"
+    evaluator = KickTeacherEvaluator(
+        KickTeacherSpec(evaluation_duration_s=1.2),
+        walk_policy_path=missing_policy,
+        motion_base="stand",
+    )
+
+    assert evaluator.motion_base == "stand"
+    assert evaluator.walk_policy_path is None
+    assert evaluator._walk_session is None
+    metrics = evaluator.rollout(np.zeros(len(PARAMETER_NAMES)))
+    assert np.isfinite(float(metrics["score"]))
+    assert not bool(metrics["fell"])
+    assert float(metrics["minimum_upright"]) > 0.95
+
+
+def test_teacher_rejects_unknown_motion_base():
+    with pytest.raises(ValueError, match="motion_base"):
+        KickTeacherEvaluator(KickTeacherSpec(), motion_base="unknown")
+
+
+def test_teacher_rejects_unknown_stand_base_pose():
+    with pytest.raises(ValueError, match="stand_base_pose"):
+        KickTeacherEvaluator(KickTeacherSpec(), stand_base_pose="unknown")
+
+
 def test_walk_history_requires_exact_state_and_matching_action_shape():
     contract = load_policy_contract(DEFAULT_CONTRACT)
     evaluator = KickTeacherEvaluator(KickTeacherSpec(), contract=contract)

@@ -148,6 +148,29 @@ int main() {
         return 1;
     }
 
+    world::WorldSnapshot procedural_snapshot = make_open_pass_snapshot();
+    procedural_snapshot.self.position_m = {-0.32, -0.04, 0.8};
+    decision::APBehavior procedural_behavior;
+    decision::Blackboard procedural_blackboard;
+    const auto procedural_stabilizing = procedural_behavior.make_command(
+        procedural_snapshot, procedural_blackboard, role_manager, false, true);
+    if (std::holds_alternative<decision::KickCommand>(procedural_stabilizing)) {
+        std::cerr << "procedural dribble skipped the release debounce\n";
+        return 1;
+    }
+    procedural_snapshot.server_time += 0.30;
+    const auto procedural_release = procedural_behavior.make_command(
+        procedural_snapshot, procedural_blackboard, role_manager, false, true);
+    const auto* procedural_kick =
+        std::get_if<decision::KickCommand>(&procedural_release);
+    if (procedural_kick == nullptr ||
+        procedural_kick->mode != decision::KickMode::DribbleTouch ||
+        !procedural_kick->target_point_m.has_value() ||
+        std::abs(procedural_kick->requested_ball_speed_mps - 0.90) > 1.0e-9) {
+        std::cerr << "enabled procedural dribble did not emit its exact contract\n";
+        return 1;
+    }
+
     decision::APBehavior risk_behavior;
     decision::Blackboard risk_blackboard;
     risk_blackboard.set(

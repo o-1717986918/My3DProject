@@ -70,6 +70,7 @@ std::string_view kick_mode_name(const decision::HighLevelCommand& command) {
     if (kick == nullptr) return "None";
     switch (kick->mode) {
         case decision::KickMode::ForwardContact: return "ForwardContact";
+        case decision::KickMode::DribbleTouch: return "DribbleTouch";
         case decision::KickMode::TargetedPass: return "TargetedPass";
         case decision::KickMode::Shot: return "Shot";
         case decision::KickMode::Clear: return "Clear";
@@ -107,14 +108,18 @@ decision::ExecutionFeedback make_execution_feedback(
 AgentApp::AgentApp(RuntimeConfig config)
     : config_(std::move(config)),
       world_state_(config_.team_name, config_.player_number, 7),
-      decision_manager_(config_.enable_pass_strategy, config_.enable_parameterized_kick),
+      decision_manager_(
+          config_.enable_pass_strategy,
+          config_.enable_parameterized_kick),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name) {}
 
 AgentApp::AgentApp(RuntimeConfig config, std::unique_ptr<server::TcpLpmClient> client)
     : config_(std::move(config)),
       world_state_(config_.team_name, config_.player_number, 7),
-      decision_manager_(config_.enable_pass_strategy, config_.enable_parameterized_kick),
+      decision_manager_(
+          config_.enable_pass_strategy,
+          config_.enable_parameterized_kick),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name),
       client_(std::move(client)) {}
@@ -358,6 +363,16 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                     : 0)
             << " kick_condition="
             << motion_manager_.active_kick_condition_index()
+            << " procedural_kick_anchor="
+            << (motion_manager_.active_procedural_kick_anchor().empty()
+                    ? std::string{"None"}
+                    : motion_manager_.active_procedural_kick_anchor())
+            << " learned_kick_active="
+            << (motion_manager_.learned_kick_active() ? 1 : 0)
+            << " learned_kick_shadow_valid="
+            << (motion_manager_.learned_kick_shadow_valid() ? 1 : 0)
+            << " learned_kick_max_abs_action="
+            << motion_manager_.learned_kick_maximum_absolute_action()
             << " own_score=" << snapshot.own_score
             << " opponent_score=" << snapshot.opponent_score
             << " strategy=" << (selected_action != nullptr

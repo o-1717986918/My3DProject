@@ -77,6 +77,32 @@ case "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" in
     0) ;;
     *) echo "APOLLO_ENABLE_PARAMETERIZED_KICK must be 0 or 1" >&2; exit 2 ;;
 esac
+case "${APOLLO_LEARNED_KICK_MODE:-off}" in
+    active|shadow)
+        if [[ "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" != 1 ]]; then
+            echo "learned kick requires APOLLO_ENABLE_PARAMETERIZED_KICK=1" >&2
+            exit 2
+        fi
+        learned_kick_model=${APOLLO_LEARNED_KICK_MODEL:-}
+        expected_sha=${APOLLO_LEARNED_KICK_SHA256:-b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1}
+        if [[ -z "$learned_kick_model" || ! -f "$learned_kick_model" ]]; then
+            echo "APOLLO_LEARNED_KICK_MODEL must name a kick_policy_v3 ONNX file" >&2
+            exit 2
+        fi
+        if [[ "$(sha256sum "$learned_kick_model" | cut -d " " -f 1)" != "$expected_sha" ]]; then
+            echo "APOLLO_LEARNED_KICK_MODEL failed the locked SHA-256 check" >&2
+            exit 2
+        fi
+        if [[ "${APOLLO_LEARNED_KICK_MODE}" == active ]]; then
+            client_strategy_args+=(--enable-learned-kick)
+        else
+            client_strategy_args+=(--shadow-learned-kick)
+        fi
+        client_strategy_args+=(--learned-kick-model "$learned_kick_model")
+        ;;
+    off) ;;
+    *) echo "APOLLO_LEARNED_KICK_MODE must be off, shadow, or active" >&2; exit 2 ;;
+esac
 case "${APOLLO_ENABLE_FAST_WALK:-0}" in
     1)
         fast_walk_model=${APOLLO_FAST_WALK_MODEL:-}

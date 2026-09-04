@@ -1,0 +1,77 @@
+schema_version: 1
+recorded_at: 2026-09-04
+stage: kick_policy_v3_runtime_mount
+status: shadow_mounted_not_promoted
+
+runtime_contract:
+  implementation: runtime/apollo/src/behavior/learned_kick_runner.cc
+  observation_contract: training/contracts/kick_policy_v3.yaml
+  input_shape: [1, 98]
+  output_shape: [1, 23]
+  composition: stable_walk_target_plus_bounded_kick_residual
+  modes: [shadow, explicit_active]
+  package_default: false
+  current_envelope:
+    target_distance_m: [1.90, 2.10]
+    relative_target_angle_deg: [-12.0, 12.0]
+    ball_local_x_m: [0.30, 0.39]
+    ball_local_y_m: [-0.03, 0.05]
+  same_cycle_fallback: [kick_residual_table, procedural_anchor, safe_reject]
+
+selected_shadow_candidate:
+  path: /home/win98/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx
+  sha256: b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1
+  exact_cpu_trials: 92
+  exact_cpu_successes: 27
+  exact_cpu_success_rate: 0.29347826086956524
+  contact_trials: 92
+  fall_trials: 1
+  promoted: false
+  use: shadow evidence and explicit controlled experiments only
+
+frozen_transition_comparison:
+  - name: kick-transition-bc-s9701
+    sha256: fc925db02351fdb8ad80fdb5545416a80029f3f8ad0abe450cfe838332767114
+    successes: 0
+    trials: 92
+    falls: 0
+  - name: kick-transition-dagger-bc-s9901
+    sha256: 8a5ead653006cf55e3afc802022c005bcb2acc981fb7364e85bee6845785b54f
+    successes: 10
+    trials: 92
+    falls: 0
+  - name: kick-transition-dagger-r2-bc-s10002
+    sha256: b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1
+    successes: 27
+    trials: 92
+    falls: 1
+  - name: kick-transition-dagger-r3-bc-s10201
+    sha256: 543e02671e0cc39034b08e4910156a64abf52668313834e0caa3e205dd8a3260
+    successes: 16
+    trials: 92
+    falls: 0
+
+verification:
+  cpp_contract_tests: 15_of_15_passed
+  external_model_load_and_inference: passed
+  external_inference_command: >-
+    runtime/apollo/build/learned_kick_runner_test
+    /home/win98/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx
+  seven_v_seven_process_run:
+    path: /home/win98/rl_runs/runtime-mount/learned-kick-shadow-s20260904-v1
+    clean_exits: 14
+    connections: 14
+    joins: 14
+    play_on_clients: 14
+    kick_command_reached: false
+    conclusion: model load is exercised but this fixture does not prove in-match shadow inference
+
+excluded_from_runtime_selection:
+  kick_policy_v2_bc:
+    reason: legacy 96-field contract and no frozen result better than retained execution paths
+  physical_correction_heads:
+    reason: best recorded gate success was 0.0625 and no exact ONNX/server promotion evidence
+  switch_selectors:
+    reason: action timing selection remained unreliable and has no safe independent actuator role
+  striker_selectors:
+    reason: best current-state selector was 153/205 while the oracle gap remained large

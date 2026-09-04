@@ -30,6 +30,16 @@ ActionCapabilityRegistry::ActionCapabilityRegistry(bool enable_parameterized_kic
     envelopes_[index_of(SkillCapability::ForwardContact)] = {
         SkillCapability::ForwardContact, CapabilityState::Stable, 0.25, 0.85, 15.0,
         0.0, 1.0, false, SkillCapability::Walk};
+    envelopes_[index_of(SkillCapability::DribbleTouch)] = {
+        SkillCapability::DribbleTouch,
+        enable_parameterized_kick ? CapabilityState::Experimental
+                                   : CapabilityState::Unavailable,
+        decision::kick_contract::kProceduralDribbleMinimumTargetDistanceM,
+        decision::kick_contract::kProceduralDribbleMaximumTargetDistanceM,
+        decision::kick_contract::kProceduralDribbleMaximumTargetAngleDeg,
+        decision::kick_contract::kProceduralDribbleRequestedSpeedMps,
+        decision::kick_contract::kProceduralDribbleRequestedSpeedMps,
+        true, SkillCapability::ForwardContact};
     envelopes_[index_of(SkillCapability::TargetedPass)] = {
         SkillCapability::TargetedPass,
         enable_parameterized_kick ? CapabilityState::Experimental
@@ -70,7 +80,9 @@ bool ActionCapabilityRegistry::executable(
     const CooperativeAction& action,
     double relative_target_angle_deg) const {
     SkillCapability capability = SkillCapability::ForwardContact;
-    if (action.category == ActionCategory::Pass) {
+    if (action.category == ActionCategory::Dribble) {
+        capability = SkillCapability::DribbleTouch;
+    } else if (action.category == ActionCategory::Pass) {
         capability = SkillCapability::TargetedPass;
     } else if (action.category == ActionCategory::Shoot) {
         capability = SkillCapability::Shot;
@@ -112,6 +124,7 @@ std::string_view to_string(SkillCapability capability) {
         case SkillCapability::GetUp: return "GetUp";
         case SkillCapability::ApproachRecover: return "ApproachRecover";
         case SkillCapability::ForwardContact: return "ForwardContact";
+        case SkillCapability::DribbleTouch: return "DribbleTouch";
         case SkillCapability::TargetedPass: return "TargetedPass";
         case SkillCapability::Shot: return "Shot";
         case SkillCapability::Clear: return "Clear";

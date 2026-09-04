@@ -46,7 +46,14 @@ def main() -> None:
         simulation_dt_s=float(raw_spec["simulation_dt_s"]),
     )
     parameters = np.asarray(source["parameters"], dtype=np.float64)
-    evaluator = KickTeacherEvaluator(spec)
+    evaluator = KickTeacherEvaluator(
+        spec,
+        motion_base=str(source.get("motion_base", "walk")),
+        stand_base_pose=str(source.get("stand_base_pose", "bent")),
+        stand_support_crouch_rad=float(
+            source.get("stand_support_crouch_rad", 0.0)
+        ),
+    )
     rng = np.random.default_rng(args.seed)
     trials: list[dict[str, object]] = []
     for trial_index in range(args.trials):
@@ -71,6 +78,8 @@ def main() -> None:
     report = {
         "purpose": "r1_kick_teacher_held_out_evaluation",
         "source_manifest": str(args.manifest),
+        "motion_base": evaluator.motion_base,
+        "stand_base_pose": evaluator.stand_base_pose,
         "seed": args.seed,
         "trial_count": args.trials,
         "successful_trials": successful,

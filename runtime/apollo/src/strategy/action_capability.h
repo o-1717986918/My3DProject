@@ -22,6 +22,7 @@ enum class SkillCapability : std::uint8_t {
     GetUp,
     ApproachRecover,
     ForwardContact,
+    DribbleTouch,
     TargetedPass,
     Shot,
     Clear,
@@ -52,7 +53,7 @@ public:
         double relative_target_angle_deg) const;
 
 private:
-    std::array<ActionEnvelope, 8> envelopes_{};
+    std::array<ActionEnvelope, 9> envelopes_{};
 };
 
 std::string_view to_string(CapabilityState state);

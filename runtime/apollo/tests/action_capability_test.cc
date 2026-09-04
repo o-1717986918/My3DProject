@@ -16,6 +16,12 @@ strategy::CooperativeAction make_pass(double distance_m, double speed_mps) {
     return action;
 }
 
+strategy::CooperativeAction make_dribble(double distance_m, double speed_mps) {
+    auto action = make_pass(distance_m, speed_mps);
+    action.category = strategy::ActionCategory::Dribble;
+    return action;
+}
+
 }  // namespace
 
 int main() {
@@ -27,6 +33,15 @@ int main() {
     if (disabled.executable(nominal, 0.0) ||
         !enabled.executable(nominal, 0.0)) {
         std::cerr << "targeted pass feature gate is incorrect\n";
+        return 1;
+    }
+    if (disabled.executable(make_dribble(0.55, 0.90), 0.0) ||
+        !enabled.executable(make_dribble(0.55, 0.90), 0.0) ||
+        enabled.state(strategy::SkillCapability::DribbleTouch) !=
+            strategy::CapabilityState::Experimental ||
+        enabled.executable(make_dribble(0.70, 0.90), 0.0) ||
+        enabled.executable(make_dribble(0.55, 0.95), 0.0)) {
+        std::cerr << "procedural dribble capability envelope is incorrect\n";
         return 1;
     }
 

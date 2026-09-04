@@ -24,9 +24,61 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cycle_args=()
+motion_args=()
 if [[ -n "$max_cycles" ]]; then
     cycle_args=(--max-cycles "$max_cycles")
 fi
+
+case "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" in
+    1) motion_args+=(--enable-parameterized-kick) ;;
+    0) ;;
+    *) echo "APOLLO_ENABLE_PARAMETERIZED_KICK must be 0 or 1" >&2; exit 2 ;;
+esac
+
+case "${APOLLO_LEARNED_KICK_MODE:-off}" in
+    active|shadow)
+        if [[ "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" != 1 ]]; then
+            echo "learned kick requires APOLLO_ENABLE_PARAMETERIZED_KICK=1" >&2
+            exit 2
+        fi
+        learned_kick_model=${APOLLO_LEARNED_KICK_MODEL:-}
+        learned_kick_sha256=${APOLLO_LEARNED_KICK_SHA256:-b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1}
+        if [[ -z "$learned_kick_model" || ! -f "$learned_kick_model" ]]; then
+            echo "APOLLO_LEARNED_KICK_MODEL must name a kick_policy_v3 ONNX file" >&2
+            exit 2
+        fi
+        if [[ "$(sha256sum "$learned_kick_model" | cut -d " " -f 1)" != "$learned_kick_sha256" ]]; then
+            echo "APOLLO_LEARNED_KICK_MODEL failed the locked SHA-256 check" >&2
+            exit 2
+        fi
+        if [[ "${APOLLO_LEARNED_KICK_MODE}" == active ]]; then
+            motion_args+=(--enable-learned-kick)
+        else
+            motion_args+=(--shadow-learned-kick)
+        fi
+        motion_args+=(--learned-kick-model "$learned_kick_model")
+        ;;
+    off) ;;
+    *) echo "APOLLO_LEARNED_KICK_MODE must be off, shadow, or active" >&2; exit 2 ;;
+esac
+
+case "${APOLLO_ENABLE_FAST_WALK:-0}" in
+    1)
+        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-}
+        fast_walk_sha256=c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b
+        if [[ -z "$fast_walk_model" || ! -f "$fast_walk_model" ]]; then
+            echo "APOLLO_FAST_WALK_MODEL must name the phase-v2 ONNX file" >&2
+            exit 2
+        fi
+        if [[ "$(sha256sum "$fast_walk_model" | cut -d " " -f 1)" != "$fast_walk_sha256" ]]; then
+            echo "APOLLO_FAST_WALK_MODEL failed the locked SHA-256 check" >&2
+            exit 2
+        fi
+        motion_args+=(--enable-fast-walk --fast-walk-model "$fast_walk_model")
+        ;;
+    0) ;;
+    *) echo "APOLLO_ENABLE_FAST_WALK must be 0 or 1" >&2; exit 2 ;;
+esac
 
 for number in $(seq 1 7); do
     "$binary" \
@@ -35,7 +87,8 @@ for number in $(seq 1 7); do
         --host "$host" \
         --port "$port" \
         --asset-root "$runtime_dir/assets" \
-        "${cycle_args[@]}" &
+        "${cycle_args[@]}" \
+        "${motion_args[@]}" &
     player_pids+=("$!")
     sleep 0.05
 done

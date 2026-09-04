@@ -35,6 +35,7 @@ struct WalkCommand {
 struct GetUpCommand {};
 enum class KickMode : std::uint8_t {
     ForwardContact,
+    DribbleTouch,
     TargetedPass,
     Shot,
     Clear,

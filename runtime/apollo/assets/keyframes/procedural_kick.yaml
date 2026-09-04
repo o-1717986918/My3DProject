@@ -1,0 +1,48 @@
+schema_version: 1
+description: >-
+  Model-independent T1 kick anchors. Only anchors with recorded exact-physics
+  evidence are published; missing pass, shot, and clear modes fail closed.
+anchors:
+  - name: right_dribble_055m_v1
+    mode: dribble
+    target_distance_m: 0.55
+    target_distance_tolerance_m: 0.10
+    target_angle_deg: 0.0
+    target_angle_tolerance_deg: 1.0
+    requested_speed_mps: 0.90
+    requested_speed_tolerance_mps: 0.05
+    ball_local_x_m: 0.32
+    ball_local_y_m: 0.04
+    ball_x_tolerance_m: 0.02
+    ball_y_tolerance_m: 0.02
+    kp: 150.0
+    kd: 1.0
+    base_pose: neutral
+    kicking_foot: right
+    key_times_s: [0.0, 0.18, 0.34, 0.54, 0.76, 1.20]
+    parameters:
+      - -0.005230483107572986
+      - -0.12490284935836007
+      - 0.10756802083474919
+      - -0.08088059340500209
+      - 0.282070709916575
+      - 0.15347690640652076
+      - 0.043456063854626026
+      - -0.32233818990986896
+      - 0.2453872232908769
+      - 0.07919615529244747
+      - -0.4328683451427111
+      - -0.0865765795896539
+      - -0.022804361366285903
+      - 0.3365781310929396
+    evidence:
+      simulator: exact_mujoco_rcssservermj_assets
+      nominal_progress_m: 0.5216432109316447
+      nominal_peak_speed_mps: 0.8727516427362522
+      nominal_minimum_torso_height_m: 0.6466808629361646
+      nominal_minimum_upright: 0.9706140903135335
+      heldout_trials: 20
+      heldout_successes: 20
+      training_manifest_sha256: 010b8a1bafad57ad78ee3581de0f542815f39a27dd8e0188fc42172a69539463
+      heldout_manifest_sha256: 327a74a43f54d8a74c5deacd8ea225da2afebcee9e61b0385a3f87b79eee80f6
+      server_status: contact_observed

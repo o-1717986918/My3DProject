@@ -321,11 +321,23 @@ class KickTeacherEvaluator:
         resource_root: Path = DEFAULT_RESOURCE_ROOT,
         prefix: str = "teacher_",
         walk_policy_path: Path = DEFAULT_WALK_POLICY,
+        motion_base: str = "walk",
+        stand_base_pose: str = "bent",
+        stand_support_crouch_rad: float = 0.0,
     ) -> None:
         spec.validate()
+        if motion_base not in {"walk", "stand"}:
+            raise ValueError("motion_base must be walk or stand")
+        if stand_base_pose not in {"bent", "neutral"}:
+            raise ValueError("stand_base_pose must be bent or neutral")
+        if not 0.0 <= stand_support_crouch_rad <= 0.5:
+            raise ValueError("stand_support_crouch_rad must be in [0, 0.5]")
         self.spec = spec
         self.contract = contract or load_policy_contract(DEFAULT_CONTRACT)
         self.prefix = prefix
+        self.motion_base = motion_base
+        self.stand_base_pose = stand_base_pose
+        self.stand_support_crouch_rad = stand_support_crouch_rad
         self.model = build_single_t1_soccer_model(
             resource_root, prefix=prefix, robot_x=-0.32, robot_y=0.0
         )
@@ -353,12 +365,23 @@ class KickTeacherEvaluator:
         ):
             pos_id = self.model.actuator(prefix + effector + "_pos").id
             vel_id = self.model.actuator(prefix + effector + "_vel").id
-            kp, kd = apollo_joint_gains(joint_name)
+            if motion_base == "stand":
+                # Use the proven high-gain position-control contract from the
+                # neutral runner.  Unlike the walk policy's per-joint gains,
+                # this keeps the bent kick-preparation pose self-supporting
+                # without ONNX feedback.
+                kp, kd = 150.0, 1.0
+            else:
+                kp, kd = apollo_joint_gains(joint_name)
             self.model.actuator_gainprm[pos_id, 0] = kp
             self.model.actuator_biasprm[pos_id, 1] = -kp
             self.model.actuator_gainprm[vel_id, 0] = kd
             self.model.actuator_biasprm[vel_id, 2] = -kd
-        self._default_pose = APOLLO_DEFAULT_POSE.copy()
+        self._default_pose = (
+            np.zeros_like(APOLLO_DEFAULT_POSE)
+            if motion_base == "stand" and stand_base_pose == "neutral"
+            else APOLLO_DEFAULT_POSE.copy()
+        )
         self._lowers = np.asarray(
             [
                 self.model.joint(prefix + name).range[0]
@@ -381,17 +404,23 @@ class KickTeacherEvaluator:
         self._torso_site = self.model.site(prefix + "torso").id
         gyro = self.model.sensor(prefix + "torso_gyro")
         self._gyro_slice = slice(gyro.adr[0], gyro.adr[0] + gyro.dim[0])
-        if not walk_policy_path.is_file():
-            raise FileNotFoundError(f"Apollo walk policy not found: {walk_policy_path}")
-        self.walk_policy_path = walk_policy_path
-        self._walk_session = ort.InferenceSession(
-            str(walk_policy_path), providers=["CPUExecutionProvider"]
-        )
-        self._walk_input = self._walk_session.get_inputs()[0].name
-        if self._walk_session.get_inputs()[0].shape != [1, 78]:
-            raise ValueError("Apollo walk teacher must have a [1, 78] input")
-        if self._walk_session.get_outputs()[0].shape != [1, 23]:
-            raise ValueError("Apollo walk teacher must have a [1, 23] output")
+        self.walk_policy_path: Path | None = None
+        self._walk_session: ort.InferenceSession | None = None
+        self._walk_input: str | None = None
+        if motion_base == "walk":
+            if not walk_policy_path.is_file():
+                raise FileNotFoundError(
+                    f"Apollo walk policy not found: {walk_policy_path}"
+                )
+            self.walk_policy_path = walk_policy_path
+            self._walk_session = ort.InferenceSession(
+                str(walk_policy_path), providers=["CPUExecutionProvider"]
+            )
+            self._walk_input = self._walk_session.get_inputs()[0].name
+            if self._walk_session.get_inputs()[0].shape != [1, 78]:
+                raise ValueError("Apollo walk teacher must have a [1, 78] input")
+            if self._walk_session.get_outputs()[0].shape != [1, 23]:
+                raise ValueError("Apollo walk teacher must have a [1, 23] output")
         self._captured_targets = np.empty((0, self.contract.action_size))
         self._captured_observations = np.empty((0, self.contract.observation_size))
         self._captured_actions = np.empty((0, self.contract.action_size))
@@ -438,6 +467,13 @@ class KickTeacherEvaluator:
         previous_action: np.ndarray,
         velocity_command: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
+        if self.motion_base == "stand":
+            return (
+                self._default_pose.copy(),
+                np.zeros(self.contract.action_size, dtype=np.float64),
+            )
+        if self._walk_session is None or self._walk_input is None:
+            raise RuntimeError("walk motion base has no inference session")
         torso_xmat = data.site_xmat[self._torso_site].reshape(3, 3)
         gravity = torso_xmat.T @ np.array([0.0, 0.0, -1.0])
         observation = np.concatenate(
@@ -452,9 +488,9 @@ class KickTeacherEvaluator:
         ).astype(np.float32)
         observation = np.nan_to_num(observation, nan=0.0, posinf=10.0, neginf=-10.0)
         observation = np.clip(observation, -10.0, 10.0)
-        action = self._walk_session.run(None, {self._walk_input: observation[None, :]})[
-            0
-        ][0].astype(np.float64)
+        action = self._walk_session.run(
+            None, {self._walk_input: observation[None, :]}
+        )[0][0].astype(np.float64)
         action = np.clip(np.nan_to_num(action), -5.0, 5.0)
         return self._default_pose + 0.25 * action, action
 
@@ -924,6 +960,33 @@ class KickTeacherEvaluator:
                     self.contract,
                     np.asarray([action_time_s], dtype=np.float64),
                 )[0]
+                if (
+                    self.motion_base == "stand"
+                    and self.stand_support_crouch_rad > 0.0
+                ):
+                    # Deterministic right-kick support-leg compliance.  The
+                    # hip/knee/ankle triplet preserves the foot pitch while
+                    # lowering the pelvis so the support leg can absorb the
+                    # strike impulse.  It remains outside the learned teacher
+                    # trajectory and is therefore explicit in every manifest.
+                    if action_time_s < 0.18:
+                        support_weight = _smoothstep(action_time_s / 0.18)
+                    elif action_time_s < 0.76:
+                        support_weight = 1.0
+                    elif action_time_s < 1.20:
+                        support_weight = 1.0 - _smoothstep(
+                            (action_time_s - 0.76) / 0.44
+                        )
+                    else:
+                        support_weight = 0.0
+                    support = self.stand_support_crouch_rad * support_weight
+                    joint = {
+                        name: index
+                        for index, name in enumerate(self.contract.joint_order)
+                    }
+                    raw_residual_target[joint["Left_Hip_Pitch"]] -= 0.5 * support
+                    raw_residual_target[joint["Left_Knee_Pitch"]] += support
+                    raw_residual_target[joint["Left_Ankle_Pitch"]] -= 0.5 * support
                 residual_target = (
                     np.clip(
                         self._default_pose + raw_residual_target,
@@ -1188,22 +1251,28 @@ class KickTeacherEvaluator:
             )
 
         def robust_objective(parameters: np.ndarray) -> float:
+            rollouts = [
+                self.rollout(
+                    parameters,
+                    ball_x_offset_m=ball_x,
+                    ball_y_offset_m=ball_y,
+                    setup_ball_x_offset_m=setup_ball_x_offset_m,
+                    setup_ball_y_offset_m=setup_ball_y_offset_m,
+                    setup_timeout_s=setup_timeout_s,
+                    setup_tolerance_m=setup_tolerance_m,
+                    setup_confirmation_cycles=setup_confirmation_cycles,
+                )
+                for ball_x, ball_y in perturbations
+            ]
             scores = np.asarray(
-                [
-                    self.rollout(
-                        parameters,
-                        ball_x_offset_m=ball_x,
-                        ball_y_offset_m=ball_y,
-                        setup_ball_x_offset_m=setup_ball_x_offset_m,
-                        setup_ball_y_offset_m=setup_ball_y_offset_m,
-                        setup_timeout_s=setup_timeout_s,
-                        setup_tolerance_m=setup_tolerance_m,
-                        setup_confirmation_cycles=setup_confirmation_cycles,
-                    )["score"]
-                    for ball_x, ball_y in perturbations
-                ],
+                [float(metrics["score"]) for metrics in rollouts],
                 dtype=np.float64,
             )
+            # Falling is a feasibility violation, not a soft trade-off against
+            # range. Keep it lexicographically below every upright candidate so
+            # CEM cannot buy a longer kick by accepting a collapse.
+            if any(bool(metrics["fell"]) for metrics in rollouts):
+                return float(-1.0e6 + np.mean(scores))
             # Deployment needs a floor, not a high average hiding one bad ball
             # placement.  Keep some pressure on mean quality while making the
             # worst deterministic perturbation dominate the search objective.

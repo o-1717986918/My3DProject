@@ -1,4 +1,4 @@
-# One-step passing migration: implementation and training handoff
+# One-step passing migration: implementation record
 
 Status: first delivery loop accepted
 
@@ -175,16 +175,19 @@ conda run -n my3d-team python scripts/analyze_apollo_pass.py \
   /tmp/my3d-pass-scenario-final/My3D-*.log
 ```
 
-## Current strategy closure and deferred work
+## Current strategy closure and handoff
 
 The subsequent full-team increment is now wired into the decision tree. A
 single deterministic `TeamPlan` is generated from the complete role
 assignment, with support/unmark candidates, pressure/cover, one-owner
 interception, paired centre-back marking, passing-lane blocks, and goalkeeper
-goal-line interception. Set plays are coordinated by `RestartCoordinator`
+goal-line interception. Phase-specific formation and the configurable
+`Balanced`, `ProtectLead`, and `ChaseGoal` risk modes are also implemented.
+Set plays are coordinated by `RestartCoordinator`
 with taker election, receiver positioning, alignment, execution feedback,
 release verification, one bounded fallback, and post-release lockout. These
-paths are covered by the 12-test CTest suite and a 600-cycle 7v7 gate.
+paths are covered by repository unit/integration tests and preserved match
+evidence.
 
 The current implementation deliberately does not claim useful physical
 targeted passes: the retained fixed contact has produced only 0.186--0.644 m
@@ -192,83 +195,33 @@ in preserved trials, while the parameterized kick remains opt-in and
 experimental. It also does not claim shot/clear capability or receiver first
 touch until those skills have physical outcome evidence.
 
-The current implementation deliberately defers through passes, pass-outcome
-ownership, receiver first touch, shot/dribble/clear comparison in one
-selector, score/time risk modes, low-pressure backward-pass suppression,
-decision replay, and swapped-side multi-match A/B statistics. The lifecycle
-enum and packet authorship are present, but `Committed/Executed/ReceiverZone/
-Received/Intercepted/Out/Cancelled/Expired` transitions still need to be
-driven by physical ball observations rather than inferred from a command.
-None should be inferred from `TargetedPass` telemetry alone.
+The remaining migration work is narrower and more explicit:
 
-## Training requirements after this delivery
+- direct and leading pass generation exists, but through-space generation and
+  non-pass action generators do not;
+- the lifecycle enum and packet authorship exist, but only `Proposed` and
+  `Ready` are actively emitted; later states must be driven by matching motion
+  feedback and physical ball observations, not inferred from command issue;
+- the receiver currently walks to a target but has no persistent intention,
+  trajectory intercept, first touch, or next-action handoff;
+- `TeamCommManager::ReadyGateState` is declared but not used, so the current
+  Ready checks do not yet enforce a stable residence interval;
+- each robot deterministically computes a full plan from its own partial world
+  view, but the protocol does not yet detect or resolve plan disagreement;
+- defensive and support duties are unique in current fixtures, but they are
+  assigned by sequential rules rather than one threat-prioritized constrained
+  assignment;
+- decision replay, physical outcome ownership, and side/seed/opponent A/B
+  evidence remain absent.
 
-### T1: parameterized directional short-pass kick (blocking)
+This document is now an implementation record for the first 2D-to-3D passing
+increment, not a second active roadmap. The authoritative continuation order
+is `docs/team-excellence-roadmap.md`: team-state consistency and global duty
+ownership first; action/pass lifecycle and receiver intention second; unified
+executable-action choice and complete positional play next; motion training in
+parallel.
 
-This is the next training task because the strategy path has reached the
-physical-action bottleneck. Train or optimize a small target-conditioned
-policy for the T1 robot, not an end-to-end team policy.
-
-Inputs should include joint position/velocity, torso orientation and angular
-velocity, feet contact state, ball position/velocity in the robot frame,
-target bearing, requested range or arrival speed, and phase/time. Outputs may
-be 23 residual joint targets over a guarded posture reference, or a compact
-foot/hip action decoded by a deterministic controller. The exported policy
-must keep an explicit observation ordering, scaling, action decoder, control
-rate, asset hash, and fallback contract.
-
-Use curriculum stages: stationary balance; contact timing; left/right
-direction; 1.5--3 m range; 3--5 m range; approach-offset randomization; then
-limited pose, ball, friction, latency, and sensor-noise randomization. Reward
-should separately score projected range error, lateral corridor error,
-direction error, useful post-contact speed, uprightness, support stability,
-joint limit/velocity/torque cost, smooth recovery, and absence of double
-contact. A large sparse goal-only reward is not sufficient.
-
-Required data are at least 20 accepted trials per target bin, recording the
-initial pose, ball pose, target, joint trace, contact time, ball trajectory,
-fall/recovery, and simulator/config hashes. Promotion begins with 2, 3.5, and
-5 m targets at -30, -15, 0, 15, and 30 degrees.
-
-The first gate is at least 16/20 balls through a one-metre-wide corridor for
-each promoted central range, median absolute direction error no more than
-12 degrees, no non-finite actions, and no more than one additional fall versus
-the fixed-contact control. The final gate adds ONNX parity, three seeds, both
-sides, 2v0 receiver-zone arrival, and strict 7v7 fallback tests.
-
-### T2: receiver first touch and stop (next, conditional)
-
-Do not start this before T1 supplies repeatable incoming trajectories. First
-attempt a deterministic receive pose plus walk/stop behavior. Train a receive
-policy only if measured 2v0 failures are dominated by humanoid contact and
-stabilization rather than communication or target selection. Its gate is
-controlled possession after arrival, not merely receiver proximity.
-
-### T3: locomotion maintenance (parallel but non-blocking)
-
-The existing Apollo walk and get-up policies remain the release baseline.
-Faster running is valuable for reach-time margins, but it is not the blocker
-for this pass closure. Continue the separate R2/R3 run work only behind its
-observation-shape, uprightness, finite-output, multi-seed, and 7v7 gates; do
-not replace the stable walk to improve a tactical benchmark.
-
-### What not to train yet
-
-Do not train an end-to-end seven-agent strategy policy at this stage. First
-calibrate the kick and reach models, implement outcome labels, complete 2v0
-and 2v1 fixtures, and collect deterministic planner replays. Utility weights
-can then be fitted offline from labeled candidate outcomes. Multi-agent RL is
-appropriate only after the action interface and credit signal are stable and
-after it can be compared against the deterministic planner with the same
-safety fallback.
-
-## Immediate continuation order
-
-1. build the target-conditioned kick data collector and T1 training/export
-   contract;
-2. replace seed ball parameters with fitted distributions and uncertainty;
-3. add `Committed/Executed/Cancelled/Expired` local state plus outcome labels;
-4. add repeatable 2v0 and 2v1 trial batches and receiver-zone metrics;
-5. add through-pass/free-space generation and tactical no-benefit filters;
-6. implement support, unmarking, marking, and phase-specific formation;
-7. run paired, side-swapped 7v7 A/B suites before any release claim.
+Training details are maintained in `docs/rl-training-plan.md` and
+`docs/model-free-parameterized-kick-plan.md`. End-to-end seven-agent strategy
+training remains deferred until replayable labels and stable action semantics
+exist.

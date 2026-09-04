@@ -19,4 +19,14 @@ inline constexpr double kParameterizedPassMaximumTargetDistanceM = 2.55;
 inline constexpr double kParameterizedPassMaximumTargetAngleDeg = 2.0;
 inline constexpr double kParameterizedPassRequestedSpeedMps = 1.43;
 
+// First model-independent anchor. This is intentionally a narrow short-touch
+// contract: widening it to pass or shot distances requires new physical
+// anchors and the same held-out/server promotion gates.
+inline constexpr double kProceduralDribbleMinimumTargetDistanceM = 0.45;
+inline constexpr double kProceduralDribbleMaximumTargetDistanceM = 0.65;
+inline constexpr double kProceduralDribbleMaximumTargetAngleDeg = 1.0;
+inline constexpr double kProceduralDribbleRequestedSpeedMps = 0.90;
+inline constexpr double kProceduralDribbleMinimumBallLocalYM = 0.02;
+inline constexpr double kProceduralDribbleMaximumBallLocalYM = 0.06;
+
 }  // namespace decision::kick_contract

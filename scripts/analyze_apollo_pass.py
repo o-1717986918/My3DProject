@@ -1,4 +1,4 @@
-"""Measure physical outcomes of Apollo targeted-pass commands from status logs."""
+"""Measure physical outcomes of Apollo target-aware kick commands."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Iterable
 @dataclass(frozen=True)
 class PassOutcome:
     log: str
+    kick_mode: str
     action_id: int
     sequence_id: int
     release_cycle: int
@@ -57,6 +58,7 @@ def _number(status: dict[str, str], key: str) -> float:
 def analyze_logs(
     paths: Iterable[Path],
     *,
+    kick_mode: str = "TargetedPass",
     minimum_progress_m: float = 0.1,
     outcome_window_cycles: int = 100,
 ) -> list[PassOutcome]:
@@ -65,16 +67,19 @@ def analyze_logs(
         statuses = load_statuses(path)
         consumed: set[tuple[int, int]] = set()
         for index, status in enumerate(statuses):
-            if status.get("kick_mode") != "TargetedPass":
+            if status.get("kick_mode") != kick_mode:
                 continue
-            key = (
+            start_cycle = int(status.get("cycle", "0"))
+            action_key = (
                 int(status.get("kick_action_id", status.get("action_id", "0"))),
                 int(status.get("kick_sequence_id", status.get("pass_seq", "0"))),
             )
-            if key in consumed:
+            if kick_mode == "TargetedPass":
+                if action_key in consumed:
+                    continue
+                consumed.add(action_key)
+            elif index > 0 and statuses[index - 1].get("kick_mode") == kick_mode:
                 continue
-            consumed.add(key)
-            start_cycle = int(status.get("cycle", "0"))
             start = (_number(status, "ball_x"), _number(status, "ball_y"))
             target = (
                 _number(
@@ -109,8 +114,9 @@ def analyze_logs(
                 )
                 if (
                     cycle > start_cycle
-                    and later.get("kick_mode") == "TargetedPass"
-                    and later_key != key
+                    and kick_mode == "TargetedPass"
+                    and later.get("kick_mode") == kick_mode
+                    and later_key != action_key
                     and later_key != (0, 0)
                 ):
                     break
@@ -130,13 +136,23 @@ def analyze_logs(
                 # Perception is captured before the command shown on the same
                 # line is applied, so include this sample and then stop before
                 # a later non-target kick can contaminate the outcome.
-                if later.get("kick_mode") not in {"None", "TargetedPass", None}:
+                if later.get("kick_mode") not in {"None", kick_mode, None}:
+                    break
+                # A procedural contact must move the ball during its own
+                # command lifetime. Do not credit the subsequent chase gait
+                # with a contact that the standalone trajectory did not make.
+                if (
+                    kick_mode != "TargetedPass"
+                    and cycle > start_cycle
+                    and later.get("kick_mode") != kick_mode
+                ):
                     break
             outcomes.append(
                 PassOutcome(
                     log=str(path),
-                    action_id=key[0],
-                    sequence_id=key[1],
+                    kick_mode=kick_mode,
+                    action_id=action_key[0],
+                    sequence_id=action_key[1],
                     release_cycle=start_cycle,
                     last_cycle=last_cycle,
                     target_distance_m=target_distance,
@@ -169,6 +185,11 @@ def main() -> int:
     parser.add_argument("--minimum-progress", type=float, default=0.1)
     parser.add_argument("--window-cycles", type=int, default=100)
     parser.add_argument(
+        "--kick-mode",
+        choices=("TargetedPass", "DribbleTouch"),
+        default="TargetedPass",
+    )
+    parser.add_argument(
         "--metric",
         choices=("attempts", "contacts"),
         help="Print only one integer metric for shell acceptance scripts.",
@@ -176,6 +197,7 @@ def main() -> int:
     args = parser.parse_args()
     outcomes = analyze_logs(
         args.logs,
+        kick_mode=args.kick_mode,
         minimum_progress_m=args.minimum_progress,
         outcome_window_cycles=args.window_cycles,
     )

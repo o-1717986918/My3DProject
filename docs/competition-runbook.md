@@ -148,6 +148,25 @@ call the capability `FastWalkV2`, not running. The launcher rejects a missing
 model and any model whose SHA-256 differs from
 `c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b`.
 
+To mount all currently useful motion paths while keeping the unpromoted kick
+actor in shadow:
+
+```bash
+APOLLO_ENABLE_PARAMETERIZED_KICK=1 \
+APOLLO_LEARNED_KICK_MODE=shadow \
+APOLLO_LEARNED_KICK_MODEL="$HOME/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx" \
+APOLLO_ENABLE_FAST_WALK=1 \
+APOLLO_FAST_WALK_MODEL="$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx" \
+scripts/run_web_match.sh 30000
+```
+
+`shadow` executes the complete 98→23 ONNX inference contract but discards its
+joint targets. Residual-table or procedural contact still controls the body.
+The launcher checks the selected r2 actor SHA-256
+`b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1`.
+Use `active` only in a controlled experiment because its frozen result is
+27/92 with one fall, not competition quality.
+
 ## 6. Package and inspect
 
 ```bash

@@ -5,7 +5,9 @@
 
 namespace decision {
 
-DecisionManager::DecisionManager(bool enable_pass_strategy, bool enable_targeted_kick)
+DecisionManager::DecisionManager(
+    bool enable_pass_strategy,
+    bool enable_targeted_kick)
     : enable_pass_strategy_(enable_pass_strategy),
       enable_targeted_kick_(enable_targeted_kick) {}
 

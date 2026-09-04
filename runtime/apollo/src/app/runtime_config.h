@@ -37,6 +37,15 @@ struct RuntimeConfig {
     /// Explicit external-local ONNX path. The restricted research model is
     /// never bundled into the competition asset tree.
     std::string fast_walk_model;
+    /// Runs an external kick_policy_v3 actor as the active target-pass
+    /// controller. This remains explicit opt-in until a candidate is promoted.
+    bool enable_learned_kick{false};
+    /// Evaluates kick_policy_v3 without granting it joint ownership. Shadow
+    /// inference exercises the deployment contract while fallback stays live.
+    bool shadow_learned_kick{false};
+    /// Explicit external-local ONNX path. Training output existence alone
+    /// never changes the packaged competition behavior.
+    std::string learned_kick_model;
 
     /// Parses supported command-line options and preserves unspecified defaults.
     static RuntimeConfig from_args(int argc, char* argv[]);
