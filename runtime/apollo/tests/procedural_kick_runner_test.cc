@@ -50,7 +50,7 @@ int main() {
         APOLLO_CODE_BASE_PROJECT_SOURCE_DIR) /
         "assets/keyframes/procedural_kick.yaml";
     behavior::ProceduralKickRunner runner(asset);
-    if (runner.anchor_count() != 1U) {
+    if (runner.anchor_count() != 3U) {
         std::cerr << "unexpected procedural anchor count\n";
         return 1;
     }
@@ -85,6 +85,24 @@ int main() {
     const auto complete = runner.step(1.20);
     if (!complete.finished || maximum_position(complete.joint_targets) > 1.0e-9) {
         std::cerr << "procedural kick did not return to neutral\n";
+        return 1;
+    }
+
+    profile.target_distance_m = 4.0;
+    profile.requested_speed_mps = 2.50;
+    profile.mode = decision::KickMode::Shot;
+    if (!runner.begin(snapshot, profile) ||
+        runner.active_anchor_name() != "right_shot_4m_v1") {
+        std::cerr << "validated 4 m shot anchor was not selected\n";
+        return 1;
+    }
+
+    profile.target_distance_m = 6.0;
+    profile.requested_speed_mps = 3.50;
+    profile.mode = decision::KickMode::Clear;
+    if (!runner.begin(snapshot, profile) ||
+        runner.active_anchor_name() != "right_clear_6m_v1") {
+        std::cerr << "validated 6 m clear anchor was not selected\n";
         return 1;
     }
 

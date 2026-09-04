@@ -43,6 +43,30 @@ decision::KickCommand make_dribble(double angle_deg = 0.0) {
     return command;
 }
 
+decision::KickCommand make_shot(double distance_m = 4.0, double angle_deg = 0.0) {
+    decision::KickCommand command;
+    const double angle_rad = angle_deg * 3.14159265358979323846 / 180.0;
+    command.target_point_m = std::array<double, 2>{
+        1.0 + distance_m * std::cos(angle_rad),
+        2.0 + distance_m * std::sin(angle_rad),
+    };
+    command.requested_ball_speed_mps = 2.50;
+    command.mode = decision::KickMode::Shot;
+    return command;
+}
+
+decision::KickCommand make_clear(double distance_m = 6.0, double angle_deg = 0.0) {
+    decision::KickCommand command;
+    const double angle_rad = angle_deg * 3.14159265358979323846 / 180.0;
+    command.target_point_m = std::array<double, 2>{
+        1.0 + distance_m * std::cos(angle_rad),
+        2.0 + distance_m * std::sin(angle_rad),
+    };
+    command.requested_ball_speed_mps = 3.50;
+    command.mode = decision::KickMode::Clear;
+    return command;
+}
+
 bool near(double lhs, double rhs, double tolerance = 1.0e-9) {
     return std::abs(lhs - rhs) <= tolerance;
 }
@@ -80,6 +104,24 @@ int main() {
         std::cerr << "validated procedural short-touch profile was not accepted\n";
         return 1;
     }
+    const auto shot = behavior::make_kick_execution_profile(
+        snapshot, make_shot(), true);
+    if (shot.kind != behavior::KickProfileKind::ProceduralContact ||
+        !near(shot.target_distance_m, 4.0) ||
+        !near(shot.requested_speed_mps, 2.50) ||
+        shot.mode != decision::KickMode::Shot) {
+        std::cerr << "validated procedural shot profile was not accepted\n";
+        return 1;
+    }
+    const auto clear = behavior::make_kick_execution_profile(
+        snapshot, make_clear(), true);
+    if (clear.kind != behavior::KickProfileKind::ProceduralContact ||
+        !near(clear.target_distance_m, 6.0) ||
+        !near(clear.requested_speed_mps, 3.50) ||
+        clear.mode != decision::KickMode::Clear) {
+        std::cerr << "validated procedural clear profile was not accepted\n";
+        return 1;
+    }
 
     const auto left = behavior::make_kick_execution_profile(
         snapshot, make_targeted(1.43, 1.5), true);
@@ -106,11 +148,23 @@ int main() {
         snapshot, make_targeted(1.42, 0.0), true);
     const auto outside_dribble_angle = behavior::make_kick_execution_profile(
         snapshot, make_dribble(3.01), true);
+    const auto outside_shot_angle = behavior::make_kick_execution_profile(
+        snapshot, make_shot(4.0, 1.01), true);
+    const auto outside_shot_distance = behavior::make_kick_execution_profile(
+        snapshot, make_shot(4.51, 0.0), true);
+    const auto outside_clear_angle = behavior::make_kick_execution_profile(
+        snapshot, make_clear(6.0, 1.01), true);
+    const auto outside_clear_distance = behavior::make_kick_execution_profile(
+        snapshot, make_clear(6.51, 0.0), true);
     if (invalid_profile.kind != behavior::KickProfileKind::StableFallback ||
         outside_angle.kind != behavior::KickProfileKind::StableFallback ||
         outside_speed.kind != behavior::KickProfileKind::StableFallback ||
         unsupported_pass_speed.kind != behavior::KickProfileKind::StableFallback ||
-        outside_dribble_angle.kind != behavior::KickProfileKind::StableFallback) {
+        outside_dribble_angle.kind != behavior::KickProfileKind::StableFallback ||
+        outside_shot_angle.kind != behavior::KickProfileKind::StableFallback ||
+        outside_shot_distance.kind != behavior::KickProfileKind::StableFallback ||
+        outside_clear_angle.kind != behavior::KickProfileKind::StableFallback ||
+        outside_clear_distance.kind != behavior::KickProfileKind::StableFallback) {
         std::cerr << "unsupported requests did not use the stable fallback\n";
         return 1;
     }

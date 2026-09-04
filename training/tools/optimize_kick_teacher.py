@@ -73,6 +73,10 @@ def main() -> None:
         default=1,
         help="fixed nominal/noisy ball placements scored per CEM candidate",
     )
+    parser.add_argument("--robust-ball-x-min", type=float)
+    parser.add_argument("--robust-ball-x-max", type=float)
+    parser.add_argument("--robust-ball-y-min", type=float)
+    parser.add_argument("--robust-ball-y-max", type=float)
     parser.add_argument(
         "--output-prefix",
         type=Path,
@@ -103,6 +107,39 @@ def main() -> None:
         if initial_parameters.shape != (len(PARAMETER_NAMES),):
             raise ValueError("--initial-parameters must contain exactly 14 values")
 
+    robust_range_values = (
+        args.robust_ball_x_min,
+        args.robust_ball_x_max,
+        args.robust_ball_y_min,
+        args.robust_ball_y_max,
+    )
+    if any(value is not None for value in robust_range_values) and not all(
+        value is not None for value in robust_range_values
+    ):
+        raise ValueError("all four robust ball range bounds must be provided")
+    ball_x_range_m = None
+    ball_y_range_m = None
+    if all(value is not None for value in robust_range_values):
+        ball_x_range_m = (
+            float(args.robust_ball_x_min),
+            float(args.robust_ball_x_max),
+        )
+        ball_y_range_m = (
+            float(args.robust_ball_y_min),
+            float(args.robust_ball_y_max),
+        )
+
+    def report_progress(generation: int, metrics: dict[str, float]) -> None:
+        print(
+            "CEM "
+            f"generation={generation + 1}/{args.generations} "
+            f"best={metrics['best_score']:.6f} "
+            f"generation_best={metrics['generation_best_score']:.6f} "
+            f"elite_mean={metrics['elite_mean_score']:.6f} "
+            f"mean_std={metrics['mean_std']:.6f}",
+            flush=True,
+        )
+
     spec = KickTeacherSpec(
         target_distance_m=args.target_distance,
         target_angle_deg=args.target_angle,
@@ -124,6 +161,9 @@ def main() -> None:
         ball_x_offset_m=args.ball_x_offset,
         ball_y_offset_m=args.ball_y_offset,
         initial_parameters=initial_parameters,
+        ball_x_range_m=ball_x_range_m,
+        ball_y_range_m=ball_y_range_m,
+        progress=report_progress,
     )
     times, observations, actions, joint_targets, metrics = evaluator.demonstration(
         result.parameters,
@@ -169,6 +209,14 @@ def main() -> None:
         "population": args.population,
         "generations": args.generations,
         "robust_samples": args.robust_samples,
+        "robust_ball_ranges_m": (
+            {
+                "x": list(ball_x_range_m),
+                "y": list(ball_y_range_m),
+            }
+            if ball_x_range_m is not None and ball_y_range_m is not None
+            else None
+        ),
         "initial_manifest": (
             str(args.initial_manifest.resolve())
             if args.initial_manifest is not None

@@ -51,19 +51,24 @@ ActionCapabilityRegistry::ActionCapabilityRegistry(bool enable_parameterized_kic
         decision::kick_contract::kParameterizedPassRequestedSpeedMps,
         true, SkillCapability::ForwardContact};
     envelopes_[index_of(SkillCapability::Shot)] = {
-        SkillCapability::Shot, CapabilityState::Unavailable,
-        decision::kick_contract::kMinimumTargetDistanceM,
-        decision::kick_contract::kMaximumTargetDistanceM,
-        decision::kick_contract::kMaximumTargetAngleDeg,
-        decision::kick_contract::kMinimumRequestedSpeedMps,
-        decision::kick_contract::kMaximumRequestedSpeedMps,
+        SkillCapability::Shot,
+        enable_parameterized_kick ? CapabilityState::Experimental
+                                   : CapabilityState::Unavailable,
+        decision::kick_contract::kProceduralShotMinimumTargetDistanceM,
+        decision::kick_contract::kProceduralShotMaximumTargetDistanceM,
+        decision::kick_contract::kProceduralShotMaximumTargetAngleDeg,
+        decision::kick_contract::kProceduralShotRequestedSpeedMps,
+        decision::kick_contract::kProceduralShotRequestedSpeedMps,
         true, SkillCapability::ForwardContact};
     envelopes_[index_of(SkillCapability::Clear)] = {
-        SkillCapability::Clear, CapabilityState::Unavailable,
-        decision::kick_contract::kMinimumTargetDistanceM,
-        decision::kick_contract::kMaximumTargetDistanceM, 180.0,
-        decision::kick_contract::kMinimumRequestedSpeedMps,
-        decision::kick_contract::kMaximumRequestedSpeedMps,
+        SkillCapability::Clear,
+        enable_parameterized_kick ? CapabilityState::Experimental
+                                   : CapabilityState::Unavailable,
+        decision::kick_contract::kProceduralClearMinimumTargetDistanceM,
+        decision::kick_contract::kProceduralClearMaximumTargetDistanceM,
+        decision::kick_contract::kProceduralClearMaximumTargetAngleDeg,
+        decision::kick_contract::kProceduralClearRequestedSpeedMps,
+        decision::kick_contract::kProceduralClearRequestedSpeedMps,
         true, SkillCapability::ForwardContact};
 }
 

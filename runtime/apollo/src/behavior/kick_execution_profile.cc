@@ -34,8 +34,6 @@ KickExecutionProfile make_kick_execution_profile(
     KickExecutionProfile profile;
     if (!parameterized_enabled ||
         command.mode == decision::KickMode::ForwardContact ||
-        command.mode == decision::KickMode::Shot ||
-        command.mode == decision::KickMode::Clear ||
         !command.target_point_m.has_value() ||
         !snapshot.ball.position_valid ||
         !std::isfinite(command.requested_ball_speed_mps) ||
@@ -63,16 +61,45 @@ KickExecutionProfile make_kick_execution_profile(
         return profile;
     }
 
-    if (command.mode == decision::KickMode::DribbleTouch) {
-        if (target_distance_m <
-                decision::kick_contract::kProceduralDribbleMinimumTargetDistanceM ||
-            target_distance_m >
-                decision::kick_contract::kProceduralDribbleMaximumTargetDistanceM ||
-            std::abs(relative_angle_deg) >
-                decision::kick_contract::kProceduralDribbleMaximumTargetAngleDeg ||
-            std::abs(
-                command.requested_ball_speed_mps -
-                decision::kick_contract::kProceduralDribbleRequestedSpeedMps) >
+    if (command.mode == decision::KickMode::DribbleTouch ||
+        command.mode == decision::KickMode::Shot ||
+        command.mode == decision::KickMode::Clear) {
+        double minimum_distance_m = 0.0;
+        double maximum_distance_m = 0.0;
+        double maximum_angle_deg = 0.0;
+        double requested_speed_mps = 0.0;
+        if (command.mode == decision::KickMode::DribbleTouch) {
+            minimum_distance_m =
+                decision::kick_contract::kProceduralDribbleMinimumTargetDistanceM;
+            maximum_distance_m =
+                decision::kick_contract::kProceduralDribbleMaximumTargetDistanceM;
+            maximum_angle_deg =
+                decision::kick_contract::kProceduralDribbleMaximumTargetAngleDeg;
+            requested_speed_mps =
+                decision::kick_contract::kProceduralDribbleRequestedSpeedMps;
+        } else if (command.mode == decision::KickMode::Shot) {
+            minimum_distance_m =
+                decision::kick_contract::kProceduralShotMinimumTargetDistanceM;
+            maximum_distance_m =
+                decision::kick_contract::kProceduralShotMaximumTargetDistanceM;
+            maximum_angle_deg =
+                decision::kick_contract::kProceduralShotMaximumTargetAngleDeg;
+            requested_speed_mps =
+                decision::kick_contract::kProceduralShotRequestedSpeedMps;
+        } else {
+            minimum_distance_m =
+                decision::kick_contract::kProceduralClearMinimumTargetDistanceM;
+            maximum_distance_m =
+                decision::kick_contract::kProceduralClearMaximumTargetDistanceM;
+            maximum_angle_deg =
+                decision::kick_contract::kProceduralClearMaximumTargetAngleDeg;
+            requested_speed_mps =
+                decision::kick_contract::kProceduralClearRequestedSpeedMps;
+        }
+        if (target_distance_m < minimum_distance_m ||
+            target_distance_m > maximum_distance_m ||
+            std::abs(relative_angle_deg) > maximum_angle_deg ||
+            std::abs(command.requested_ball_speed_mps - requested_speed_mps) >
                 1.0e-9) {
             return profile;
         }

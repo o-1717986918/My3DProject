@@ -1,0 +1,134 @@
+schema_version: 1
+recorded_at: 2026-09-05
+stage: player_action_foundation
+status: runtime_mounted_with_bounded_experimental_kicks
+
+runtime_stack:
+  precise_walk:
+    state: stable_default
+    asset: runtime/apollo/assets/networks/walk/policy.onnx
+    sha256: 6df65fa7d36fd4989fcb022e385de797d51f35c8375532841034716e4bc0d850
+  get_up:
+    state: stable_default
+    asset: runtime/apollo/assets/networks/getup/policy.onnx
+    sha256: ae6ade761e50fccb432e118cebd456d9e96e87de0fa3a3adc2d5f92ef496a83d
+  high_speed_walk:
+    state: bounded_runtime_route_with_stable_walk_fallback
+    asset: /home/win98/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx
+    sha256: c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b
+    claimed_as_running: false
+  learned_target_kick:
+    state: bounded_active_in_source_launchers_with_same_cycle_fallback
+    asset: /home/win98/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx
+    sha256: b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1
+    exact_cpu_successes: 27
+    exact_cpu_trials: 92
+    source_launcher_default: active
+    portable_binary_default: disabled
+    active_envelope: fixed_2m_measured_training_slice_only
+    promoted: false
+    fallback_order: [residual_table, procedural_anchor, safe_reject]
+  procedural_kicks:
+    state: bounded_experimental
+    asset: runtime/apollo/assets/keyframes/procedural_kick.yaml
+    sha256: 485423b34914bb6fc685cbcb62a2e081a8a3f871d8a117c6f927b524fcc9d511
+
+procedural_actions:
+  targeted_pass_2m:
+    implementation: learned_actor_then_residual_table_fallback
+    residual_asset: runtime/apollo/assets/keyframes/kick_residual_table.yaml
+    residual_asset_sha256: f8cacbeb6a125257ef34e2b51e76738e5940dcd374032d80622b54236f9fc54e
+    source_evidence_lock: training/locks/fast_walk_apollo_integration_2026_09_01.yaml
+    server_samples: 25
+    server_contacts: 1
+    pass_plan_samples: 210
+    pass_ready_samples: 176
+    limitations: [narrow_2m_learned_slice, weak_server_distance, experimental]
+  dribble_touch_055m:
+    anchor: right_dribble_055m_v1
+    exact_cpu_successes: 20
+    exact_cpu_trials: 20
+    server_run: /home/win98/rl_runs/procedural-kick/server-dribble-clean-gate
+    server_clean_clients: 14
+    server_samples: 63
+    server_contacts: 1
+    server_executor_getup_samples: 0
+    server_sha256_of_sorted_log_checksums: bd73a2dff7ca9ee577bf872d454b9b7afdf480902075a3bfb289eb2d75b1946c
+    server_contact_observed: true
+    limitations: [right_foot, near_zero_angle, single_distance_anchor]
+  shot_4m:
+    anchor: right_shot_4m_v1
+    training_manifest: /home/win98/rl_runs/player-action-foundation/shot-4m-s20261033-v1.json
+    training_manifest_sha256: 2b6b40b78c3acb4b62c87b2a1145ea6ade0169043d1245707f5611aca063c978
+    heldout_report: /home/win98/rl_runs/player-action-foundation/shot-4m-s20261033-heldout100-release-slot.json
+    heldout_report_sha256: 5cc692c8677a26f64e43a21f88cb0ccab46f744c33d06d7c6cc9dcda77fd183c
+    heldout_seed: 20261054
+    heldout_successes: 100
+    heldout_trials: 100
+    ball_local_x_m: [0.312, 0.340]
+    ball_local_y_m: [0.028, 0.052]
+    server_run: /home/win98/rl_runs/player-action-foundation/server-shot-s20261053-v1
+    server_cycles: 1200
+    server_samples: 12
+    server_contacts: 1
+    server_ordered_log_set_sha256: eea016cf3e76d383f81eca426e2457eb6616eff883963f5824efa674bc992aec
+  clear_6m:
+    anchor: right_clear_6m_v1
+    success_semantics: safety_clearance_not_precise_targeting
+    minimum_progress_m: 4.5
+    corridor_half_width_m: 1.5
+    minimum_launch_speed_mps: 2.5
+    training_manifest: /home/win98/rl_runs/player-action-foundation/clear-6m-s20261051-v1.json
+    training_manifest_sha256: 8c40e2bb86c00dbbd733b41d933a955f408ff3c3bad6ce61fdc6a8d52c054c51
+    trajectory_sha256: c53a1b564a630b743b34a8ce0f6e754b25d39a327c53d44ecea1c961dfecb5ff
+    heldout_report: /home/win98/rl_runs/player-action-foundation/clear-6m-s20261051-heldout100-release-slot.json
+    heldout_report_sha256: 64dfeedc9fbc8e31b491305493894f26f46ee12d589e84f8400543e1388bf34e
+    heldout_seed: 20261055
+    heldout_successes: 100
+    heldout_trials: 100
+    ball_local_x_m: [0.312, 0.340]
+    ball_local_y_m: [0.028, 0.052]
+    server_run: /home/win98/rl_runs/player-action-foundation/server-clear-s20261059-v1
+    server_cycles: 1200
+    server_samples: 13
+    server_contacts: 1
+    server_ordered_log_set_sha256: 31425062b99a3711a393286d47bc455d300d7b23aaab9f279f4897caf2560c7b
+
+rejected_training_candidates:
+  soccer_omni:
+    path: /home/win98/rl_runs/run-soccer-omni-s20260951-v1
+    frozen_command_suite: 5_of_8
+    runtime_mounted: false
+  soccer_omni_axis:
+    path: /home/win98/rl_runs/run-soccer-omni-axis-s20260991-v1
+    frozen_command_suite: 5_of_8
+    runtime_mounted: false
+  k2b_fixed_2m:
+    path: /home/win98/rl_runs/paid-k2/k2b-fixed2m-smoke-s20260990-v1/checkpoints/000000001024
+    target_success: 0.0
+    runtime_mounted: false
+
+verification:
+  cpp_ctest: 15_of_15_passed
+  python_targeted_tests: 16_of_16_passed
+  python_full_training_suite: 231_of_231_passed
+  clear_gate_unit_tests: passed
+  shell_syntax: passed
+  default_all_capabilities_7v7:
+    run: /home/win98/rl_runs/player-action-foundation/base-7v7-s20261060-v1
+    cycles: 900
+    clean_clients: 14
+    fast_walk_samples: 212
+    get_up_samples: 97
+    server_errors: 0
+    illegal_defense: 0
+    sha256_of_sorted_log_checksums: 81916247eaf08993c925acca889f7c2ed37534d0d0d06f97de23328257ca0054
+  source_outputs_directory: /home/win98/rl_runs
+  c_drive_large_outputs_written: false
+
+remaining_learning_route:
+  - build multi-condition pass teachers and a self-contained BC/DAgger actor
+  - collect server shadow traces and perform constrained PPO only after BC success
+  - expand left-foot and angle coverage without widening current runtime envelopes
+  - train receive_first_touch from the measured outgoing-ball distribution
+  - improve high-speed walk braking_turning_and_lateral_control

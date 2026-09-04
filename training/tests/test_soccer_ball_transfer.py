@@ -21,7 +21,7 @@ def _networks(profile_name: str, actor_size: int, critic_size: int):
     )
 
 
-def test_zero_row_transfer_preserves_actor_and_critic_outputs():
+def _assert_zero_row_transfer_preserves_actor_and_critic_outputs():
     old_networks = _networks("soccer_motion_residual_v3", 110, 118)
     new_networks = _networks("soccer_ball_motion_residual_v1", 126, 134)
     actor = old_networks.policy_network.init(jax.random.PRNGKey(1))
@@ -65,3 +65,12 @@ def test_zero_row_transfer_preserves_actor_and_critic_outputs():
 
     np.testing.assert_allclose(new_policy, old_policy, atol=5.0e-7, rtol=0.0)
     np.testing.assert_allclose(new_value, old_value, atol=5.0e-7, rtol=0.0)
+
+
+def test_zero_row_transfer_preserves_actor_and_critic_outputs():
+    # Inserting zero input rows changes the GEMM shape. GPU autotuning may then
+    # select a different FP32 accumulation order, obscuring the exact transfer
+    # invariant with backend-dependent roundoff. This structural parity test
+    # deliberately runs on CPU; GPU behavior is covered by training smoke tests.
+    with jax.default_device(jax.devices("cpu")[0]):
+        _assert_zero_row_transfer_preserves_actor_and_critic_outputs()

@@ -51,6 +51,14 @@ constexpr double kProceduralDribbleBallLocalYM = 0.04;
 // command switch; this converges near the 0.32 m optimization centre instead
 // of leaving the envelope before the debounce completes.
 constexpr double kProceduralDribbleBallLocalXM = 0.335;
+// The server walk controller brakes about 2.3 cm long and 2.2 cm low in the
+// narrow strong-kick slot. These are approach set-points only; release is
+// still checked against each anchor's independently validated physical slot.
+constexpr double kProceduralStrongKickCommandBehindM = 0.3155;
+constexpr double kProceduralShotCommandBallLocalYM = 0.0620;
+// The mirrored right-team clear calibration settles about 1.8 cm above its
+// command, so aim lower while retaining the same measured release envelope.
+constexpr double kProceduralClearCommandBallLocalYM = 0.0220;
 // The learned walk has a small-command dead zone of roughly 0.08--0.10 m/s.
 // A gain of eight makes the final centimetre-scale reverse correction
 // observable in the server while the explicit speed clamps below retain the
@@ -256,7 +264,7 @@ bool match_role(const Blackboard& blackboard, int role_id) {
 struct APDecisionContext {
     const world::WorldSnapshot& snapshot;
     APState& state;
-    bool procedural_dribble_enabled{false};
+    bool procedural_kick_enabled{false};
     std::array<double, 2> ball{0.0, 0.0};
     std::array<double, 2> self{0.0, 0.0};
     double ball_distance{0.0};
@@ -320,24 +328,66 @@ HighLevelCommand make_dribble_command(
         self_from_ball[0] * perpendicular[0] + self_from_ball[1] * perpendicular[1];
     const double lateral_offset = std::abs(signed_lateral_offset);
     const bool use_procedural_dribble =
-        context.procedural_dribble_enabled &&
+        context.procedural_kick_enabled &&
         cooperative_action == nullptr && restart_plan == nullptr &&
         context.snapshot.play_mode == world::PlayMode::PlayOn;
-    const double contact_behind_m = use_procedural_dribble
-        ? kProceduralDribbleBallLocalXM
-        : kKickContactBehindM;
-    const double command_behind_m = use_procedural_dribble
-        ? kProceduralDribbleBallLocalXM
-        : kDribbleCommandBehindM;
-    const double target_ball_local_y_m = use_procedural_dribble
-        ? kProceduralDribbleBallLocalYM
-        : kForwardContactBallLocalYM;
-    const double longitudinal_tolerance_m = use_procedural_dribble
-        ? 0.035
-        : kKickSetupLongitudinalToleranceM;
-    const double lateral_tolerance_m = use_procedural_dribble
-        ? 0.02
-        : kKickSetupLateralToleranceM;
+    const bool use_procedural_shot =
+        context.procedural_kick_enabled && cooperative_action != nullptr &&
+        cooperative_action->category == strategy::ActionCategory::Shoot &&
+        restart_plan == nullptr &&
+        context.snapshot.play_mode == world::PlayMode::PlayOn;
+    const bool use_procedural_clear =
+        context.procedural_kick_enabled && cooperative_action != nullptr &&
+        cooperative_action->category == strategy::ActionCategory::Clear &&
+        restart_plan == nullptr &&
+        context.snapshot.play_mode == world::PlayMode::PlayOn;
+    const bool use_procedural_strong_kick =
+        use_procedural_shot || use_procedural_clear;
+    const bool use_procedural_kick =
+        use_procedural_dribble || use_procedural_strong_kick;
+
+    double contact_behind_m = kKickContactBehindM;
+    double command_behind_m = kDribbleCommandBehindM;
+    double release_ball_local_y_m = kForwardContactBallLocalYM;
+    double command_ball_local_y_m = kForwardContactBallLocalYM;
+    double longitudinal_tolerance_m = kKickSetupLongitudinalToleranceM;
+    double lateral_tolerance_m = kKickSetupLateralToleranceM;
+    double procedural_max_orientation_error_deg =
+        decision::kick_contract::kProceduralDribbleMaximumTargetAngleDeg;
+    if (use_procedural_clear) {
+        contact_behind_m =
+            decision::kick_contract::kProceduralClearBallLocalXM;
+        command_behind_m = kProceduralStrongKickCommandBehindM;
+        release_ball_local_y_m =
+            decision::kick_contract::kProceduralClearBallLocalYM;
+        command_ball_local_y_m = kProceduralClearCommandBallLocalYM;
+        longitudinal_tolerance_m =
+            decision::kick_contract::kProceduralClearBallLocalXRangeM;
+        lateral_tolerance_m =
+            decision::kick_contract::kProceduralClearBallLocalYRangeM;
+        procedural_max_orientation_error_deg =
+            decision::kick_contract::kProceduralClearMaximumTargetAngleDeg;
+    } else if (use_procedural_shot) {
+        contact_behind_m =
+            decision::kick_contract::kProceduralShotBallLocalXM;
+        command_behind_m = kProceduralStrongKickCommandBehindM;
+        release_ball_local_y_m =
+            decision::kick_contract::kProceduralShotBallLocalYM;
+        command_ball_local_y_m = kProceduralShotCommandBallLocalYM;
+        longitudinal_tolerance_m =
+            decision::kick_contract::kProceduralShotBallLocalXRangeM;
+        lateral_tolerance_m =
+            decision::kick_contract::kProceduralShotBallLocalYRangeM;
+        procedural_max_orientation_error_deg =
+            decision::kick_contract::kProceduralShotMaximumTargetAngleDeg;
+    } else if (use_procedural_dribble) {
+        contact_behind_m = kProceduralDribbleBallLocalXM;
+        command_behind_m = kProceduralDribbleBallLocalXM;
+        release_ball_local_y_m = kProceduralDribbleBallLocalYM;
+        command_ball_local_y_m = kProceduralDribbleBallLocalYM;
+        longitudinal_tolerance_m = 0.035;
+        lateral_tolerance_m = 0.02;
+    }
     const bool needs_side_step =
         along_direction > -kDribbleSideStepBehindThresholdM &&
         lateral_offset < kDribbleSideClearanceM;
@@ -356,15 +406,17 @@ HighLevelCommand make_dribble_command(
     // desired release set. Converge to one repeatable canonical contact pose;
     // the residual selector can still absorb the remaining bounded error.
     const double behind_distance = -along_direction;
-    const double lateral_setup_error =
-        signed_lateral_offset + target_ball_local_y_m;
+    const double release_lateral_error =
+        signed_lateral_offset + release_ball_local_y_m;
+    const double command_lateral_error =
+        signed_lateral_offset + command_ball_local_y_m;
     const bool setup_ready =
         std::abs(behind_distance - contact_behind_m) <=
             longitudinal_tolerance_m &&
-        std::abs(lateral_setup_error) <= lateral_tolerance_m &&
-        (!use_procedural_dribble ||
+        std::abs(release_lateral_error) <= lateral_tolerance_m &&
+        (!use_procedural_kick ||
          orientation_error_deg <=
-             decision::kick_contract::kProceduralDribbleMaximumTargetAngleDeg);
+             procedural_max_orientation_error_deg);
 
     if (!context.state.dribble_ready && setup_ready) {
         context.state.dribble_ready = true;
@@ -396,7 +448,7 @@ HighLevelCommand make_dribble_command(
                 -kDribbleMaxReverseSetupSpeedMps,
                 kDribbleMaxForwardSetupSpeedMps);
             const double lateral_speed = std::clamp(
-                -kDribbleLateralGain * lateral_setup_error,
+                -kDribbleLateralGain * command_lateral_error,
                 -kDribbleMaxLateralSetupSpeedMps,
                 kDribbleMaxLateralSetupSpeedMps);
             const std::array<double, 2> velocity_world{
@@ -429,7 +481,9 @@ HighLevelCommand make_dribble_command(
     });
     const bool contact_state_stable =
         context.snapshot.ball.position_valid && setup_ready &&
-        orientation_error_deg <= kKickMaxOrientationErrorDeg &&
+        orientation_error_deg <= (use_procedural_kick
+            ? procedural_max_orientation_error_deg
+            : kKickMaxOrientationErrorDeg) &&
         planar_speed_mps <= kKickSetupMaximumPlanarSpeedMps;
     if (contact_state_stable) {
         if (context.state.kick_setup_stable_since_s <= 0.0) {
@@ -441,7 +495,7 @@ HighLevelCommand make_dribble_command(
     const bool contact_state_confirmed =
         context.state.kick_setup_stable_since_s > 0.0 &&
         now - context.state.kick_setup_stable_since_s >=
-            (use_procedural_dribble
+            (use_procedural_kick
                 ? kProceduralKickSetupStableHoldS
                 : kKickSetupStableHoldS);
     const bool legal_kick =
@@ -451,7 +505,9 @@ HighLevelCommand make_dribble_command(
         now >= context.state.next_kick_allowed_s &&
         context.ball_distance >= kKickMinBallDistanceM &&
         context.ball_distance <= kKickMaxBallDistanceM &&
-        orientation_error_deg <= kKickMaxOrientationErrorDeg &&
+        orientation_error_deg <= (use_procedural_kick
+            ? procedural_max_orientation_error_deg
+            : kKickMaxOrientationErrorDeg) &&
         contact_state_confirmed;
     // Readiness is a hard release gate. Once dribble_ready is latched the
     // robot can drift slightly inside the valid contact envelope; gating only
@@ -487,6 +543,18 @@ HighLevelCommand make_dribble_command(
             kick_command.action_id = cooperative_action->action_id;
             kick_command.sequence_id = cooperative_action->sequence_id;
             kick_command.mode = KickMode::TargetedPass;
+        } else if (use_procedural_shot) {
+            kick_command.target_point_m = cooperative_action->target_point_m;
+            kick_command.requested_ball_speed_mps =
+                cooperative_action->requested_ball_speed_mps;
+            kick_command.action_id = cooperative_action->action_id;
+            kick_command.mode = KickMode::Shot;
+        } else if (use_procedural_clear) {
+            kick_command.target_point_m = cooperative_action->target_point_m;
+            kick_command.requested_ball_speed_mps =
+                cooperative_action->requested_ball_speed_mps;
+            kick_command.action_id = cooperative_action->action_id;
+            kick_command.mode = KickMode::Clear;
         } else if (use_procedural_dribble) {
             kick_command.target_point_m = std::array<double, 2>{
                 context.ball[0] + direction[0] * 0.55,
@@ -512,7 +580,7 @@ HighLevelCommand make_dribble_command(
         // stance. Holding it here also removes zero-command gait sway, making
         // the 0.25 s release debounce physically achievable without relaxing
         // the validated ball-slot or body-speed contracts.
-        if (use_procedural_dribble) {
+        if (use_procedural_kick) {
             return NeutralCommand{};
         }
         WalkCommand align_command = make_walk_command(context.self);
@@ -565,6 +633,71 @@ bool matching_ready_intent(
         }
     }
     return false;
+}
+
+std::optional<strategy::CooperativeAction> make_goal_shot_candidate(
+    const world::WorldSnapshot& snapshot) {
+    if (snapshot.play_mode != world::PlayMode::PlayOn ||
+        !snapshot.ball.position_valid) {
+        return std::nullopt;
+    }
+    strategy::CooperativeAction shot;
+    const auto server_tick = static_cast<std::uint32_t>(std::max(
+        0.0, std::round(snapshot.server_time * 50.0)));
+    shot.action_id =
+        (static_cast<std::uint32_t>(snapshot.player_number) << 24U) |
+        (server_tick & 0x00ffffffU);
+    shot.category = strategy::ActionCategory::Shoot;
+    shot.actor_player_number = snapshot.player_number;
+    shot.start_ball_point_m = {
+        snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+    shot.target_point_m = field_geometry::actual_their_goal_center_target();
+    shot.requested_ball_speed_mps =
+        decision::kick_contract::kProceduralShotRequestedSpeedMps;
+    shot.confidence = 1.0;
+    const double distance_m = math::planar_dist(
+        shot.start_ball_point_m, shot.target_point_m);
+    if (distance_m <
+            decision::kick_contract::kProceduralShotMinimumTargetDistanceM ||
+        distance_m >
+            decision::kick_contract::kProceduralShotMaximumTargetDistanceM) {
+        return std::nullopt;
+    }
+    return shot;
+}
+
+std::optional<strategy::CooperativeAction> make_safety_clear_candidate(
+    const world::WorldSnapshot& snapshot) {
+    constexpr double kDefensiveClearDepthM = 10.0;
+    constexpr double kClearTargetDistanceM = 6.0;
+    if (snapshot.play_mode != world::PlayMode::PlayOn ||
+        !snapshot.ball.position_valid ||
+        snapshot.ball.position_m[0] >
+            -field_geometry::kActualHalfLengthM + kDefensiveClearDepthM) {
+        return std::nullopt;
+    }
+    strategy::CooperativeAction clear;
+    const auto server_tick = static_cast<std::uint32_t>(std::max(
+        0.0, std::round(snapshot.server_time * 50.0)));
+    clear.action_id =
+        (static_cast<std::uint32_t>(snapshot.player_number) << 24U) |
+        (server_tick & 0x00ffffffU);
+    clear.category = strategy::ActionCategory::Clear;
+    clear.actor_player_number = snapshot.player_number;
+    clear.start_ball_point_m = {
+        snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+    const auto clear_direction = math::vec2_unit_or(
+        math::vec2_sub(
+            field_geometry::actual_their_goal_center_target(),
+            clear.start_ball_point_m),
+        {1.0, 0.0});
+    clear.target_point_m = math::vec2_add(
+        clear.start_ball_point_m,
+        math::vec2_scale(clear_direction, kClearTargetDistanceM));
+    clear.requested_ball_speed_mps =
+        decision::kick_contract::kProceduralClearRequestedSpeedMps;
+    clear.confidence = 1.0;
+    return clear;
 }
 
 bool pass_commit_is_valid(
@@ -730,6 +863,45 @@ HighLevelCommand APBehavior::make_command(
     }
 
     const strategy::ActionCapabilityRegistry capabilities(enable_targeted_kick);
+    if (enable_targeted_kick && !state_.committed_pass.has_value() &&
+        context.ball_distance <= 2.5) {
+        const auto clear = make_safety_clear_candidate(snapshot);
+        if (clear.has_value()) {
+            const auto target_direction = math::vec2_sub(
+                clear->target_point_m, context.ball);
+            const double direction_deg = math::vector_angle_deg(target_direction);
+            const double self_yaw_deg =
+                world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+                    snapshot.self.orientation_wxyz);
+            const double relative_target_angle_deg = math::normalize_deg(
+                direction_deg - self_yaw_deg);
+            if (capabilities.executable(*clear, relative_target_angle_deg)) {
+                blackboard.set(
+                    Blackboard::kKeySelectedCooperativeAction, *clear);
+            }
+            return make_dribble_command(context, direction_deg, &*clear);
+        }
+        const auto shot = make_goal_shot_candidate(snapshot);
+        if (shot.has_value()) {
+            const auto target_direction = math::vec2_sub(
+                shot->target_point_m, context.ball);
+            const double direction_deg = math::vector_angle_deg(target_direction);
+            const double self_yaw_deg =
+                world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+                    snapshot.self.orientation_wxyz);
+            const double relative_target_angle_deg = math::normalize_deg(
+                direction_deg - self_yaw_deg);
+            if (capabilities.executable(*shot, relative_target_angle_deg)) {
+                blackboard.set(
+                    Blackboard::kKeySelectedCooperativeAction, *shot);
+            }
+            // The candidate's distance and speed already lie inside the
+            // declared shot envelope. Approach and align even before the
+            // angle check passes; make_dribble_command repeats the exact
+            // one-degree release gate before it can emit KickMode::Shot.
+            return make_dribble_command(context, direction_deg, &*shot);
+        }
+    }
     if (enable_pass_strategy && enable_targeted_kick &&
         snapshot.play_mode == world::PlayMode::PlayOn) {
         strategy::PlanningResult plan = action_planner_.plan(snapshot);

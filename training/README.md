@@ -314,6 +314,32 @@ PYTHONPATH=training python training/tools/evaluate_kick_teacher.py \
   --output /home/win98/rl_runs/kick-teacher/kick-v2-2m-center-s1701-eval.json
 ```
 
+The optimizer can evaluate every candidate over an explicit release-pose
+envelope and prints one progress line per CEM generation. Keep those bounds in
+the generated manifest so runtime tolerances can be traced to a predeclared
+experiment instead of widened after a server run:
+
+```bash
+PYTHONPATH=training python training/tools/optimize_kick_teacher.py \
+  --target-distance 4.0 --target-angle 0 --requested-speed 2.5 \
+  --desired-arrival-speed 0.6 --mode shot --motion-base stand \
+  --stand-base-pose neutral --population 256 --generations 30 \
+  --robust-samples 17 --robust-ball-x-min -0.008 \
+  --robust-ball-x-max 0.020 --robust-ball-y-min -0.012 \
+  --robust-ball-y-max 0.012 --seed 20261042 \
+  --output-prefix /home/win98/rl_runs/player-action-foundation/shot-4m
+```
+
+The currently mounted 4 m procedural shot uses the frozen seed-20261033
+teacher. Its independently seeded release-slot evaluation passed 100/100 and
+the 1200-cycle 7v7 calibration observed a physical contact. This is a narrow
+right-foot, near-zero-angle fallback and teacher, not a general learned shot.
+The separate 6 m `clear` teacher also passed 100/100 under its safety-clearance
+profile and produced a physical contact in a 1200-cycle 7v7 run. It guarantees
+at least 4.5 m forward progress inside a 1.5 m half-corridor while upright; it
+does not claim exact six-metre placement. Do not rename or extrapolate either
+anchor.
+
 Do not use repeated fixed-trajectory tuning to hide placement failures. Generate
 conditioned demonstrations and train the v2 range/direction/speed policy when a
 single teacher cannot cover the declared ball-pose envelope.
@@ -523,7 +549,13 @@ asset hashes, three-seed held-out evaluation, ONNX parity report, and
 RCSSServerMJ acceptance result are present. Runtime inference must retain the
 existing kick as a safe fallback.
 
-As of 2026-08-31 the Holosoma and independent GMR motion pipelines, true-flight
-evaluator, periodic projector, standard/legacy ONNX exporter and exact CPU
-acceptance loop work. No running checkpoint passes the CPU completion gate, so
-the competition runtime continues to use the original stable `walk.onnx`.
+As of 2026-09-05 the runtime keeps the original stable `walk.onnx` for precise
+movement and fallback, and conditionally uses the retained FastWalkV2 candidate
+for long, low-turn forward demands. Two new football-locomotion curricula both
+remained at 5/8 on the frozen eight-command CPU suite and were rejected. The
+0.55 m procedural dribble touch, narrow 4 m procedural shot, and safety-focused
+6 m procedural clear are mounted as model-independent fallbacks. The source-tree
+WSL launchers also enable the transition-kick ONNX by default, but its frozen
+exact-CPU score is only 27/92, so active ownership is restricted to its measured
+fixed-2 m slice and every mismatch or inference failure falls back in the same
+cycle. Use `APOLLO_LEARNED_KICK_MODE=shadow` when joint ownership is undesired.

@@ -11,6 +11,7 @@ from my3d_rl.kick_teacher import (
     KickTeacherSpec,
     build_joint_delta_trajectory,
     cem_optimize,
+    clearance_trial_success,
     kick_trial_success,
 )
 
@@ -36,6 +37,47 @@ def test_cem_reproducibly_solves_bounded_quadratic():
     np.testing.assert_allclose(first.parameters, second.parameters)
     np.testing.assert_allclose(first.parameters, target, atol=0.06)
     assert first.score > -0.01
+
+
+def test_teacher_optimizer_reports_progress_and_honors_robust_ranges():
+    evaluator = KickTeacherEvaluator(
+        KickTeacherSpec(evaluation_duration_s=1.2),
+        motion_base="stand",
+    )
+    placements = []
+    progress = []
+
+    def fake_rollout(parameters, **kwargs):
+        del parameters
+        placements.append(
+            (kwargs["ball_x_offset_m"], kwargs["ball_y_offset_m"])
+        )
+        return {"score": 1.0, "fell": False}
+
+    evaluator.rollout = fake_rollout
+    evaluator.optimize(
+        seed=23,
+        population=2,
+        generations=1,
+        robust_samples=3,
+        ball_x_range_m=(-0.01, 0.03),
+        ball_y_range_m=(-0.02, 0.02),
+        progress=lambda generation, metrics: progress.append(
+            (generation, metrics)
+        ),
+    )
+
+    assert progress[0][0] == 0
+    assert progress[0][1]["best_score"] == 1.0
+    assert len(placements) == 9
+    for objective_call in range(3):
+        nominal, first_perturbed, second_perturbed = placements[
+            3 * objective_call : 3 * objective_call + 3
+        ]
+        assert nominal == (0.0, 0.0)
+        for ball_x, ball_y in (first_perturbed, second_perturbed):
+            assert -0.01 <= ball_x <= 0.03
+            assert -0.02 <= ball_y <= 0.02
 
 
 def test_teacher_trajectory_is_bounded_smooth_and_returns_to_neutral():
@@ -201,3 +243,31 @@ def test_kick_trial_gate_requires_contact_range_direction_speed_and_upright():
         rejected = dict(accepted)
         rejected[rejected_field] = rejected_value
         assert not kick_trial_success(rejected)
+
+
+def test_clearance_gate_requires_safe_forward_displacement_not_exact_range():
+    accepted = {
+        "contact": True,
+        "fell": False,
+        "progress_m": 5.1,
+        "lateral_error_m": 1.1,
+        "maximum_directional_speed_mps": 3.4,
+        "minimum_torso_height_m": 0.60,
+        "minimum_upright": 0.85,
+        # A useful clearance need not hit a six-metre landing target.
+        "range_error_m": 0.9,
+        "speed_error_mps": 0.1,
+    }
+    assert clearance_trial_success(accepted)
+    for rejected_field, rejected_value in (
+        ("contact", False),
+        ("fell", True),
+        ("progress_m", 4.49),
+        ("lateral_error_m", 1.51),
+        ("maximum_directional_speed_mps", 2.49),
+        ("minimum_torso_height_m", 0.54),
+        ("minimum_upright", 0.74),
+    ):
+        rejected = dict(accepted)
+        rejected[rejected_field] = rejected_value
+        assert not clearance_trial_success(rejected)

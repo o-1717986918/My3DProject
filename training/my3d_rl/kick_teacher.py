@@ -1214,6 +1214,7 @@ class KickTeacherEvaluator:
         setup_timeout_s: float = 1.2,
         setup_tolerance_m: float = 0.015,
         setup_confirmation_cycles: int = 5,
+        progress: Callable[[int, dict[str, float]], None] | None = None,
     ) -> CEMResult:
         if robust_samples < 1:
             raise ValueError("robust_samples must be positive")
@@ -1296,6 +1297,7 @@ class KickTeacherEvaluator:
             seed=seed,
             population=population,
             generations=generations,
+            progress=progress,
         )
 
     def trajectory(self, parameters: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -1349,4 +1351,32 @@ def kick_trial_success(
         and float(metrics["range_error_m"]) <= range_tolerance_m
         and float(metrics["lateral_error_m"]) <= corridor_half_width_m
         and float(metrics["speed_error_mps"]) <= launch_speed_tolerance_mps
+    )
+
+
+def clearance_trial_success(
+    metrics: dict[str, float | bool],
+    *,
+    minimum_progress_m: float = 4.5,
+    corridor_half_width_m: float = 1.5,
+    minimum_launch_speed_mps: float = 2.5,
+    minimum_torso_height_m: float = 0.55,
+    minimum_upright: float = 0.75,
+) -> bool:
+    """Classify a safety clearance without pretending it is a precise pass.
+
+    A clearance succeeds by moving the ball far enough out of danger in a
+    bounded forward sector while the robot stays controllable.  Exact target
+    range and arrival speed are deliberately not part of this contract.
+    """
+    return bool(
+        metrics["contact"]
+        and not metrics["fell"]
+        and float(metrics["progress_m"]) >= minimum_progress_m
+        and float(metrics["lateral_error_m"]) <= corridor_half_width_m
+        and float(metrics["maximum_directional_speed_mps"])
+        >= minimum_launch_speed_mps
+        and float(metrics["minimum_torso_height_m"])
+        >= minimum_torso_height_m
+        and float(metrics["minimum_upright"]) >= minimum_upright
     )

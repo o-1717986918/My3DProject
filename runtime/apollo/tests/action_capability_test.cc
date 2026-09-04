@@ -22,6 +22,18 @@ strategy::CooperativeAction make_dribble(double distance_m, double speed_mps) {
     return action;
 }
 
+strategy::CooperativeAction make_shot(double distance_m, double speed_mps) {
+    auto action = make_pass(distance_m, speed_mps);
+    action.category = strategy::ActionCategory::Shoot;
+    return action;
+}
+
+strategy::CooperativeAction make_clear(double distance_m, double speed_mps) {
+    auto action = make_pass(distance_m, speed_mps);
+    action.category = strategy::ActionCategory::Clear;
+    return action;
+}
+
 }  // namespace
 
 int main() {
@@ -42,6 +54,26 @@ int main() {
         enabled.executable(make_dribble(0.70, 0.90), 0.0) ||
         enabled.executable(make_dribble(0.55, 0.95), 0.0)) {
         std::cerr << "procedural dribble capability envelope is incorrect\n";
+        return 1;
+    }
+    if (disabled.executable(make_shot(4.0, 2.50), 0.0) ||
+        !enabled.executable(make_shot(4.0, 2.50), 0.0) ||
+        enabled.state(strategy::SkillCapability::Shot) !=
+            strategy::CapabilityState::Experimental ||
+        enabled.executable(make_shot(4.51, 2.50), 0.0) ||
+        enabled.executable(make_shot(4.0, 2.49), 0.0) ||
+        enabled.executable(make_shot(4.0, 2.50), 1.01)) {
+        std::cerr << "procedural shot capability envelope is incorrect\n";
+        return 1;
+    }
+    if (disabled.executable(make_clear(6.0, 3.50), 0.0) ||
+        !enabled.executable(make_clear(6.0, 3.50), 0.0) ||
+        enabled.state(strategy::SkillCapability::Clear) !=
+            strategy::CapabilityState::Experimental ||
+        enabled.executable(make_clear(6.51, 3.50), 0.0) ||
+        enabled.executable(make_clear(6.0, 3.49), 0.0) ||
+        enabled.executable(make_clear(6.0, 3.50), 1.01)) {
+        std::cerr << "procedural clear capability envelope is incorrect\n";
         return 1;
     }
 

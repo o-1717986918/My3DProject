@@ -31,6 +31,21 @@ pass_reassert_settle_s=0.5
 kickoff_command_delay=0.5
 kick_calibration_scenario=0
 procedural_dribble_scenario=0
+procedural_shot_scenario=0
+procedural_clear_scenario=0
+scenario_ball_x=0
+scenario_ball_y=0
+staging_ball_x=-20
+staging_ball_y=0
+strong_kick_track_robot_x=0
+strong_kick_track_robot_y=0
+strong_kick_release_robot_x=0
+strong_kick_release_robot_y=0
+strong_kick_opponent_x=0
+strong_kick_kicker_team=My3D-A
+strong_kick_opponent_team=My3D-B
+strong_kick_qw=1
+strong_kick_qz=0
 parameterized_kick_mode=${APOLLO_ENABLE_PARAMETERIZED_KICK:-1}
 learned_kick_mode=${APOLLO_LEARNED_KICK_MODE:-}
 if [[ -z "$learned_kick_mode" ]]; then
@@ -115,19 +130,87 @@ case "${MATCH_PROCEDURAL_DRIBBLE_SCENARIO:-0}" in
         ;;
 esac
 
-if [[ "$kick_calibration_scenario" == 1 &&
-      "$procedural_dribble_scenario" == 1 ]]; then
+case "${MATCH_PROCEDURAL_SHOT_SCENARIO:-0}" in
+    1)
+        # Establish vision outside near-field occlusion, then place the AP in
+        # the exact held-out 4 m shot slot: ball local x=0.326 m, y=+0.04 m.
+        pass_sender_x=22.7
+        pass_sender_y=-0.04
+        pass_sender_qw=1
+        pass_sender_qz=0
+        pass_reassert_delay=0.01
+        pass_reassert_settle_s=0.05
+        kickoff_command_delay=0.05
+        scenario_ball_x=23.5
+        staging_ball_x=23.5
+        strong_kick_track_robot_x=22.7
+        strong_kick_track_robot_y=0
+        strong_kick_release_robot_x=23.174
+        strong_kick_release_robot_y=-0.04
+        strong_kick_opponent_x=-24
+        procedural_shot_scenario=1
+        ;;
+    0) ;;
+    *)
+        echo "MATCH_PROCEDURAL_SHOT_SCENARIO must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+
+case "${MATCH_PROCEDURAL_CLEAR_SCENARIO:-0}" in
+    1)
+        # Defensive-third safety-clear scene. The AP faces +x and enters the
+        # independently held-out 6 m clear slot at local x=0.326 m, y=+0.04 m.
+        pass_sender_x=-0.8
+        pass_sender_y=0
+        pass_sender_qw=1
+        pass_sender_qz=0
+        pass_reassert_delay=0.01
+        pass_reassert_settle_s=0.05
+        kickoff_command_delay=0.05
+        # Use the right-side team so the monitor places the ball at positive
+        # server x. Frame normalization maps this to the same canonical -20 m
+        # defensive-third state and +x attacking direction used by the policy.
+        scenario_ball_x=20
+        staging_ball_x=20
+        strong_kick_track_robot_x=20.8
+        strong_kick_track_robot_y=0
+        strong_kick_release_robot_x=20.326
+        strong_kick_release_robot_y=0.04
+        strong_kick_opponent_x=-24
+        strong_kick_kicker_team=My3D-B
+        strong_kick_opponent_team=My3D-A
+        strong_kick_qw=0
+        strong_kick_qz=1
+        procedural_clear_scenario=1
+        ;;
+    0) ;;
+    *)
+        echo "MATCH_PROCEDURAL_CLEAR_SCENARIO must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+
+scenario_count=$((
+    kick_calibration_scenario + procedural_dribble_scenario +
+    procedural_shot_scenario + procedural_clear_scenario
+))
+if [[ "$scenario_count" -gt 1 ]]; then
     echo "kick calibration scenarios are mutually exclusive" >&2
     exit 2
 fi
-if [[ "$procedural_dribble_scenario" == 1 &&
+if [[ ( "$procedural_dribble_scenario" == 1 ||
+        "$procedural_shot_scenario" == 1 ||
+        "$procedural_clear_scenario" == 1 ) &&
       "${MATCH_PASS_SCENARIO:-0}" != 1 ]]; then
-    echo "MATCH_PROCEDURAL_DRIBBLE_SCENARIO requires MATCH_PASS_SCENARIO=1" >&2
+    echo "procedural kick scenarios require MATCH_PASS_SCENARIO=1" >&2
     exit 2
 fi
-if [[ "$procedural_dribble_scenario" == 1 &&
+if [[ ( "$procedural_dribble_scenario" == 1 ||
+        "$procedural_shot_scenario" == 1 ||
+        "$procedural_clear_scenario" == 1 ) &&
       "${APOLLO_ENABLE_PASS_STRATEGY:-1}" != 0 ]]; then
-    echo "procedural dribble calibration requires APOLLO_ENABLE_PASS_STRATEGY=0" >&2
+    echo "procedural kick calibration requires APOLLO_ENABLE_PASS_STRATEGY=0" >&2
     exit 2
 fi
 
@@ -172,9 +255,11 @@ case "$learned_kick_mode" in
         ;;
 esac
 
-if [[ "$procedural_dribble_scenario" == 1 &&
+if [[ ( "$procedural_dribble_scenario" == 1 ||
+        "$procedural_shot_scenario" == 1 ||
+        "$procedural_clear_scenario" == 1 ) &&
       "$parameterized_kick_mode" != 1 ]]; then
-    echo "procedural dribble scenario requires parameterized kick support" >&2
+    echo "procedural kick scenario requires parameterized kick support" >&2
     exit 2
 fi
 
@@ -288,7 +373,7 @@ if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
         "(agent (unum 5) (team My3D-B) (move3d 18 1 0.8 0 0 0 1))" \
         "(agent (unum 6) (team My3D-B) (move3d 18 4 0.8 0 0 0 1))" \
         "(agent (unum 7) (team My3D-B) (move3d 18 7 0.8 0 0 0 1))" \
-        "(ball (pos -20 0 0.11) (vel 0 0 0))"
+        "(ball (pos $staging_ball_x $staging_ball_y 0.11) (vel 0 0 0))"
     sleep 1
     # The client-side beam command can race the first monitor reset while all
     # fourteen ONNX sessions finish initialization. Re-assert only the actors
@@ -342,7 +427,7 @@ if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
     "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
         --host 127.0.0.1 \
         --port "$monitor_port" \
-        "(ball (pos 0 0 0.11) (vel 0 0 0))"
+        "(ball (pos $scenario_ball_x $scenario_ball_y 0.11) (vel 0 0 0))"
     if [[ "$kick_calibration_scenario" == 1 ]]; then
         # First allow a post-transition camera update at 0.8 m, then remove
         # approach gait phase and accidental pre-kick contacts. Decision,
@@ -372,6 +457,61 @@ if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
             "(agent (unum 7) (team My3D-A) (move3d -0.32 -0.04 0.8 1 0 0 0))" \
             "(agent (unum 7) (team My3D-A) (move3d -0.32 -0.04 0.8 1 0 0 0))" \
             "(agent (unum 7) (team My3D-A) (move3d -0.32 -0.04 0.8 1 0 0 0))"
+        sleep 0.05
+    elif [[ "$procedural_shot_scenario" == 1 ||
+            "$procedural_clear_scenario" == 1 ]]; then
+        sleep 0.2
+        # Establish a fresh near-contact track at 0.8 m before entering the
+        # torso-occluded release slot. Keep both bodies fixed for ten camera
+        # updates so monitor-command latency cannot consume the whole stage.
+        "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+            --host 127.0.0.1 \
+            --port "$monitor_port" \
+            --delay 0.02 \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_track_robot_x $strong_kick_track_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))"
+        sleep 1.0
+        "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+            --host 127.0.0.1 \
+            --port "$monitor_port" \
+            --delay 0.01 \
+            "(agent (unum 1) (team $strong_kick_opponent_team) (move3d $strong_kick_opponent_x -8 0.8 1 0 0 0))" \
+            "(agent (unum 2) (team $strong_kick_opponent_team) (move3d $strong_kick_opponent_x -6 0.8 1 0 0 0))" \
+            "(agent (unum 3) (team $strong_kick_opponent_team) (move3d $strong_kick_opponent_x -4 0.8 1 0 0 0))" \
+            "(agent (unum 4) (team $strong_kick_opponent_team) (move3d $strong_kick_opponent_x -2 0.8 1 0 0 0))" \
+            "(agent (unum 5) (team $strong_kick_opponent_team) (move3d $strong_kick_opponent_x 2 0.8 1 0 0 0))" \
+            "(agent (unum 6) (team $strong_kick_opponent_team) (move3d $strong_kick_opponent_x 4 0.8 1 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_opponent_team) (move3d $strong_kick_opponent_x 6 0.8 1 0 0 0))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_release_robot_x $strong_kick_release_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_release_robot_x $strong_kick_release_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_release_robot_x $strong_kick_release_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_release_robot_x $strong_kick_release_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_release_robot_x $strong_kick_release_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))" \
+            "(ball (pos $scenario_ball_x 0 0.11) (vel 0 0 0))" \
+            "(agent (unum 7) (team $strong_kick_kicker_team) (move3d $strong_kick_release_robot_x $strong_kick_release_robot_y 0.8 $strong_kick_qw 0 0 $strong_kick_qz))"
         sleep 0.05
     fi
 else
@@ -422,6 +562,14 @@ procedural_kick_samples=$(
     { grep -Eh "MY3D_STATUS.*motion=ProceduralKick(Execute|Hold).*kick_mode=DribbleTouch" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
+procedural_shot_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=ProceduralKick(Execute|Hold).*kick_mode=Shot" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+procedural_clear_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=ProceduralKick(Execute|Hold).*kick_mode=Clear" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
 getup_samples=$(
     { grep -Eh "MY3D_STATUS.*motion=GetUp" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
@@ -447,6 +595,10 @@ pass_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
     --metric contacts "$run_dir"/My3D-*.log)
 procedural_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
     --kick-mode DribbleTouch --metric contacts "$run_dir"/My3D-*.log)
+procedural_shot_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
+    --kick-mode Shot --metric contacts "$run_dir"/My3D-*.log)
+procedural_clear_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
+    --kick-mode Clear --metric contacts "$run_dir"/My3D-*.log)
 activation_warnings=0
 if [[ -f "$run_dir/MUJOCO_LOG.TXT" ]]; then
     activation_warnings=$(grep -c "Nan, Inf or huge value in CTRL" \
@@ -467,6 +619,18 @@ if [[ "${MATCH_REQUIRE_PROCEDURAL_KICK:-0}" == 1 &&
     ( $procedural_kick_samples -eq 0 || $procedural_contact_events -eq 0 ) ]]; then
     procedural_kick_requirement_failed=1
 fi
+procedural_shot_requirement_failed=0
+if [[ "${MATCH_REQUIRE_PROCEDURAL_SHOT:-0}" == 1 &&
+    ( $procedural_shot_samples -eq 0 ||
+      $procedural_shot_contact_events -eq 0 ) ]]; then
+    procedural_shot_requirement_failed=1
+fi
+procedural_clear_requirement_failed=0
+if [[ "${MATCH_REQUIRE_PROCEDURAL_CLEAR:-0}" == 1 &&
+    ( $procedural_clear_samples -eq 0 ||
+      $procedural_clear_contact_events -eq 0 ) ]]; then
+    procedural_clear_requirement_failed=1
+fi
 pass_requirement_failed=0
 if [[ "${MATCH_REQUIRE_PASS:-0}" == 1 ]] && \
     { [[ $pass_plan_samples -eq 0 ]] || [[ $pass_ready_samples -eq 0 ]] || \
@@ -483,6 +647,8 @@ if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
     || $illegal_defense -ne 0 || $kick_requirement_failed -ne 0 \
     || $parameterized_kick_requirement_failed -ne 0 \
     || $procedural_kick_requirement_failed -ne 0 \
+    || $procedural_shot_requirement_failed -ne 0 \
+    || $procedural_clear_requirement_failed -ne 0 \
     || $pass_requirement_failed -ne 0 || $fast_walk_requirement_failed -ne 0 ]]; then
     echo "Apollo 7v7 acceptance failed: cycles=$max_cycles clean_exits=$clean_exits " \
         "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
@@ -492,6 +658,10 @@ if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
         "learned_kick_shadow_samples=$learned_kick_shadow_samples " \
         "procedural_kick_samples=$procedural_kick_samples " \
         "procedural_contact_events=$procedural_contact_events " \
+        "procedural_shot_samples=$procedural_shot_samples " \
+        "procedural_shot_contact_events=$procedural_shot_contact_events " \
+        "procedural_clear_samples=$procedural_clear_samples " \
+        "procedural_clear_contact_events=$procedural_clear_contact_events " \
         "getup_samples=$getup_samples " \
         "fast_walk_samples=$fast_walk_samples " \
         "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
@@ -513,6 +683,10 @@ echo "Apollo 7v7 acceptance passed: cycles=$max_cycles clean_exits=$clean_exits 
     "learned_kick_shadow_samples=$learned_kick_shadow_samples " \
     "procedural_kick_samples=$procedural_kick_samples " \
     "procedural_contact_events=$procedural_contact_events " \
+    "procedural_shot_samples=$procedural_shot_samples " \
+    "procedural_shot_contact_events=$procedural_shot_contact_events " \
+    "procedural_clear_samples=$procedural_clear_samples " \
+    "procedural_clear_contact_events=$procedural_clear_contact_events " \
     "getup_samples=$getup_samples " \
     "fast_walk_samples=$fast_walk_samples " \
     "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \

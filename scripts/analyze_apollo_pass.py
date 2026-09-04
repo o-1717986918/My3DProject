@@ -186,7 +186,7 @@ def main() -> int:
     parser.add_argument("--window-cycles", type=int, default=100)
     parser.add_argument(
         "--kick-mode",
-        choices=("TargetedPass", "DribbleTouch"),
+        choices=("TargetedPass", "DribbleTouch", "Shot", "Clear"),
         default="TargetedPass",
     )
     parser.add_argument(

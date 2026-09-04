@@ -171,6 +171,61 @@ int main() {
         return 1;
     }
 
+    world::WorldSnapshot shot_snapshot = make_open_pass_snapshot();
+    shot_snapshot.ball.position_m = {23.5, 0.0, 0.11};
+    shot_snapshot.self.position_m = {23.1725, -0.04, 0.8};
+    decision::APBehavior shot_behavior;
+    decision::Blackboard shot_blackboard;
+    const auto shot_stabilizing = shot_behavior.make_command(
+        shot_snapshot, shot_blackboard, role_manager, false, true);
+    if (std::holds_alternative<decision::KickCommand>(shot_stabilizing) ||
+        !shot_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "procedural shot skipped alignment or was not selected\n";
+        return 1;
+    }
+    shot_snapshot.server_time += 0.10;
+    const auto shot_release = shot_behavior.make_command(
+        shot_snapshot, shot_blackboard, role_manager, false, true);
+    const auto* shot_kick = std::get_if<decision::KickCommand>(&shot_release);
+    if (shot_kick == nullptr || shot_kick->mode != decision::KickMode::Shot ||
+        !shot_kick->target_point_m.has_value() ||
+        std::abs(shot_kick->requested_ball_speed_mps - 2.50) > 1.0e-9) {
+        std::cerr << "enabled procedural shot did not emit its exact contract\n";
+        return 1;
+    }
+
+    world::WorldSnapshot clear_snapshot = make_open_pass_snapshot();
+    clear_snapshot.ball.position_m = {-20.0, 0.0, 0.11};
+    clear_snapshot.self.position_m = {-20.326, -0.04, 0.8};
+    decision::APBehavior clear_behavior;
+    decision::Blackboard clear_blackboard;
+    const auto clear_stabilizing = clear_behavior.make_command(
+        clear_snapshot, clear_blackboard, role_manager, false, true);
+    if (std::holds_alternative<decision::KickCommand>(clear_stabilizing) ||
+        !clear_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "procedural clear skipped alignment or was not selected\n";
+        return 1;
+    }
+    clear_snapshot.server_time += 0.10;
+    const auto clear_release = clear_behavior.make_command(
+        clear_snapshot, clear_blackboard, role_manager, false, true);
+    const auto* clear_kick = std::get_if<decision::KickCommand>(&clear_release);
+    if (clear_kick == nullptr || clear_kick->mode != decision::KickMode::Clear ||
+        !clear_kick->target_point_m.has_value() ||
+        std::abs(clear_kick->requested_ball_speed_mps - 3.50) > 1.0e-9 ||
+        std::abs(
+            math::planar_dist(
+                std::array<double, 2>{
+                    clear_snapshot.ball.position_m[0],
+                    clear_snapshot.ball.position_m[1]},
+                *clear_kick->target_point_m) -
+            6.0) > 1.0e-9) {
+        std::cerr << "enabled procedural clear did not emit its exact contract\n";
+        return 1;
+    }
+
     decision::APBehavior risk_behavior;
     decision::Blackboard risk_blackboard;
     risk_blackboard.set(
