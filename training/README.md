@@ -112,6 +112,36 @@ PYTHONPATH=training python training/tools/train_run.py \
   --run-dir /home/win98/rl_runs/run-phase-v2-<name>
 ```
 
+Continue the accepted phase-v2 checkpoint on the football command surface
+(braking, reverse, lateral motion, turning, short command segments, pushes and
+one-step action delay):
+
+```bash
+PYTHONPATH=training XLA_PYTHON_CLIENT_PREALLOCATE=false \
+  python training/tools/train_run.py \
+  --stage soccer_omni --impl warp --num-envs 128 \
+  --num-timesteps 5000000 --seed 20260951 --num-evals 6 \
+  --num-eval-envs 32 --network-profile legacy_phase_warmstart_v2 \
+  --restore-checkpoint \
+  /home/win98/rl_runs/run-phase-v2-formal-s71-20260831-01/checkpoints/000005898240 \
+  --run-dir /home/win98/rl_runs/run-soccer-omni-s20260951-v1
+```
+
+Do not select a football locomotion policy from one straight-line evaluation.
+Export a candidate and run the fixed eight-command CPU suite:
+
+```bash
+PYTHONPATH=training python training/tools/evaluate_run_command_suite.py \
+  --model /home/win98/rl_runs/run-soccer-omni-s20260951-v1/policy.onnx \
+  --contract training/contracts/run_policy_v2.yaml --episodes 16 \
+  --output-dir /home/win98/rl_runs/run-soccer-omni-s20260951-v1/cpu-suite
+```
+
+The suite covers stand, precision/fast forward, reverse, left/right strafe and
+left/right turn. It reports the worst upright completion, planar velocity RMSE
+and yaw-rate RMSE; every command must pass before the candidate can replace
+the retained runtime model.
+
 Export and verify a v2 checkpoint:
 
 ```bash

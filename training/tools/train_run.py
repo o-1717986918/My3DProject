@@ -205,6 +205,38 @@ STAGES: dict[str, dict[str, Any]] = {
         "push_interval_steps": 150,
         "action_delay_max_steps": 1,
     },
+    # Football locomotion is dominated by short command segments rather than
+    # a ten-second speed trial.  Keep the checkpoint-compatible phase-v2
+    # boundary, but train the missing braking, lateral and turning surface and
+    # expose command switches several times per episode.
+    "soccer_omni": {
+        "lin_vel_x": [-0.25, 1.65],
+        "lin_vel_y": [-0.45, 0.45],
+        "ang_vel_yaw": [-0.75, 0.75],
+        "gait_frequency": [1.0, 2.0],
+        "stand_probability": 0.25,
+        "command_resample_steps": 75,
+        "reset_joint_noise": 0.04,
+        "reset_root_velocity_noise": 0.08,
+        "reset_yaw_range": 0.20,
+        "push_enable": True,
+        "push_interval_steps": 125,
+        "push_magnitude": [0.04, 0.18],
+        "action_delay_max_steps": 1,
+        "reward.tracking_linear": 5.0,
+        "reward.tracking_yaw": 3.0,
+        "reward.upright": 1.0,
+        "reward.height": 1.5,
+        "reward.alive": 0.5,
+        "reward.lateral_tracking": -2.0,
+        "reward.yaw_rate_error": -1.5,
+        "reward.vertical_velocity": -0.35,
+        "reward.angular_xy": -0.20,
+        "reward.action_rate": -0.03,
+        "reward.action_acceleration": -0.01,
+        "reward.pose": -0.03,
+        "reward.fall": -80.0,
+    },
 }
 
 

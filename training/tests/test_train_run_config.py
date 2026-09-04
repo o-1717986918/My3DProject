@@ -7,3 +7,17 @@ def test_motion_reference_initialization_is_scoped_to_motion_stages():
     assert STAGES["motion_straight"]["reference_init_probability"] == 0.10
     assert STAGES["reference_residual"]["reference_init_probability"] == 1.0
     assert STAGES["reference_residual"]["fixed_command"] == [1.8, 0.0, 0.0]
+
+
+def test_soccer_omni_stage_trains_switches_and_full_planar_commands():
+    stage = STAGES["soccer_omni"]
+
+    assert stage["lin_vel_x"][0] < 0.0
+    assert stage["lin_vel_y"][0] < 0.0 < stage["lin_vel_y"][1]
+    assert stage["ang_vel_yaw"][0] < 0.0 < stage["ang_vel_yaw"][1]
+    assert stage["command_resample_steps"] < 100
+    assert stage["stand_probability"] > 0.0
+    assert stage["push_enable"] is True
+    assert stage["action_delay_max_steps"] == 1
+    assert stage["reward.lateral_tracking"] < 0.0
+    assert stage["reward.yaw_rate_error"] < 0.0

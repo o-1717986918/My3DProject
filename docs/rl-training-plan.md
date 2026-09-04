@@ -321,6 +321,17 @@ Walk/fast-walk -> precision approach -> neutral settle
 训练数据应加入真实服务器中触发 fallback/get-up 的入口状态。默认 walk 继续负责
 近球、门将、横移、急转和任何失败回退。
 
+2026-09-05 已开始 L1 正式批次：新增 `soccer_omni` 课程，保持现有
+`run_policy_v2` 的 80→23 ONNX/运行时边界，从已挂载 phase-v2 checkpoint 继续
+训练。课程覆盖 `vx=-0.25..1.65 m/s`、`vy=±0.45 m/s`、`yaw=±0.75 rad/s`、
+1.5 秒指令重采样、25% 停止命令、推扰和一周期动作延迟。
+
+冻结的旧候选八命令 CPU 基线位于
+`/home/win98/rl_runs/run-soccer-omni-baseline-s20260941-v1`：5/8 命令通过；
+高速前行偏航、倒退和左转失败，其中倒退 8/8 均未完成。后续模型必须在同一命令
+集上报告最差值，不能再由单一 1.5 m/s 直线结果选出。评测入口为
+`training/tools/evaluate_run_command_suite.py`。
+
 ### R：接球与 first touch
 
 先完成 D2 的接球意图和来球轨迹预测，再建立确定性接球姿态。只有失败主要来自

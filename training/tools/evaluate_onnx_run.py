@@ -267,7 +267,12 @@ def main() -> None:
     command = np.array([args.vx, args.vy, args.yaw_rate], dtype=np.float32)
     completed: list[bool] = []
     mean_forward_speeds: list[float] = []
+    mean_lateral_speeds: list[float] = []
+    mean_yaw_rates: list[float] = []
     forward_rmses: list[float] = []
+    lateral_rmses: list[float] = []
+    yaw_rate_rmses: list[float] = []
+    planar_velocity_rmses: list[float] = []
     lateral_drifts: list[float] = []
     flight_phase: list[bool] = []
     flight_phase_anytime: list[bool] = []
@@ -353,7 +358,8 @@ def main() -> None:
 
         initial_xy = data.qpos[root_qpos : root_qpos + 2].copy()
         previous_action = np.zeros(contract.action_size, dtype=np.float32)
-        forward_velocity: list[float] = []
+        local_velocity_samples: list[np.ndarray] = []
+        yaw_rate_samples: list[float] = []
         airborne_substeps: list[bool] = []
         fell = False
         invalid = False
@@ -465,7 +471,13 @@ def main() -> None:
             body_yaw = np.arctan2(torso_xmat[1, 0], torso_xmat[0, 0])
             c, s = np.cos(body_yaw), np.sin(body_yaw)
             world_vx, world_vy = data.qvel[root_dof : root_dof + 2]
-            forward_velocity.append(c * world_vx + s * world_vy)
+            local_velocity_samples.append(
+                np.array(
+                    [c * world_vx + s * world_vy, -s * world_vx + c * world_vy],
+                    dtype=np.float64,
+                )
+            )
+            yaw_rate_samples.append(float(data.sensordata[gyro_slice][2]))
             upright = torso_xmat[2, 2]
             height = data.xpos[torso_body, 2]
             invalid = not (
@@ -477,10 +489,16 @@ def main() -> None:
             if invalid or fell:
                 break
 
-        forward = np.asarray(forward_velocity, dtype=np.float64)
-        after_warmup = forward[min(warmup_steps, forward.size) :]
-        if after_warmup.size == 0:
-            after_warmup = forward
+        local_velocities = np.asarray(local_velocity_samples, dtype=np.float64)
+        yaw_rates = np.asarray(yaw_rate_samples, dtype=np.float64)
+        warmup_index = min(warmup_steps, local_velocities.shape[0])
+        after_warmup = local_velocities[warmup_index:]
+        yaw_after_warmup = yaw_rates[warmup_index:]
+        if after_warmup.shape[0] == 0:
+            after_warmup = local_velocities
+            yaw_after_warmup = yaw_rates
+        velocity_error = after_warmup - command[None, :2]
+        yaw_error = yaw_after_warmup - command[2]
         delta_world = data.qpos[root_qpos : root_qpos + 2] - initial_xy
         c0, s0 = np.cos(yaw), np.sin(yaw)
         lateral = -s0 * delta_world[0] + c0 * delta_world[1]
@@ -489,20 +507,36 @@ def main() -> None:
         longest_flight_anytime = _max_consecutive(np.asarray(airborne_substeps))
 
         completed.append(
-            not fell and not invalid and len(forward_velocity) == episode_steps
+            not fell and not invalid and len(local_velocity_samples) == episode_steps
         )
-        mean_forward_speeds.append(float(np.mean(after_warmup)))
-        forward_rmses.append(float(np.sqrt(np.mean(np.square(after_warmup - args.vx)))))
+        mean_forward_speeds.append(float(np.mean(after_warmup[:, 0])))
+        mean_lateral_speeds.append(float(np.mean(after_warmup[:, 1])))
+        mean_yaw_rates.append(float(np.mean(yaw_after_warmup)))
+        forward_rmses.append(
+            float(np.sqrt(np.mean(np.square(velocity_error[:, 0]))))
+        )
+        lateral_rmses.append(
+            float(np.sqrt(np.mean(np.square(velocity_error[:, 1]))))
+        )
+        yaw_rate_rmses.append(float(np.sqrt(np.mean(np.square(yaw_error)))))
+        planar_velocity_rmses.append(
+            float(np.sqrt(np.mean(np.sum(np.square(velocity_error), axis=1))))
+        )
         lateral_drifts.append(abs(float(lateral)))
         # Two consecutive 5 ms physics frames reject one-frame contact noise.
         flight_phase.append(longest_flight >= 2)
         flight_phase_anytime.append(longest_flight_anytime >= 2)
         max_flight_steps.append(longest_flight)
-        survived_control_steps.append(len(forward_velocity))
+        survived_control_steps.append(len(local_velocity_samples))
         invalid_episodes += int(invalid)
 
     speeds = np.asarray(mean_forward_speeds)
+    lateral_speeds = np.asarray(mean_lateral_speeds)
+    yaw_rates = np.asarray(mean_yaw_rates)
     rmses = np.asarray(forward_rmses)
+    lateral_error_rmses = np.asarray(lateral_rmses)
+    yaw_error_rmses = np.asarray(yaw_rate_rmses)
+    planar_error_rmses = np.asarray(planar_velocity_rmses)
     drifts = np.asarray(lateral_drifts)
     completion_rate = float(np.mean(completed))
     flight_rate = float(np.mean(flight_phase))
@@ -540,9 +574,31 @@ def main() -> None:
             "p10_m_s": _percentile(speeds, 10),
             "p90_m_s": _percentile(speeds, 90),
         },
+        "lateral_speed": {
+            "median_m_s": _percentile(lateral_speeds, 50),
+            "p10_m_s": _percentile(lateral_speeds, 10),
+            "p90_m_s": _percentile(lateral_speeds, 90),
+        },
+        "yaw_rate": {
+            "median_rad_s": _percentile(yaw_rates, 50),
+            "p10_rad_s": _percentile(yaw_rates, 10),
+            "p90_rad_s": _percentile(yaw_rates, 90),
+        },
         "forward_tracking_rmse": {
             "median_m_s": _percentile(rmses, 50),
             "p90_m_s": _percentile(rmses, 90),
+        },
+        "lateral_tracking_rmse": {
+            "median_m_s": _percentile(lateral_error_rmses, 50),
+            "p90_m_s": _percentile(lateral_error_rmses, 90),
+        },
+        "planar_velocity_tracking_rmse": {
+            "median_m_s": _percentile(planar_error_rmses, 50),
+            "p90_m_s": _percentile(planar_error_rmses, 90),
+        },
+        "yaw_rate_tracking_rmse": {
+            "median_rad_s": _percentile(yaw_error_rmses, 50),
+            "p90_rad_s": _percentile(yaw_error_rmses, 90),
         },
         "absolute_lateral_drift": {
             "median_m": _percentile(drifts, 50),
@@ -585,6 +641,18 @@ def main() -> None:
     }
     payload["gates"] = gates
     payload["candidate_gate_passed"] = all(gates.values())
+    soccer_command_gates = {
+        "upright_completion_rate_gte_0_95": completion_rate >= 0.95,
+        "median_planar_velocity_rmse_lte_0_45": payload[
+            "planar_velocity_tracking_rmse"
+        ]["median_m_s"] <= 0.45,
+        "median_yaw_rate_rmse_lte_0_35": payload["yaw_rate_tracking_rmse"][
+            "median_rad_s"
+        ] <= 0.35,
+        "all_values_finite": invalid_episodes == 0,
+    }
+    payload["soccer_command_gates"] = soccer_command_gates
+    payload["soccer_command_gate_passed"] = all(soccer_command_gates.values())
 
     rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     if args.output:
