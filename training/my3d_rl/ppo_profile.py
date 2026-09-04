@@ -297,6 +297,31 @@ PROFILES = {
         factory_kind="legacy_teacher",
         policy_contract="run_policy_v2",
     ),
+    # Checkpoint-compatible football continuation.  The historical v2 profile
+    # inherited an adaptive-KL lower bound above its nominal learning rate,
+    # allowing the effective rate to rise by almost one order of magnitude.
+    # Keep the exact actor layout while bounding updates tightly enough to
+    # preserve the straight gait during axis-aligned command training.
+    "legacy_phase_soccer_v3": PpoProfile(
+        name="legacy_phase_soccer_v3",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=2,
+        discounting=0.995,
+        entropy_cost=5.0e-4,
+        learning_rate=2.0e-6,
+        normalize_observations=False,
+        adaptive_kl=True,
+        factory_kind="legacy_teacher",
+        policy_contract="run_policy_v2",
+        desired_kl=0.003,
+        learning_rate_min=5.0e-7,
+        learning_rate_max=5.0e-6,
+    ),
     # Conservative reference-motion transfer profile.  Brax defaults the
     # adaptive-KL lower bound to 1e-5, which silently doubles the v2 profile's
     # nominal learning rate.  This version makes the bounds explicit, reduces

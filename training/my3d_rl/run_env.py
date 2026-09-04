@@ -103,6 +103,7 @@ def default_config() -> config_dict.ConfigDict:
         gait_frequency=[1.0, 2.0],
         swing_period=0.20,
         stand_probability=0.2,
+        axis_aligned_command_probability=0.0,
         command_resample_steps=500,
         fixed_command=[0.0, 0.0, 0.0],
         use_fixed_command=False,
@@ -172,6 +173,12 @@ class DirectionalRun(mjx_env.MjxEnv):
         super().__init__(config, config_overrides)
         self.prefix = prefix
         self._resource_root = resource_root
+        if not 0.0 <= self._config.stand_probability <= 1.0:
+            raise ValueError("stand_probability must be in [0, 1]")
+        if not 0.0 <= self._config.axis_aligned_command_probability <= 1.0:
+            raise ValueError("axis_aligned_command_probability must be in [0, 1]")
+        if self._config.command_resample_steps < 1:
+            raise ValueError("command_resample_steps must be positive")
         if self.contract.action_scale is None:
             raise ValueError("run policy contract must declare action_scale")
         if not np.isclose(self._config.action_scale, self.contract.action_scale):
@@ -911,7 +918,14 @@ class DirectionalRun(mjx_env.MjxEnv):
     def _sample_command(self, rng: jax.Array) -> jax.Array:
         if self._config.use_fixed_command:
             return jp.asarray(self._config.fixed_command)
-        rng_x, rng_y, rng_yaw, rng_stand = jax.random.split(rng, 4)
+        (
+            rng_x,
+            rng_y,
+            rng_yaw,
+            rng_stand,
+            rng_axis_gate,
+            rng_axis_index,
+        ) = jax.random.split(rng, 6)
         command = jp.array(
             [
                 jax.random.uniform(
@@ -931,6 +945,21 @@ class DirectionalRun(mjx_env.MjxEnv):
                 ),
             ]
         )
+        axis_index = jax.random.randint(rng_axis_index, (), 0, 3)
+        axis_command = jp.where(
+            axis_index == 0,
+            jp.array([command[0], 0.0, 0.0]),
+            jp.where(
+                axis_index == 1,
+                jp.array([0.0, command[1], 0.0]),
+                jp.array([0.0, 0.0, command[2]]),
+            ),
+        )
+        axis_aligned = (
+            jax.random.uniform(rng_axis_gate)
+            < self._config.axis_aligned_command_probability
+        )
+        command = jp.where(axis_aligned, axis_command, command)
         stand = jax.random.uniform(rng_stand) < self._config.stand_probability
         return jp.where(stand, jp.zeros(3), command)
 

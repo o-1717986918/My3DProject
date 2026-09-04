@@ -21,3 +21,13 @@ def test_soccer_omni_stage_trains_switches_and_full_planar_commands():
     assert stage["action_delay_max_steps"] == 1
     assert stage["reward.lateral_tracking"] < 0.0
     assert stage["reward.yaw_rate_error"] < 0.0
+
+
+def test_axis_aligned_soccer_stage_matches_frozen_command_suite():
+    stage = STAGES["soccer_omni_axis"]
+
+    assert stage["axis_aligned_command_probability"] == 0.5
+    assert stage["command_resample_steps"] == 100
+    assert stage["reward.tracking_yaw"] > STAGES["soccer_omni"][
+        "reward.tracking_yaw"
+    ]

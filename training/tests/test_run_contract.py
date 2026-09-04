@@ -118,6 +118,26 @@ def test_run_environment_uses_exact_control_period_and_safe_targets():
     np.testing.assert_allclose(decoded, np.asarray(env._nominal_physical))
 
 
+def test_axis_aligned_command_sampler_zeroes_two_command_axes():
+    env = DirectionalRun(
+        config_overrides={
+            "axis_aligned_command_probability": 1.0,
+            "stand_probability": 0.0,
+            "lin_vel_x": [-0.25, 1.65],
+            "lin_vel_y": [-0.45, 0.45],
+            "ang_vel_yaw": [-0.75, 0.75],
+        }
+    )
+    commands = np.asarray(
+        jax.vmap(env._sample_command)(jax.random.split(jax.random.PRNGKey(91), 256))
+    )
+
+    assert np.all(np.sum(np.abs(commands) > 1.0e-7, axis=1) <= 1)
+    assert np.any(np.abs(commands[:, 0]) > 1.0e-7)
+    assert np.any(np.abs(commands[:, 1]) > 1.0e-7)
+    assert np.any(np.abs(commands[:, 2]) > 1.0e-7)
+
+
 def test_phase_policy_contract_extends_actor_without_changing_actions():
     contract = load_policy_contract(PHASE_CONTRACT)
     env = DirectionalRun(contract=contract)
@@ -245,6 +265,19 @@ def test_motion_transfer_profile_has_explicit_conservative_kl_bounds():
     assert profile.learning_rate <= profile.learning_rate_max
     assert profile.learning_rate_max < 1.0e-5
     assert profile.desired_kl == 0.002
+
+
+def test_soccer_phase_profile_cannot_raise_learning_rate_above_bound():
+    historical = get_ppo_profile("legacy_phase_warmstart_v2")
+    profile = get_ppo_profile("legacy_phase_soccer_v3")
+
+    assert profile.policy_contract == historical.policy_contract
+    assert profile.factory_kind == historical.factory_kind
+    assert profile.policy_hidden_layer_sizes == historical.policy_hidden_layer_sizes
+    assert profile.learning_rate_min <= profile.learning_rate
+    assert profile.learning_rate <= profile.learning_rate_max
+    assert profile.learning_rate_max <= 5.0e-6
+    assert profile.desired_kl < historical.desired_kl
 
 
 def test_soccer_motion_v4_resume_is_conservative_and_checkpoint_compatible():

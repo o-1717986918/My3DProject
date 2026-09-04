@@ -237,6 +237,39 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.pose": -0.03,
         "reward.fall": -80.0,
     },
+    # The first broad soccer_omni run almost never sampled an exact straight,
+    # pure lateral or pure-yaw command and consequently did not improve the
+    # frozen command suite.  This curriculum puts half of non-stand samples on
+    # one command axis and uses the conservative soccer checkpoint profile.
+    "soccer_omni_axis": {
+        "lin_vel_x": [-0.25, 1.65],
+        "lin_vel_y": [-0.45, 0.45],
+        "ang_vel_yaw": [-0.75, 0.75],
+        "gait_frequency": [1.0, 2.0],
+        "stand_probability": 0.20,
+        "axis_aligned_command_probability": 0.50,
+        "command_resample_steps": 100,
+        "reset_joint_noise": 0.035,
+        "reset_root_velocity_noise": 0.06,
+        "reset_yaw_range": 0.15,
+        "push_enable": True,
+        "push_interval_steps": 150,
+        "push_magnitude": [0.03, 0.15],
+        "action_delay_max_steps": 1,
+        "reward.tracking_linear": 6.0,
+        "reward.tracking_yaw": 5.0,
+        "reward.upright": 1.5,
+        "reward.height": 1.5,
+        "reward.alive": 0.5,
+        "reward.lateral_tracking": -3.0,
+        "reward.yaw_rate_error": -3.0,
+        "reward.vertical_velocity": -0.40,
+        "reward.angular_xy": -0.25,
+        "reward.action_rate": -0.04,
+        "reward.action_acceleration": -0.015,
+        "reward.pose": -0.04,
+        "reward.fall": -100.0,
+    },
 }
 
 

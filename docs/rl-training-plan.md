@@ -332,6 +332,15 @@ Walk/fast-walk -> precision approach -> neutral settle
 集上报告最差值，不能再由单一 1.5 m/s 直线结果选出。评测入口为
 `training/tools/evaluate_run_command_suite.py`。
 
+首个 500 万步 broad curriculum 位于
+`/home/win98/rl_runs/run-soccer-omni-s20260951-v1`。MJWarp 随机命令评估的跌倒率
+由 28.1% 降到 12.5%，但两个候选的精确 CPU 命令集仍是相同的 5/8，故明确拒绝
+挂载。根因是连续三轴均匀采样几乎不产生纯直行、纯横移或纯转向命令，同时旧
+`legacy_phase_warmstart_v2` 的 adaptive-KL 下限高于名义学习率，更新实际放大。
+下一批使用 `soccer_omni_axis`（50% 轴对齐命令）和
+`legacy_phase_soccer_v3`（`5e-7..5e-6` 学习率、较小 KL）从冻结运行时 checkpoint
+重新开始，而不是在拒绝模型上继续。
+
 ### R：接球与 first touch
 
 先完成 D2 的接球意图和来球轨迹预测，再建立确定性接球姿态。只有失败主要来自

@@ -142,6 +142,22 @@ left/right turn. It reports the worst upright completion, planar velocity RMSE
 and yaw-rate RMSE; every command must pass before the candidate can replace
 the retained runtime model.
 
+The first broad `soccer_omni` run is a rejected baseline: random-command fall
+rate improved, but the frozen CPU suite stayed at 5/8. The follow-up must start
+again from the retained phase-v2 checkpoint and use axis-aligned sampling plus
+the bounded adaptive-KL profile:
+
+```bash
+PYTHONPATH=training XLA_PYTHON_CLIENT_PREALLOCATE=false \
+  python training/tools/train_run.py \
+  --stage soccer_omni_axis --impl warp --num-envs 128 \
+  --num-timesteps 5000000 --seed 20260991 --num-evals 6 \
+  --num-eval-envs 32 --network-profile legacy_phase_soccer_v3 \
+  --restore-checkpoint \
+  /home/win98/rl_runs/run-phase-v2-formal-s71-20260831-01/checkpoints/000005898240 \
+  --run-dir /home/win98/rl_runs/run-soccer-omni-axis-s20260991-v1
+```
+
 Export and verify a v2 checkpoint:
 
 ```bash
