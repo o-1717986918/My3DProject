@@ -68,11 +68,11 @@
 
 | 能力 | 启用方式 | 证据 | 限制与结论 |
 | --- | --- | --- | --- |
-| `FastWalkV2` 高速行走 | `--enable-fast-walk --fast-walk-model <path>`；比赛脚本对应 `APOLLO_ENABLE_FAST_WALK=1` | 指定候选 CPU 32/32 直立、中位速度 1.499 m/s；7v7 调用链可运行 | 10 秒横向漂移中位 5.452 m，服务器起身次数偏高；已接线但非默认、不能称为跑步 |
-| 残差表目标传球 | `--enable-parameterized-kick`；脚本对应 `APOLLO_ENABLE_PARAMETERIZED_KICK=1` | 152/153 条件表的精确评估三种子约 94.7%–96.3% | 服务器保存结果的实际出球仍弱；仅实验传球，默认关闭 |
+| `FastWalkV2` 高速行走 | 源码树 WSL 启动脚本默认传入 `--enable-fast-walk --fast-walk-model <path>` | 指定候选 CPU 32/32 直立、中位速度 1.499 m/s；7v7 调用链可运行 | 10 秒横向漂移中位 5.452 m，服务器起身次数偏高；已默认启用但仍有运行时门控和稳定步态回退，不能称为跑步 |
+| 残差表目标传球 | 源码树 WSL 启动脚本默认传入 `--enable-parameterized-kick` | 152/153 条件表的精确评估三种子约 94.7%–96.3% | 服务器保存结果的实际出球仍弱；作为 learned kick 不匹配/失败时的实验回退 |
 | 程序化 `DribbleTouch` | 当前工作树中同一参数化踢球开关；AP 无传球提交时可发出短触 | 精确 MuJoCo 球位扰动 20/20；一次干净服务器事件约前进 0.831 m、横向 0.016 m、方向误差约 1.08°、无起身 | 只有右脚、近零角度和一个 0.55 m 锚点；资产与 C++ runner 尚未提交，服务器只证明一次触球 |
-| 学习目标传球 runner | `--enable-parameterized-kick --shadow-learned-kick --learned-kick-model <path>`；主动实验把 shadow 换为 `--enable-learned-kick` | `kick_policy_v3` 的 98→23 观测、推理、残差解码、限位和同周期回退已接通；外部 r2 ONNX 加载/推理通过 | r2 冻结评估仅 27/92 且 1 次跌倒，只允许 shadow 或显式实验；不覆盖证据更强的残差/程序化默认回退 |
-| 目标动作安全拒绝 | 参数化动作默认关闭，或请求超出共享包线 | 运动层返回 `RejectedTargetedKickHold` | 已实现且正确；不会把目标传球静默变成固定前踢 |
+| 学习目标传球 runner | 源码树 WSL 启动脚本默认 active；可用 `APOLLO_LEARNED_KICK_MODE=shadow` 改为只推理 | `kick_policy_v3` 的 98→23 观测、推理、残差解码、限位和同周期回退已接通；外部 r2 ONNX 加载/推理通过 | r2 冻结评估仅 27/92 且 1 次跌倒；主动执行被限制在实际固定 2 m 训练切片，其他请求不覆盖残差/程序化回退 |
+| 目标动作安全拒绝 | 直接运行二进制/保守配置时参数化动作关闭，或请求超出共享包线 | 运动层返回 `RejectedTargetedKickHold` | 已实现且正确；不会把目标传球静默变成固定前踢 |
 
 当前工作树验证：
 
@@ -84,6 +84,8 @@
   一次完整 98→23 推理；
 - 7v7 shadow 启动样本 14/14 客户端完成连接、入场和退出，但旧定点场景未产生
   `KickCommand`，因此只能证明进程级加载，不能写成比赛内 shadow 已触发；
+- 全能力默认启动的 450-cycle 7v7 为 14/14 干净退出、253 个 FastWalkV2
+  采样、98 个起身采样、零非法防守；自然比赛仍未进入 learned kick 窄包线；
 - 程序化短触资产仍是 `server_status: contact_observed`，不是正式晋级状态。
 
 ### 3.3 只有接口、没有实际动作

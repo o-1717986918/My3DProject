@@ -148,34 +148,38 @@ export MATCH_REQUIRE_FAST_WALK=1
 scripts/run_web_match.sh 30000
 ```
 
-This remains an opt-in experimental capability, not the packaged default. A
+This remains an experimental, non-packaged capability, although the configured
+source-tree WSL launchers now explicitly enable it by default. A
 900-cycle combined 7v7 gate produced 1,374 `FastWalkV2` status samples, 25
 parameterized-kick samples, 210 pass-plan samples and one physical pass contact
 with 14/14 clean exits, but also 499 get-up samples at a two-cycle status
 interval. The deployment is complete enough for visual/domain-gap collection;
 its fall rate is not yet competition-release quality.
 
-### Mounted learned-kick path and all-capabilities profile
+### Default all-capabilities development profile
 
-The runtime accepts a `kick_policy_v3` `[1,98] -> [1,23]` actor in shadow or
-explicit active mode. The current best transition actor is only 27/92 on its
-frozen exact-CPU set with one fall, so the recommended profile evaluates it in
-shadow while the stronger residual/procedural path owns the joints:
+The WSL team, acceptance and browser-match launchers enable every currently
+executable capability by default: parameterized residual/procedural contact,
+the bounded learned-kick actor, and FastWalkV2. Stable walk/get-up remain the
+automatic fallback. The current transition actor is only 27/92 on its frozen
+exact-CPU set with one fall, so it receives joint ownership only in its narrow
+measured 2 m envelope; all other target contacts retain the stronger fallback.
 
 ```bash
-export APOLLO_ENABLE_PARAMETERIZED_KICK=1
-export APOLLO_LEARNED_KICK_MODE=shadow
-export APOLLO_LEARNED_KICK_MODEL="$HOME/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx"
-export APOLLO_ENABLE_FAST_WALK=1
-export APOLLO_FAST_WALK_MODEL="$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx"
 scripts/run_web_match.sh 30000
 ```
 
-This mounts every currently useful path: stable walk/get-up remain available,
-FastWalkV2 owns supported long forward travel, residual and procedural contact
-remain executable fallbacks, and the learned kick actor produces deployment
-evidence without silently replacing them. Set `APOLLO_LEARNED_KICK_MODE=active`
-only for controlled experiments; it is not a promotion claim.
+Set `APOLLO_LEARNED_KICK_MODE=shadow` to evaluate the actor without granting
+joint ownership. To recover the conservative baseline explicitly:
+
+```bash
+APOLLO_ENABLE_PARAMETERIZED_KICK=0 APOLLO_ENABLE_FAST_WALK=0 \
+  scripts/run_web_match.sh 30000
+```
+
+The launcher defaults resolve under the current WSL user's `$HOME/rl_runs`.
+The binary itself and portable competition package do not silently acquire
+machine-local training dependencies.
 
 ## Package
 

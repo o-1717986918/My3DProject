@@ -22,6 +22,14 @@ server_pid=
 player_pids=()
 client_strategy_args=()
 server_time_args=()
+parameterized_kick_mode=${APOLLO_ENABLE_PARAMETERIZED_KICK:-1}
+learned_kick_mode=${APOLLO_LEARNED_KICK_MODE:-}
+if [[ -z "$learned_kick_mode" ]]; then
+    learned_kick_mode=$(
+        [[ "$parameterized_kick_mode" == 1 ]] && echo active || echo off
+    )
+fi
+fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-1}
 
 cleanup() {
     for pid in "${player_pids[@]:-}"; do
@@ -72,18 +80,18 @@ case "${APOLLO_ENABLE_PASS_STRATEGY:-1}" in
     0) client_strategy_args+=(--disable-pass-strategy) ;;
     *) echo "APOLLO_ENABLE_PASS_STRATEGY must be 0 or 1" >&2; exit 2 ;;
 esac
-case "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" in
+case "$parameterized_kick_mode" in
     1) client_strategy_args+=(--enable-parameterized-kick) ;;
     0) ;;
     *) echo "APOLLO_ENABLE_PARAMETERIZED_KICK must be 0 or 1" >&2; exit 2 ;;
 esac
-case "${APOLLO_LEARNED_KICK_MODE:-off}" in
+case "$learned_kick_mode" in
     active|shadow)
-        if [[ "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" != 1 ]]; then
+        if [[ "$parameterized_kick_mode" != 1 ]]; then
             echo "learned kick requires APOLLO_ENABLE_PARAMETERIZED_KICK=1" >&2
             exit 2
         fi
-        learned_kick_model=${APOLLO_LEARNED_KICK_MODEL:-}
+        learned_kick_model=${APOLLO_LEARNED_KICK_MODEL:-$HOME/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx}
         expected_sha=${APOLLO_LEARNED_KICK_SHA256:-b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1}
         if [[ -z "$learned_kick_model" || ! -f "$learned_kick_model" ]]; then
             echo "APOLLO_LEARNED_KICK_MODEL must name a kick_policy_v3 ONNX file" >&2
@@ -93,7 +101,7 @@ case "${APOLLO_LEARNED_KICK_MODE:-off}" in
             echo "APOLLO_LEARNED_KICK_MODEL failed the locked SHA-256 check" >&2
             exit 2
         fi
-        if [[ "${APOLLO_LEARNED_KICK_MODE}" == active ]]; then
+        if [[ "$learned_kick_mode" == active ]]; then
             client_strategy_args+=(--enable-learned-kick)
         else
             client_strategy_args+=(--shadow-learned-kick)
@@ -103,9 +111,9 @@ case "${APOLLO_LEARNED_KICK_MODE:-off}" in
     off) ;;
     *) echo "APOLLO_LEARNED_KICK_MODE must be off, shadow, or active" >&2; exit 2 ;;
 esac
-case "${APOLLO_ENABLE_FAST_WALK:-0}" in
+case "$fast_walk_mode" in
     1)
-        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-}
+        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx}
         expected_sha=c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b
         if [[ -z "$fast_walk_model" || ! -f "$fast_walk_model" ]]; then
             echo "APOLLO_FAST_WALK_MODEL must name the phase-v2 ONNX file" >&2

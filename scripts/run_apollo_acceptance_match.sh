@@ -31,6 +31,14 @@ pass_reassert_settle_s=0.5
 kickoff_command_delay=0.5
 kick_calibration_scenario=0
 procedural_dribble_scenario=0
+parameterized_kick_mode=${APOLLO_ENABLE_PARAMETERIZED_KICK:-1}
+learned_kick_mode=${APOLLO_LEARNED_KICK_MODE:-}
+if [[ -z "$learned_kick_mode" ]]; then
+    learned_kick_mode=$(
+        [[ "$parameterized_kick_mode" == 1 ]] && echo active || echo off
+    )
+fi
+fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-1}
 
 case "${APOLLO_ENABLE_PASS_STRATEGY:-1}" in
     1) ;;
@@ -123,7 +131,7 @@ if [[ "$procedural_dribble_scenario" == 1 &&
     exit 2
 fi
 
-case "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" in
+case "$parameterized_kick_mode" in
     1) client_strategy_args+=(--enable-parameterized-kick) ;;
     0) ;;
     *)
@@ -132,15 +140,15 @@ case "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" in
         ;;
 esac
 
-case "${APOLLO_LEARNED_KICK_MODE:-off}" in
+case "$learned_kick_mode" in
     active|shadow)
-        if [[ "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" != 1 ]]; then
+        if [[ "$parameterized_kick_mode" != 1 ]]; then
             echo "learned kick requires APOLLO_ENABLE_PARAMETERIZED_KICK=1" >&2
             exit 2
         fi
-        learned_kick_model=${APOLLO_LEARNED_KICK_MODEL:-}
-        # Current best transition candidate. It is mounted for shadow
-        # evidence and explicit experiments, not promoted as the default.
+        learned_kick_model=${APOLLO_LEARNED_KICK_MODEL:-$HOME/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx}
+        # Current best transition candidate. Active control remains bounded by
+        # LearnedKickRunner's narrow measured envelope and same-cycle fallback.
         learned_kick_sha256=${APOLLO_LEARNED_KICK_SHA256:-b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1}
         if [[ -z "$learned_kick_model" || ! -f "$learned_kick_model" ]]; then
             echo "APOLLO_LEARNED_KICK_MODEL must name a kick_policy_v3 ONNX file" >&2
@@ -150,7 +158,7 @@ case "${APOLLO_LEARNED_KICK_MODE:-off}" in
             echo "APOLLO_LEARNED_KICK_MODEL failed the locked SHA-256 check" >&2
             exit 2
         fi
-        if [[ "${APOLLO_LEARNED_KICK_MODE}" == active ]]; then
+        if [[ "$learned_kick_mode" == active ]]; then
             client_strategy_args+=(--enable-learned-kick)
         else
             client_strategy_args+=(--shadow-learned-kick)
@@ -165,14 +173,14 @@ case "${APOLLO_LEARNED_KICK_MODE:-off}" in
 esac
 
 if [[ "$procedural_dribble_scenario" == 1 &&
-      "${APOLLO_ENABLE_PARAMETERIZED_KICK:-0}" != 1 ]]; then
+      "$parameterized_kick_mode" != 1 ]]; then
     echo "procedural dribble scenario requires parameterized kick support" >&2
     exit 2
 fi
 
-case "${APOLLO_ENABLE_FAST_WALK:-0}" in
+case "$fast_walk_mode" in
     1)
-        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-}
+        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx}
         fast_walk_sha256=c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b
         if [[ -z "$fast_walk_model" || ! -f "$fast_walk_model" ]]; then
             echo "APOLLO_FAST_WALK_MODEL must name the phase-v2 ONNX file" >&2

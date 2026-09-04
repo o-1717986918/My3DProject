@@ -65,6 +65,19 @@ verification:
     play_on_clients: 14
     kick_command_reached: false
     conclusion: model load is exercised but this fixture does not prove in-match shadow inference
+  all_capabilities_default_run:
+    path: /home/win98/rl_runs/runtime-mount/all-explicit-capabilities-s20260904-v1
+    cycles: 450
+    clean_exits: 14
+    connections: 14
+    joins: 14
+    play_on_clients: 14
+    illegal_defense: 0
+    fatal_errors: 0
+    fast_walk_samples: 253
+    getup_samples: 98
+    learned_kick_command_reached: false
+    conclusion: all external models loaded and FastWalk executed; no natural kick entered the learned envelope
 
 excluded_from_runtime_selection:
   kick_policy_v2_bc:
