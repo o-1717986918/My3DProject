@@ -14,7 +14,9 @@
 #include "src/world/world_state.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace app {
@@ -52,6 +54,8 @@ private:
     std::string last_active_motion_{"Neutral"};
     behavior::SkillExecutionStatus last_execution_status_{
         behavior::SkillExecutionStatus::Running};
+    std::uint64_t next_execution_request_id_{1U};
+    std::optional<decision::ExecutionFeedback> pending_execution_feedback_;
 };
 
 }  // namespace app

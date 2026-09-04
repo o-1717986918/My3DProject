@@ -13,8 +13,10 @@ implemented, observable 3D match action. During `PlayOn`, the attacking player
 can generate direct and one-metre leading-pass candidates, reject physically
 or tactically unsafe candidates, announce the selected target, wait for the
 receiver's readiness message, align behind the ball, and issue a typed
-targeted-pass command. The previous forward-contact action remains the
-same-cycle fallback.
+targeted-pass command. An unsupported or rejected targeted request is now
+converted to a neutral no-contact hold at the motion boundary; the previous
+forward-contact macro is available only when the strategy explicitly requests
+the fixed-contact capability.
 
 The delivered loop is:
 
@@ -69,8 +71,9 @@ Strategy code is isolated in `runtime/apollo/src/strategy/` and compiled as
   target, pass type, requested speed, predicted times, interception margin,
   utility, and confidence.
 - `KickCommand` carries the target, requested speed, receiver, action ID,
-  sequence ID, and exact `KickMode`. A default command still means the former
-  safe forward contact.
+  sequence ID, exact `KickMode`, and (for restarts) an epoch/revision pair.
+  A default command still means the former safe forward contact, while an
+  invalid targeted request is rejected into a neutral no-contact hold.
 - `TacticalState` records possession, phase, pressure proxies, score, and time.
 - The initial ball model uses the measured 1.43 m/s contact speed, 0.08 m/s²
   rolling deceleration, and 0.20 m/s minimum controlled speed. These are seed
@@ -85,10 +88,10 @@ Strategy code is isolated in `runtime/apollo/src/strategy/` and compiled as
   dash cycles or ball decay.
 - Candidate ordering has explicit tie-breaks and a stable quantized action ID.
   The minimum selected utility is 1.0.
-- Team communication remains exactly eight bytes. Version 2 multiplexes the
-  original state packet with checksummed `Proposed` and `Ready` pass intents;
-  target, sequence, receiver, speed, and ETA are quantized. Intent freshness is
-  bounded to 30 cycles.
+- Team communication remains exactly eight bytes. Version 3 multiplexes the
+  original state packet with checksummed pass lifecycle intents; the packet
+  identifies passer/receiver authorship, lifecycle state, target, sequence,
+  speed, and ETA. Intent freshness is bounded to 30 cycles.
 - Before contact, the passer cancels or replans if the receiver is invalid or
   fallen, the target leaves the field, the ball moves more than 0.75 m from the
   planned start, or the receiver moves more than 1.25 m from a direct target
@@ -98,6 +101,13 @@ Strategy code is isolated in `runtime/apollo/src/strategy/` and compiled as
 - Telemetry includes score/time, phase, possession, candidate and rejection
   counts, pass type, action/sequence IDs, receiver, ready state, target,
   interception margin, utility, and exact kick mode.
+
+The currently shipped residual table narrows the experimental targeted-pass
+execution envelope to a 1.45--2.55 m target, +/-2 degrees, and 1.43 m/s. The
+candidate generator still evaluates the larger tactical 1.5--8.0 m space, but
+the capability registry prevents a commitment outside the measured residual
+envelope. Such a candidate is retained as a diagnostic rejection rather than
+silently becoming a fixed forward contact.
 
 ## Verification evidence
 
@@ -139,6 +149,21 @@ This evidence validates command-to-contact wiring, not useful pass range or
 receiver completion. The current fixed contact macro is weak and variable; it
 does not yet satisfy the roadmap's 2--5 m corridor or 16/20 completion gates.
 
+After the residual envelope was made explicit, the in-envelope 2 m scenario
+was rerun on 2026-09-04:
+
+```bash
+APOLLO_ENABLE_PARAMETERIZED_KICK=1 MATCH_PASS_SCENARIO=1 \
+  MATCH_PARAMETERIZED_KICK_SCENARIO=1 MATCH_REQUIRE_PASS=1 \
+  MATCH_REQUIRE_KICK=1 APOLLO_STATUS_INTERVAL=5 \
+  scripts/run_apollo_acceptance_match.sh 900
+```
+
+It completed 14/14 agents cleanly with zero server errors or illegal defense,
+12 parameterized-kick samples, 18 Ready samples, and one measured pass-contact
+event. The out-of-envelope 3.65 m fixture correctly produced no targeted kick;
+that is an intentional safety rejection, not a failed fixed-kick fallback.
+
 To inspect a preserved run:
 
 ```bash
@@ -146,14 +171,31 @@ conda run -n my3d-team python scripts/analyze_apollo_pass.py \
   /tmp/my3d-pass-scenario-final/My3D-*.log
 ```
 
-## Deferred strategy work
+## Current strategy closure and deferred work
 
-The current implementation deliberately defers through passes, explicit
-`Committed/Executed/Cancelled/Expired` packets, receiver first touch, pass
-outcome ownership, shot/dribble/clear comparison in one selector, support and
-mark assignments, low-pressure backward-pass suppression, decision replay,
-and swapped-side multi-match A/B statistics. Those items stay in the staged
-roadmap; none should be inferred from `TargetedPass` telemetry alone.
+The subsequent full-team increment is now wired into the decision tree. A
+single deterministic `TeamPlan` is generated from the complete role
+assignment, with support/unmark candidates, pressure/cover, one-owner
+interception, paired centre-back marking, passing-lane blocks, and goalkeeper
+goal-line interception. Set plays are coordinated by `RestartCoordinator`
+with taker election, receiver positioning, alignment, execution feedback,
+release verification, one bounded fallback, and post-release lockout. These
+paths are covered by the 12-test CTest suite and a 600-cycle 7v7 gate.
+
+The current implementation deliberately does not claim useful physical
+targeted passes: the retained fixed contact has produced only 0.186--0.644 m
+in preserved trials, while the parameterized kick remains opt-in and
+experimental. It also does not claim shot/clear capability or receiver first
+touch until those skills have physical outcome evidence.
+
+The current implementation deliberately defers through passes, pass-outcome
+ownership, receiver first touch, shot/dribble/clear comparison in one
+selector, score/time risk modes, low-pressure backward-pass suppression,
+decision replay, and swapped-side multi-match A/B statistics. The lifecycle
+enum and packet authorship are present, but `Committed/Executed/ReceiverZone/
+Received/Intercepted/Out/Cancelled/Expired` transitions still need to be
+driven by physical ball observations rather than inferred from a command.
+None should be inferred from `TargetedPass` telemetry alone.
 
 ## Training requirements after this delivery
 

@@ -17,6 +17,7 @@ world::WorldSnapshot make_snapshot(int player_number) {
     snapshot.play_mode_group = world::PlayModeGroup::Other;
     snapshot.self.position_m = {0.0, 0.0, 0.8};
     snapshot.ball.visible = true;
+    snapshot.ball.position_valid = true;
     snapshot.ball.position_m = {0.5, -0.25, 0.11};
     return snapshot;
 }
@@ -64,6 +65,16 @@ int main() {
 
     receiver.ingest(proposed, 10);
     receiver_snapshot.team_comm_snapshot = receiver.make_snapshot(10);
+    const auto premature = receiver.make_packet(receiver_snapshot, 4);
+    if (premature.kind != comm::TeamCommPacketKind::State) {
+        std::cerr << "receiver acknowledged before reaching the target\n";
+        return 1;
+    }
+    receiver_snapshot.self.position_m = {4.0, 1.0, 0.8};
+    const double ball_heading = std::atan2(-1.25, -3.5);
+    receiver_snapshot.self.orientation_wxyz = {
+        std::cos(ball_heading * 0.5), 0.0, 0.0,
+        std::sin(ball_heading * 0.5)};
     const auto ready = comm::TeamCommCodec::decode(
         comm::TeamCommCodec::encode(
             receiver.make_packet(receiver_snapshot, 4)));

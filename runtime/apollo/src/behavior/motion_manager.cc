@@ -37,7 +37,9 @@ MotionStepResult MotionManager::step(
     bool reset) {
     if (std::holds_alternative<decision::BeamCommand>(command)) {
         reset_get_up_state();
-        return {false, "BeamBypass", {}, SkillExecutionStatus::Completed};
+        return {
+            false, "BeamBypass", {}, SkillExecutionStatus::Completed,
+            decision::MotionRequestKind::Unknown};
     }
 
     if (get_up_phase_ != GetUpPhase::Idle) {
@@ -50,7 +52,9 @@ MotionStepResult MotionManager::step(
         return {
             true,
             result.fast_walk_active ? "FastWalkV2" : "Walk",
-            result.joint_targets};
+            result.joint_targets,
+            SkillExecutionStatus::Running,
+            decision::MotionRequestKind::Walk};
     }
 
     if (const auto* kick = std::get_if<decision::KickCommand>(&command)) {
@@ -61,14 +65,19 @@ MotionStepResult MotionManager::step(
     if (std::holds_alternative<decision::NeutralCommand>(command)) {
         reset_get_up_state();
         const auto result = neutral_runner_.step(reset, snapshot.server_time);
-        return {true, "Neutral", result.joint_targets};
+        return {
+            true, "Neutral", result.joint_targets,
+            SkillExecutionStatus::Running,
+            decision::MotionRequestKind::Neutral};
     }
 
     if (std::holds_alternative<decision::GetUpCommand>(command)) {
         return step_get_up(snapshot, reset);
     }
 
-    return {false, "Idle", {}, SkillExecutionStatus::Rejected};
+    return {
+        false, "Idle", {}, SkillExecutionStatus::Rejected,
+        decision::MotionRequestKind::Unknown};
 }
 
 MotionStepResult MotionManager::step_kick(
@@ -94,7 +103,8 @@ MotionStepResult MotionManager::step_kick(
             true,
             "RejectedTargetedKickHold",
             hold.joint_targets,
-            SkillExecutionStatus::Rejected};
+            SkillExecutionStatus::Rejected,
+            decision::MotionRequestKind::Kick};
     }
 
     const double elapsed = std::max(0.0, snapshot.server_time - kick_start_time_);
@@ -143,6 +153,7 @@ MotionStepResult MotionManager::step_kick(
         macro_complete
             ? SkillExecutionStatus::Completed
             : SkillExecutionStatus::Running,
+        decision::MotionRequestKind::Kick,
     };
 }
 
@@ -170,7 +181,9 @@ MotionStepResult MotionManager::step_get_up(
     if (result.upright || timed_out) {
         reset_get_up_state();
     }
-    return {true, "GetUpRL", result.joint_targets, status};
+    return {
+        true, "GetUpRL", result.joint_targets, status,
+        decision::MotionRequestKind::GetUp};
 }
 
 void MotionManager::enter_get_up_phase(

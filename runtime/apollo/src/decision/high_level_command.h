@@ -49,6 +49,8 @@ struct KickCommand {
     std::optional<int> receiver_player_number;
     std::uint32_t action_id{0U};
     std::uint8_t sequence_id{0U};
+    std::optional<std::uint64_t> restart_epoch;
+    std::optional<std::uint32_t> restart_revision;
     KickMode mode{KickMode::ForwardContact};
 };
 /// Requests the neutral standing keyframe.

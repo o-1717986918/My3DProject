@@ -19,6 +19,11 @@ public:
     static constexpr const char* kKeyRolePos = "role_pos";
     static constexpr const char* kKeyStrategyPlan = "strategy_plan";
     static constexpr const char* kKeySelectedCooperativeAction = "selected_cooperative_action";
+    static constexpr const char* kKeyTacticalTarget = "tactical_target";
+    static constexpr const char* kKeyTeamPlan = "team_plan";
+    static constexpr const char* kKeyRoleAssignments = "role_assignments";
+    static constexpr const char* kKeyRestartDecision = "restart_decision";
+    static constexpr const char* kKeyTacticalRiskMode = "tactical_risk_mode";
 
     template <typename T>
     void set(const std::string& key, T value) {

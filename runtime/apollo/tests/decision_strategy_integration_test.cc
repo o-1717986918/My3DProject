@@ -30,7 +30,7 @@ world::WorldSnapshot make_open_pass_snapshot() {
     auto& receiver = snapshot.teammates[5];
     receiver.seen = true;
     receiver.last_seen_time = snapshot.server_time;
-    receiver.position_m = {4.0, 0.0, 0.8};
+    receiver.position_m = {1.0, 0.0, 0.8};
     return snapshot;
 }
 
@@ -86,7 +86,7 @@ int main() {
     snapshot.server_time = 1.01;
     snapshot.teammates[5].seen = true;
     snapshot.teammates[5].last_seen_time = snapshot.server_time;
-    snapshot.teammates[5].position_m = {4.0, 0.0, 0.8};
+    snapshot.teammates[5].position_m = {1.0, 0.0, 0.8};
     snapshot.self.position_m = {-0.35, 0.3, 0.8};
     const decision::HighLevelCommand still_waiting = behavior.make_command(
         snapshot, blackboard, role_manager, true, true);
@@ -145,6 +145,25 @@ int main() {
         fallback_kick != nullptr &&
         fallback_kick->mode != decision::KickMode::ForwardContact) {
         std::cerr << "disabled strategy emitted a strategy-dependent kick\n";
+        return 1;
+    }
+
+    decision::APBehavior risk_behavior;
+    decision::Blackboard risk_blackboard;
+    risk_blackboard.set(
+        decision::Blackboard::kKeyTacticalTarget,
+        decision::TacticalTarget{
+            decision::TacticalDuty::Cover,
+            {-3.0, 1.0},
+            std::array<double, 2>{0.0, 0.0},
+            0,
+            0.8});
+    static_cast<void>(risk_behavior.make_command(
+        make_open_pass_snapshot(), risk_blackboard, role_manager, false));
+    if (risk_blackboard.get<decision::TacticalTarget>(
+            decision::Blackboard::kKeyTacticalTarget).duty !=
+        decision::TacticalDuty::Cover) {
+        std::cerr << "AP behavior overwrote the team tactical duty\n";
         return 1;
     }
     return 0;

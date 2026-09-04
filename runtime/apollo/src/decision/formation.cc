@@ -10,16 +10,9 @@
 //   * make_open_play_shape computes open-play targets dynamically from the
 //     ball position.
 //
-// --- Base-version scope ---
-// make_open_play_shape is intentionally simple so other teams can fork and
-// customize. It is NOT aware of:
-//   * game phase (no Defense / Balanced / Attack mode switch — see git
-//     history for the removed ~110-line ShapeMode-driven version),
-//   * opponent positions,
-//   * ball velocity.
-// FormationContext exposes only ball_position_m, play_mode, field_length_m,
-// and field_width_m. If you need any of the above signals, add them back to
-// FormationContext and consume them inside make_open_play_shape.
+// Open-play shape uses the phase and late-match risk mode supplied by the
+// tactical state. Opponent positions and ball velocity remain intentionally in
+// TeamTactics, where they can be assigned consistently across all players.
 
 #include "src/decision/formation.h"
 #include "src/decision/field_geometry.h"
@@ -38,20 +31,6 @@ using field_geometry::Position2;
 
 constexpr double kRoleBallClearanceM = 1.2;
 constexpr double kStBallClearanceM = 2.4;            // ST needs more room to turn / receive a pass
-
-// CB pair flanks the ball at kCbDistFromBallM along the ball→own_goal axis,
-// split kCbLateralOffsetM perpendicular to each side.
-constexpr double kCbDistFromBallM = 3.0;
-constexpr double kCbLateralOffsetM = 4.0;
-
-// CBM and CDM on the ball→own_goal axis, between the ball and the GK.
-constexpr double kCbmDistFromBallM = 4.0;
-constexpr double kCdmDistFromBallM = 7.0;
-
-// ST sits this far ahead of the ball on the ball→opponent-goal axis, with a
-// small lateral offset to avoid standing exactly on the ball's line.
-constexpr double kStAttackDepthM = 3.0;
-constexpr double kStLateralOffsetM = 1.3;
 
 constexpr std::size_t kRoleCbl = static_cast<std::size_t>(RoleManager::ROLE_CBL);
 constexpr std::size_t kRoleCbr = static_cast<std::size_t>(RoleManager::ROLE_CBR);
@@ -165,25 +144,45 @@ Formation::RolePositions make_open_play_shape(const FormationContext& ctx) {
     const Position2 u = math::vec2_unit_or(math::vec2_sub(ball, own_goal), {1.0, 0.0});
     const Position2 gk_to_ball = math::vec2_unit_or(math::vec2_sub(ball, goalkeeper), u);
 
-    // CBL/CBR flank the ball at kCbDistFromBallM along the ball→own_goal axis,
+    const bool defending = ctx.phase == strategy::TacticalPhase::Defend;
+    const bool transition = ctx.phase == strategy::TacticalPhase::Transition;
+    const bool protect_lead =
+        ctx.risk_mode == strategy::TacticalRiskMode::ProtectLead;
+    const bool chase_goal =
+        ctx.risk_mode == strategy::TacticalRiskMode::ChaseGoal;
+    const double cb_dist_from_ball = defending ? 3.8 :
+        (transition ? 3.4 : 3.0);
+    const double cb_lateral_offset = defending ? 4.6 :
+        (chase_goal ? 3.6 : 4.0);
+    const double cbm_dist_from_ball = defending ? 4.8 :
+        (chase_goal ? 3.5 : 4.0);
+    const double cdm_dist_from_ball = defending ? 8.0 : 7.0;
+    const double st_attack_depth = defending ? 1.5 :
+        (protect_lead ? 2.0 : (chase_goal ? 4.5 :
+            (transition ? 2.3 : 3.0)));
+    const double st_lateral_offset = defending ? 1.0 :
+        (chase_goal ? 1.8 : 1.3);
+
+    // CBL/CBR flank the ball at a phase-dependent distance along the
+    // ball→own_goal axis,
     // one on each perpendicular side.
     const Position2 cb_anchor = point_from_anchor_toward(
-        ball, own_goal, u, kCbDistFromBallM, half_length, half_width);
+        ball, own_goal, u, cb_dist_from_ball, half_length, half_width);
     const Position2 cb_lateral = math::perpendicular_left(u);
     Position2 cbl = clamp_to_field(
-        math::vec2_add(cb_anchor, math::vec2_scale(cb_lateral, +kCbLateralOffsetM)),
+        math::vec2_add(cb_anchor, math::vec2_scale(cb_lateral, +cb_lateral_offset)),
         half_length, half_width);
     Position2 cbr = clamp_to_field(
-        math::vec2_add(cb_anchor, math::vec2_scale(cb_lateral, -kCbLateralOffsetM)),
+        math::vec2_add(cb_anchor, math::vec2_scale(cb_lateral, -cb_lateral_offset)),
         half_length, half_width);
     cbl = keep_clear_of_ball(cbl, ball, math::vec2_scale(gk_to_ball, -1.0), kRoleBallClearanceM, half_length, half_width);
     cbr = keep_clear_of_ball(cbr, ball, math::vec2_scale(gk_to_ball, -1.0), kRoleBallClearanceM, half_length, half_width);
 
     // CBM and CDM on the ball→own_goal axis, between the ball and the GK.
     Position2 cbm = point_from_anchor_toward(
-        ball, own_goal, u, kCbmDistFromBallM, half_length, half_width);
+        ball, own_goal, u, cbm_dist_from_ball, half_length, half_width);
     Position2 cdm = point_from_anchor_toward(
-        ball, own_goal, u, kCdmDistFromBallM, half_length, half_width);
+        ball, own_goal, u, cdm_dist_from_ball, half_length, half_width);
     cbm = keep_clear_of_ball(cbm, ball, math::vec2_scale(u, -1.0), kRoleBallClearanceM, half_length, half_width);
     cdm = keep_clear_of_ball(cdm, ball, math::vec2_scale(u, -1.0), kRoleBallClearanceM, half_length, half_width);
 
@@ -197,8 +196,8 @@ Formation::RolePositions make_open_play_shape(const FormationContext& ctx) {
     const double st_side = ball[1] >= 0.0 ? 1.0 : -1.0;
     Position2 st = clamp_to_field(
         math::vec2_add(
-            math::vec2_add(ball, math::vec2_scale(goal_dir, kStAttackDepthM)),
-            math::vec2_scale(goal_lateral, st_side * kStLateralOffsetM)),
+            math::vec2_add(ball, math::vec2_scale(goal_dir, st_attack_depth)),
+            math::vec2_scale(goal_lateral, st_side * st_lateral_offset)),
         half_length, half_width);
     st = keep_clear_of_ball(st, ball, math::vec2_scale(goal_lateral, st_side), kStBallClearanceM, half_length, half_width);
     avoid_goal_mouth(st, half_length);

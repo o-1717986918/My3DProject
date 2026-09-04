@@ -14,7 +14,7 @@ namespace comm {
 /// Schedules outgoing packets and maintains recent records from teammates.
 class TeamCommManager {
 public:
-    static constexpr std::uint8_t kProtocolVersion = 2U;
+    static constexpr std::uint8_t kProtocolVersion = 3U;
     static constexpr int kMaxRecordAgeCycles = 30;
 
     explicit TeamCommManager(const std::string& team_name);
@@ -30,9 +30,20 @@ public:
     TeamCommSnapshot make_snapshot(int current_server_cycle) const;
 
 private:
+    struct ReadyGateState {
+        int passer_player_number{0};
+        int receiver_player_number{0};
+        std::uint8_t sequence_id{0U};
+        double target_x_m{0.0};
+        double target_y_m{0.0};
+        double stable_since_s{0.0};
+    };
+
     std::uint8_t version_byte_;  // (team_hash << 4) | protocol_version
     std::unordered_map<int, TeamCommRecord> records_;
     std::unordered_map<int, PassIntentRecord> pass_intents_;
+    mutable std::optional<ReadyGateState> ready_gate_state_;
+    mutable bool sent_pass_intent_last_slot_{false};
 };
 
 }  // namespace comm

@@ -5,8 +5,10 @@
 
 #include "src/comm/team_comm_codec.h"
 #include "src/decision/role_behaviors.h"
+#include "src/decision/team_tactics.h"
 #include "src/math/math_utils.h"
 #include "src/server/action_encoder.h"
+#include "src/strategy/tactical_state.h"
 #include "src/world/frame_normalizer.h"
 
 #include <algorithm>
@@ -53,6 +55,7 @@ bool pass_ready(
     const strategy::CooperativeAction& action) {
     for (const auto& intent : snapshot.team_comm_snapshot.pass_intents) {
         if (intent.state == comm::PassIntentState::Ready &&
+            intent.sender_player_number == action.target_player_number &&
             intent.passer_player_number == snapshot.player_number &&
             intent.receiver_player_number == action.target_player_number &&
             intent.sequence_id == action.sequence_id) {
@@ -72,6 +75,31 @@ std::string_view kick_mode_name(const decision::HighLevelCommand& command) {
         case decision::KickMode::Clear: return "Clear";
     }
     return "None";
+}
+
+decision::ExecutionFeedback make_execution_feedback(
+    std::uint64_t request_id,
+    double server_time,
+    const behavior::MotionStepResult& result,
+    const decision::HighLevelCommand& command) {
+    decision::ExecutionFeedback feedback;
+    feedback.request_id = request_id;
+    feedback.server_time = server_time;
+    feedback.status = result.status;
+    feedback.request_kind = result.request_kind;
+
+    if (result.request_kind == decision::MotionRequestKind::Kick) {
+        const auto* kick = std::get_if<decision::KickCommand>(&command);
+        if (kick != nullptr) {
+            feedback.restart_epoch = kick->restart_epoch;
+            feedback.restart_revision = kick->restart_revision;
+        }
+        if (kick != nullptr && kick->mode == decision::KickMode::TargetedPass) {
+            feedback.cooperative_action_id = kick->action_id;
+            feedback.sequence_id = kick->sequence_id;
+        }
+    }
+    return feedback;
 }
 
 }  // namespace
@@ -136,7 +164,9 @@ std::string AgentApp::process_perception_message(const std::string& message) {
     world_state_.set_team_comm_snapshot(team_comm_manager_.make_snapshot(frame.server_cycle));
 
     const world::WorldSnapshot& snapshot = world_state_.snapshot();
-    const auto command = decision_manager_.decide(snapshot);
+    const auto command = decision_manager_.decide(
+        snapshot, pending_execution_feedback_);
+    pending_execution_feedback_.reset();
     const auto* kick_command = std::get_if<decision::KickCommand>(&command);
     const auto* selected_action =
         decision_manager_.selected_cooperative_action();
@@ -161,6 +191,9 @@ std::string AgentApp::process_perception_message(const std::string& message) {
         const auto motion_result = motion_manager_.step(snapshot, command, reset);
         last_active_motion_ = motion_result.active_motion;
         last_execution_status_ = motion_result.status;
+        pending_execution_feedback_ = make_execution_feedback(
+            next_execution_request_id_++, snapshot.server_time,
+            motion_result, command);
         if (motion_result.handled) {
             const auto motor_nodes = server::ActionEncoder::encode_motor_actions(motion_result.joint_targets, robot_model_);
             nodes.insert(nodes.end(), motor_nodes.begin(), motor_nodes.end());
@@ -190,6 +223,12 @@ std::string AgentApp::process_perception_message(const std::string& message) {
 
     if (config_.status_interval_cycles > 0U && frame.server_cycle >= 0 &&
         static_cast<std::size_t>(frame.server_cycle) % config_.status_interval_cycles == 0U) {
+        const auto* restart_decision = decision_manager_.blackboard().exists(
+                decision::Blackboard::kKeyRestartDecision)
+            ? &decision_manager_.blackboard().get<
+                  decision::RestartCoordinationDecision>(
+                  decision::Blackboard::kKeyRestartDecision)
+            : nullptr;
         const double self_yaw_deg =
             world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
                 snapshot.self.orientation_wxyz);
@@ -217,6 +256,67 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << " play_on=" << (snapshot.play_mode == world::PlayMode::PlayOn ? 1 : 0)
             << " motion=" << last_active_motion_
             << " execution=" << behavior::to_string(last_execution_status_)
+            << " execution_request_id="
+            << (pending_execution_feedback_.has_value()
+                    ? pending_execution_feedback_->request_id
+                    : 0U)
+            << " execution_kind="
+            << (pending_execution_feedback_.has_value()
+                    ? decision::to_string(
+                        pending_execution_feedback_->request_kind)
+                    : "Beam")
+            << " restart_phase="
+            << (restart_decision != nullptr
+                    ? decision::to_string(restart_decision->phase)
+                    : std::string_view{"Idle"})
+            << " restart_epoch="
+            << (restart_decision != nullptr &&
+                    restart_decision->plan.has_value()
+                    ? restart_decision->plan->epoch
+                    : 0U)
+            << " restart_revision="
+            << (restart_decision != nullptr &&
+                    restart_decision->plan.has_value()
+                    ? restart_decision->plan->revision
+                    : 0U)
+            << " restart_taker="
+            << (restart_decision != nullptr &&
+                    restart_decision->plan.has_value()
+                    ? restart_decision->plan->taker_player_number
+                    : 0)
+            << " duty="
+            << (decision_manager_.blackboard().exists(
+                    decision::Blackboard::kKeyTacticalTarget)
+                ? decision::to_string(
+                    decision_manager_.blackboard().get<decision::TacticalTarget>(
+                        decision::Blackboard::kKeyTacticalTarget).duty)
+                : std::string_view{"None"})
+            << " tactical_target_x="
+            << (decision_manager_.blackboard().exists(
+                    decision::Blackboard::kKeyTacticalTarget)
+                ? decision_manager_.blackboard().get<decision::TacticalTarget>(
+                    decision::Blackboard::kKeyTacticalTarget).position_m[0]
+                : 0.0)
+            << " tactical_target_y="
+            << (decision_manager_.blackboard().exists(
+                    decision::Blackboard::kKeyTacticalTarget)
+                ? decision_manager_.blackboard().get<decision::TacticalTarget>(
+                    decision::Blackboard::kKeyTacticalTarget).position_m[1]
+                : 0.0)
+            << " marked_opponent="
+            << (decision_manager_.blackboard().exists(
+                    decision::Blackboard::kKeyTacticalTarget)
+                ? decision_manager_.blackboard().get<decision::TacticalTarget>(
+                    decision::Blackboard::kKeyTacticalTarget)
+                    .marked_opponent_player_number
+                : 0)
+            << " risk_mode="
+            << (decision_manager_.blackboard().exists(
+                    decision::Blackboard::kKeyTacticalRiskMode)
+                ? strategy::to_string(
+                    decision_manager_.blackboard().get<strategy::TacticalRiskMode>(
+                        decision::Blackboard::kKeyTacticalRiskMode))
+                : std::string_view{"Balanced"})
             << " kick_mode=" << kick_mode_name(command)
             << " ball_visible=" << (snapshot.ball.visible ? 1 : 0)
             << " ball_position_valid=" << (snapshot.ball.position_valid ? 1 : 0)

@@ -34,11 +34,11 @@ ActionCapabilityRegistry::ActionCapabilityRegistry(bool enable_parameterized_kic
         SkillCapability::TargetedPass,
         enable_parameterized_kick ? CapabilityState::Experimental
                                    : CapabilityState::Unavailable,
-        decision::kick_contract::kMinimumTargetDistanceM,
-        decision::kick_contract::kMaximumTargetDistanceM,
-        decision::kick_contract::kMaximumTargetAngleDeg,
-        decision::kick_contract::kMinimumRequestedSpeedMps,
-        decision::kick_contract::kMaximumRequestedSpeedMps,
+        decision::kick_contract::kParameterizedPassMinimumTargetDistanceM,
+        decision::kick_contract::kParameterizedPassMaximumTargetDistanceM,
+        decision::kick_contract::kParameterizedPassMaximumTargetAngleDeg,
+        decision::kick_contract::kParameterizedPassRequestedSpeedMps,
+        decision::kick_contract::kParameterizedPassRequestedSpeedMps,
         true, SkillCapability::ForwardContact};
     envelopes_[index_of(SkillCapability::Shot)] = {
         SkillCapability::Shot, CapabilityState::Unavailable,

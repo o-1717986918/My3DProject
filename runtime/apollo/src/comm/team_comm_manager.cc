@@ -3,6 +3,9 @@
 
 #include "src/comm/team_comm_manager.h"
 
+#include "src/math/math_utils.h"
+#include "src/world/frame_normalizer.h"
+
 #include <cmath>
 #include <limits>
 
@@ -52,6 +55,9 @@ TeamCommPacket TeamCommManager::make_packet(
     if (outgoing_pass.has_value()) {
         packet.kind = TeamCommPacketKind::PassIntent;
         packet.pass_intent_state = PassIntentState::Proposed;
+        packet.pass_intent_author = PassIntentAuthor::Passer;
+        packet.pass_peer_player_number = static_cast<std::uint8_t>(
+            outgoing_pass->receiver_player_number);
         packet.passer_player_number = static_cast<std::uint8_t>(snapshot.player_number);
         packet.receiver_player_number = static_cast<std::uint8_t>(
             outgoing_pass->receiver_player_number);
@@ -74,10 +80,33 @@ TeamCommPacket TeamCommManager::make_packet(
         }
     }
     const bool upright = snapshot.self.position_m[2] >= world::kFallenHeightThresholdM;
-    if (proposed != nullptr && upright &&
+    bool receiver_ready = false;
+    if (proposed != nullptr && upright && snapshot.ball.position_valid) {
+        const std::array<double, 2> self{
+            snapshot.self.position_m[0], snapshot.self.position_m[1]};
+        const std::array<double, 2> target{
+            proposed->target_x_m, proposed->target_y_m};
+        const std::array<double, 2> ball{
+            snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+        const double yaw_deg =
+            world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+                snapshot.self.orientation_wxyz);
+        const double ball_heading_deg = math::vector_angle_deg(
+            math::vec2_sub(ball, self));
+        const double planar_speed_mps = math::norm2({
+            snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]});
+        receiver_ready =
+            math::planar_dist(self, target) <= 0.75 &&
+            std::abs(math::normalize_deg(ball_heading_deg - yaw_deg)) <= 25.0 &&
+            planar_speed_mps <= 0.35;
+    }
+    if (proposed != nullptr && receiver_ready &&
         snapshot.play_mode == world::PlayMode::PlayOn) {
         packet.kind = TeamCommPacketKind::PassIntent;
         packet.pass_intent_state = PassIntentState::Ready;
+        packet.pass_intent_author = PassIntentAuthor::Receiver;
+        packet.pass_peer_player_number = static_cast<std::uint8_t>(
+            proposed->passer_player_number);
         packet.passer_player_number = static_cast<std::uint8_t>(
             proposed->passer_player_number);
         packet.receiver_player_number = static_cast<std::uint8_t>(snapshot.player_number);

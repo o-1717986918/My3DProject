@@ -5,6 +5,7 @@
 
 #include "src/app/runtime_config.h"
 #include "src/decision/high_level_command.h"
+#include "src/decision/execution_feedback.h"
 #include "src/behavior/getup_runner.h"
 #include "src/behavior/kick_execution_profile.h"
 #include "src/behavior/kick_residual_runner.h"
@@ -19,21 +20,10 @@
 
 namespace behavior {
 
-enum class SkillExecutionStatus : std::uint8_t {
-    Running,
-    Completed,
-    Rejected,
-    TimedOut,
-};
+using SkillExecutionStatus = decision::ExecutionStatus;
 
 constexpr const char* to_string(SkillExecutionStatus status) {
-    switch (status) {
-        case SkillExecutionStatus::Running: return "Running";
-        case SkillExecutionStatus::Completed: return "Completed";
-        case SkillExecutionStatus::Rejected: return "Rejected";
-        case SkillExecutionStatus::TimedOut: return "TimedOut";
-    }
-    return "Rejected";
+    return decision::to_string(status);
 }
 
 /// Low-level targets selected for the current high-level command.
@@ -42,6 +32,8 @@ struct MotionStepResult {
     std::string active_motion;
     robot::JointTargets joint_targets;
     SkillExecutionStatus status{SkillExecutionStatus::Running};
+    decision::MotionRequestKind request_kind{
+        decision::MotionRequestKind::Unknown};
 };
 
 /// Selects and coordinates walk, neutral, and get-up motion runners.

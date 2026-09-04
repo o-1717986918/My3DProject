@@ -22,7 +22,7 @@ int main() {
     using namespace decision::kick_contract;
     const strategy::ActionCapabilityRegistry disabled(false);
     const strategy::ActionCapabilityRegistry enabled(true);
-    const auto nominal = make_pass(4.0, 1.43);
+    const auto nominal = make_pass(2.0, 1.43);
 
     if (disabled.executable(nominal, 0.0) ||
         !enabled.executable(nominal, 0.0)) {
@@ -31,20 +31,23 @@ int main() {
     }
 
     if (!enabled.executable(
-            make_pass(kMinimumTargetDistanceM, kMinimumRequestedSpeedMps),
-            -kMaximumTargetAngleDeg) ||
+            make_pass(kParameterizedPassMinimumTargetDistanceM,
+                      kParameterizedPassRequestedSpeedMps),
+            -kParameterizedPassMaximumTargetAngleDeg) ||
         !enabled.executable(
-            make_pass(kMaximumTargetDistanceM, kMaximumRequestedSpeedMps),
-            kMaximumTargetAngleDeg)) {
+            make_pass(kParameterizedPassMaximumTargetDistanceM,
+                      kParameterizedPassRequestedSpeedMps),
+            kParameterizedPassMaximumTargetAngleDeg)) {
         std::cerr << "valid targeted pass envelope boundary was rejected\n";
         return 1;
     }
 
     if (enabled.executable(make_pass(0.24, 1.43), 0.0) ||
-        enabled.executable(make_pass(8.01, 1.43), 0.0) ||
-        enabled.executable(make_pass(4.0, 0.79), 0.0) ||
-        enabled.executable(make_pass(4.0, 3.01), 0.0) ||
-        enabled.executable(nominal, 15.01)) {
+        enabled.executable(make_pass(
+            kParameterizedPassMaximumTargetDistanceM + 0.01, 1.43), 0.0) ||
+        enabled.executable(make_pass(2.0, 0.79), 0.0) ||
+        enabled.executable(make_pass(2.0, 3.01), 0.0) ||
+        enabled.executable(nominal, kParameterizedPassMaximumTargetAngleDeg + 0.01)) {
         std::cerr << "out-of-envelope targeted pass was accepted\n";
         return 1;
     }

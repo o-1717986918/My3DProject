@@ -126,5 +126,60 @@ int main() {
         std::cerr << "stale receiver position was not rejected\n";
         return 1;
     }
+
+    world::WorldSnapshot reach_race = open;
+    reach_race.self.position_m = {-1.0, 0.0, 0.8};
+    reach_race.self.orientation_wxyz = {0.0, 0.0, 0.0, 1.0};
+    reach_race.teammates[6].seen = true;
+    reach_race.teammates[6].position_m = reach_race.self.position_m;
+    reach_race.opponents[0].seen = true;
+    reach_race.opponents[0].last_seen_time = reach_race.server_time;
+    reach_race.opponents[0].position_m = {1.2, 0.0, 0.8};
+    const auto race_state = strategy::build_tactical_state(reach_race);
+    if (race_state.nearest_teammate_ball_distance_m >=
+            race_state.nearest_opponent_ball_distance_m ||
+        race_state.nearest_teammate_ball_time_s <=
+            race_state.nearest_opponent_ball_time_s ||
+        race_state.possession != strategy::PossessionOwner::Theirs) {
+        std::cerr << "possession ignored the reach-time race\n";
+        return 1;
+    }
+
+    world::WorldSnapshot risk_snapshot = open;
+    risk_snapshot.own_score = 1;
+    risk_snapshot.opponent_score = 0;
+    risk_snapshot.match_time_s = 299.0;
+    if (strategy::build_tactical_state(risk_snapshot).risk_mode !=
+        strategy::TacticalRiskMode::Balanced) {
+        std::cerr << "late-match threshold triggered too early\n";
+        return 1;
+    }
+    risk_snapshot.match_time_s = 300.0;
+    if (strategy::build_tactical_state(risk_snapshot).risk_mode !=
+        strategy::TacticalRiskMode::ProtectLead) {
+        std::cerr << "protect-lead mode was not selected\n";
+        return 1;
+    }
+    risk_snapshot.own_score = 0;
+    risk_snapshot.opponent_score = 1;
+    if (strategy::build_tactical_state(risk_snapshot).risk_mode !=
+        strategy::TacticalRiskMode::ChaseGoal) {
+        std::cerr << "chase-goal mode was not selected\n";
+        return 1;
+    }
+    strategy::TacticalRiskParameters custom_threshold;
+    custom_threshold.late_match_threshold_s = 120.0;
+    risk_snapshot.match_time_s = 119.9;
+    if (strategy::build_tactical_state(risk_snapshot, custom_threshold).risk_mode !=
+        strategy::TacticalRiskMode::Balanced) {
+        std::cerr << "custom late-match threshold was ignored\n";
+        return 1;
+    }
+    risk_snapshot.match_time_s = 120.0;
+    if (strategy::build_tactical_state(risk_snapshot, custom_threshold).risk_mode !=
+        strategy::TacticalRiskMode::ChaseGoal) {
+        std::cerr << "custom chase-goal threshold was ignored\n";
+        return 1;
+    }
     return 0;
 }

@@ -19,6 +19,9 @@ namespace {
 // held last tick. Equivalent to ~0.5 m of distance pull; small enough that a
 // genuinely closer slot still wins, large enough to break tie-induced flips.
 constexpr double kStickyBonusSqM = 0.25;
+// A fresh teammate broadcast is weaker than this process's last assignment,
+// but still nudges independently observing agents toward the same matching.
+constexpr double kCommRoleBonusSqM = 0.16;
 
 // Upper bound on permutation count. 7v7 has ≤5 free outfielders (5! = 120).
 // At 8 we are at 40 320 permutations — still ~0.5 ms at 50 Hz, marginal but
@@ -43,6 +46,9 @@ double evaluate_permutation(
         if (pn < previous_role_by_player.size() &&
             previous_role_by_player[pn] == role_id) {
             pair_cost -= kStickyBonusSqM;
+        }
+        if (player.comm_role == role_id) {
+            pair_cost -= kCommRoleBonusSqM;
         }
         total += pair_cost;
     }

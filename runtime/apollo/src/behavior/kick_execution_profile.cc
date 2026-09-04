@@ -50,8 +50,10 @@ KickExecutionProfile make_kick_execution_profile(
         (*command.target_point_m)[1] - snapshot.ball.position_m[1],
     };
     const double target_distance_m = math::norm2(target_delta);
-    if (target_distance_m < decision::kick_contract::kMinimumTargetDistanceM ||
-        target_distance_m > decision::kick_contract::kMaximumTargetDistanceM) {
+    if (target_distance_m <
+            decision::kick_contract::kParameterizedPassMinimumTargetDistanceM ||
+        target_distance_m >
+            decision::kick_contract::kParameterizedPassMaximumTargetDistanceM) {
         return profile;
     }
 
@@ -62,7 +64,8 @@ KickExecutionProfile make_kick_execution_profile(
     const double relative_angle_deg =
         math::normalize_deg(target_heading_deg - self_yaw_deg);
     if (!std::isfinite(relative_angle_deg) ||
-        std::abs(relative_angle_deg) > decision::kick_contract::kMaximumTargetAngleDeg) {
+        std::abs(relative_angle_deg) >
+            decision::kick_contract::kParameterizedPassMaximumTargetAngleDeg) {
         return profile;
     }
 

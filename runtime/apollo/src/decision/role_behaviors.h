@@ -4,8 +4,11 @@
 #pragma once
 
 #include "src/decision/blackboard.h"
+#include "src/decision/execution_feedback.h"
 #include "src/decision/high_level_command.h"
+#include "src/decision/restart_coordinator.h"
 #include "src/decision/role_manager.h"
+#include "src/decision/team_tactics.h"
 #include "src/strategy/action_planner.h"
 #include "src/world/world_snapshot.h"
 
@@ -32,6 +35,7 @@ struct APState {
     double next_kick_allowed_s{0.0};
     double kick_setup_stable_since_s{0.0};
     double pass_commit_until_s{0.0};
+    double pass_retry_after_s{0.0};
     std::uint8_t next_pass_sequence_id{0U};
     std::optional<strategy::CooperativeAction> committed_pass;
     std::optional<KickCommand> active_kick_command;
@@ -47,6 +51,7 @@ public:
         RoleManager& role_manager,
         bool enable_pass_strategy,
         bool enable_targeted_kick = false) const;
+    void apply_execution_feedback(const ExecutionFeedback& feedback) const;
     void reset_state() const { state_ = {}; }
 private:
     mutable APState state_;
@@ -65,6 +70,7 @@ public:
     HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
         Blackboard& blackboard) const override;
+    void reset_state() const { relay_state_ = {}; }
 private:
     int role_id_;
     bool defensive_opponent_clip_;
@@ -78,20 +84,35 @@ public:
     HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
         Blackboard& blackboard) const override;
-    void reset_state() const {}
+    void reset_state() const { clearance_state_ = {}; }
+private:
+    mutable APState clearance_state_;
 };
 
-/// Clears persistent state owned by all role behavior instances.
-void reset_role_behavior_state();
+/// Per-agent owner for every persistent role behavior. Keeping this object in
+/// DecisionManager prevents cooldown, pass, and restart state from leaking
+/// between agents or independent replay tests in one process.
+class RoleBehaviorSet {
+public:
+    std::optional<HighLevelCommand> select(
+        const world::WorldSnapshot& snapshot,
+        Blackboard& blackboard,
+        RoleManager& role_manager,
+        bool enable_pass_strategy,
+        bool enable_targeted_kick = false) const;
+    void reset() const;
+    void apply_execution_feedback(const ExecutionFeedback& feedback) const;
+
+private:
+    APBehavior ap_;
+    SimpleRoleBehavior cbm_{RoleManager::ROLE_CBM, false};
+    SimpleRoleBehavior st_{RoleManager::ROLE_ST, false};
+    SimpleRoleBehavior cbl_{RoleManager::ROLE_CBL, true};
+    SimpleRoleBehavior cbr_{RoleManager::ROLE_CBR, true};
+    SimpleRoleBehavior cdm_{RoleManager::ROLE_CDM, false};
+    GKBehavior gk_;
+};
 
 int current_role_from_blackboard(const Blackboard& blackboard);
-
-/// Selects the behavior matching the current role, if one is available.
-std::optional<HighLevelCommand> select_role_behavior(
-    const world::WorldSnapshot& snapshot,
-    Blackboard& blackboard,
-    RoleManager& role_manager,
-    bool enable_pass_strategy,
-    bool enable_targeted_kick = false);
 
 }  // namespace decision

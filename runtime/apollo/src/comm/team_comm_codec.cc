@@ -16,8 +16,15 @@ namespace {
 constexpr std::uint8_t kInvalidQuantized = 0xFFU;
 constexpr std::uint8_t kUnknownRoleBits = 0x07U;
 constexpr std::uint8_t kPassIntentBit = 0x80U;
-constexpr std::uint8_t kPassReadyBit = 0x40U;
+constexpr std::uint8_t kPassAuthorReceiverBit = 0x40U;
 constexpr std::uint8_t kIntentChecksumSalt = 0xA5U;
+constexpr std::uint8_t kSixBitMaximum = 0x3FU;
+constexpr double kMaximumPassSpeedMps = 3.0;
+constexpr double kMaximumPredictedBallTimeS = 25.2;
+
+static_assert(
+    static_cast<std::uint8_t>(PassIntentState::Expired) <= 0x0FU,
+    "Pass lifecycle state must fit in four bits");
 
 using server_constants::kFieldHalfLengthM;
 using server_constants::kFieldHalfWidthM;
@@ -48,13 +55,15 @@ std::uint8_t pack_header(const TeamCommPacket& packet) {
         static_cast<std::uint8_t>(packet.fallen ? 0x40U : 0x00U));
 }
 
-std::uint8_t quantize_range(double value, double max_value) {
+std::uint8_t quantize_range_6bit(double value, double max_value) {
     const double clamped = std::clamp(value, 0.0, max_value);
-    return static_cast<std::uint8_t>(std::lround(clamped / max_value * 254.0));
+    return static_cast<std::uint8_t>(
+        std::lround(clamped / max_value * kSixBitMaximum));
 }
 
-double dequantize_range(std::uint8_t value, double max_value) {
-    return static_cast<double>(value) / 254.0 * max_value;
+double dequantize_range_6bit(std::uint8_t value, double max_value) {
+    return static_cast<double>(value & kSixBitMaximum) /
+        static_cast<double>(kSixBitMaximum) * max_value;
 }
 
 std::uint8_t intent_checksum(const std::vector<std::uint8_t>& encoded) {
@@ -81,16 +90,43 @@ std::vector<std::uint8_t> TeamCommCodec::encode(const TeamCommPacket& packet) {
     std::vector<std::uint8_t> encoded;
     encoded.reserve(kPacketSizeBytes);
     if (packet.kind == TeamCommPacketKind::PassIntent) {
-        const int peer = packet.pass_intent_state == PassIntentState::Proposed
-            ? static_cast<int>(packet.receiver_player_number)
-            : static_cast<int>(packet.passer_player_number);
-        const std::uint8_t sender_bits = static_cast<std::uint8_t>(
-            std::clamp<int>(static_cast<int>(packet.sender_player_number), 1, 7) - 1);
+        const int sender = static_cast<int>(packet.sender_player_number);
+        const int passer = static_cast<int>(packet.passer_player_number);
+        const int receiver = static_cast<int>(packet.receiver_player_number);
+        if (sender < 1 || sender > 7 || passer < 1 || passer > 7 ||
+            receiver < 1 || receiver > 7 || passer == receiver) {
+            throw std::runtime_error("Invalid pass-intent participants");
+        }
+        const bool authored_by_receiver =
+            packet.pass_intent_author == PassIntentAuthor::Receiver;
+        const int author = authored_by_receiver ? receiver : passer;
+        const int expected_peer = authored_by_receiver ? passer : receiver;
+        const int peer = packet.pass_peer_player_number == 0U
+            ? expected_peer
+            : static_cast<int>(packet.pass_peer_player_number);
+        if (sender != author || peer != expected_peer) {
+            throw std::runtime_error("Pass-intent author/peer mismatch");
+        }
+        const std::uint8_t state =
+            static_cast<std::uint8_t>(packet.pass_intent_state);
+        if (state > static_cast<std::uint8_t>(PassIntentState::Expired)) {
+            throw std::runtime_error("Invalid pass-intent lifecycle state");
+        }
+        const std::uint8_t sender_bits =
+            static_cast<std::uint8_t>(sender - 1);
         const std::uint8_t peer_bits = static_cast<std::uint8_t>(
-            std::clamp(peer, 1, 7) - 1);
+            peer - 1);
         const std::uint8_t header = static_cast<std::uint8_t>(
             kPassIntentBit | sender_bits | (peer_bits << 3U) |
-            (packet.pass_intent_state == PassIntentState::Ready ? kPassReadyBit : 0U));
+            (authored_by_receiver ? kPassAuthorReceiverBit : 0U));
+        const std::uint16_t lifecycle_and_metrics =
+            static_cast<std::uint16_t>(state) |
+            (static_cast<std::uint16_t>(quantize_range_6bit(
+                packet.requested_ball_speed_mps,
+                kMaximumPassSpeedMps)) << 4U) |
+            (static_cast<std::uint16_t>(quantize_range_6bit(
+                packet.predicted_ball_time_s,
+                kMaximumPredictedBallTimeS)) << 10U);
         encoded.push_back(packet.version);
         encoded.push_back(header);
         encoded.push_back(quantize_axis(
@@ -98,8 +134,10 @@ std::vector<std::uint8_t> TeamCommCodec::encode(const TeamCommPacket& packet) {
         encoded.push_back(quantize_axis(
             packet.pass_target_y_m, -kFieldHalfWidthM, kFieldHalfWidthM));
         encoded.push_back(packet.pass_sequence_id);
-        encoded.push_back(quantize_range(packet.requested_ball_speed_mps, 3.0));
-        encoded.push_back(quantize_range(packet.predicted_ball_time_s, 25.4));
+        encoded.push_back(static_cast<std::uint8_t>(
+            lifecycle_and_metrics & 0x00FFU));
+        encoded.push_back(static_cast<std::uint8_t>(
+            lifecycle_and_metrics >> 8U));
         encoded.push_back(intent_checksum(encoded));
         return encoded;
     }
@@ -134,29 +172,57 @@ TeamCommPacket TeamCommCodec::decode(const std::vector<std::uint8_t>& encoded) {
             throw std::runtime_error("Team pass-intent checksum mismatch");
         }
         packet.kind = TeamCommPacketKind::PassIntent;
-        packet.sender_player_number = static_cast<std::uint8_t>((header & 0x07U) + 1U);
-        const std::uint8_t peer = static_cast<std::uint8_t>(((header >> 3U) & 0x07U) + 1U);
-        packet.pass_intent_state = (header & kPassReadyBit) != 0U
-            ? PassIntentState::Ready
-            : PassIntentState::Proposed;
-        if (packet.pass_intent_state == PassIntentState::Proposed) {
+        const std::uint8_t sender_bits = header & 0x07U;
+        const std::uint8_t peer_bits = (header >> 3U) & 0x07U;
+        if (sender_bits >= 7U || peer_bits >= 7U ||
+            sender_bits == peer_bits) {
+            throw std::runtime_error("Invalid pass-intent author/peer encoding");
+        }
+        packet.sender_player_number =
+            static_cast<std::uint8_t>(sender_bits + 1U);
+        packet.pass_peer_player_number =
+            static_cast<std::uint8_t>(peer_bits + 1U);
+        packet.pass_intent_author =
+            (header & kPassAuthorReceiverBit) != 0U
+                ? PassIntentAuthor::Receiver
+                : PassIntentAuthor::Passer;
+        if (packet.pass_intent_author == PassIntentAuthor::Passer) {
             packet.passer_player_number = packet.sender_player_number;
-            packet.receiver_player_number = peer;
+            packet.receiver_player_number = packet.pass_peer_player_number;
         } else {
-            packet.passer_player_number = peer;
+            packet.passer_player_number = packet.pass_peer_player_number;
             packet.receiver_player_number = packet.sender_player_number;
         }
+        const std::uint16_t lifecycle_and_metrics =
+            static_cast<std::uint16_t>(encoded[5]) |
+            (static_cast<std::uint16_t>(encoded[6]) << 8U);
+        const std::uint8_t state = static_cast<std::uint8_t>(
+            lifecycle_and_metrics & 0x000FU);
+        if (state > static_cast<std::uint8_t>(PassIntentState::Expired)) {
+            throw std::runtime_error("Invalid pass-intent lifecycle state");
+        }
+        packet.pass_intent_state = static_cast<PassIntentState>(state);
         packet.pass_target_x_m = dequantize_axis(
             encoded[2], -kFieldHalfLengthM, kFieldHalfLengthM);
         packet.pass_target_y_m = dequantize_axis(
             encoded[3], -kFieldHalfWidthM, kFieldHalfWidthM);
         packet.pass_sequence_id = encoded[4];
-        packet.requested_ball_speed_mps = dequantize_range(encoded[5], 3.0);
-        packet.predicted_ball_time_s = dequantize_range(encoded[6], 25.4);
+        packet.requested_ball_speed_mps = dequantize_range_6bit(
+            static_cast<std::uint8_t>(
+                (lifecycle_and_metrics >> 4U) & kSixBitMaximum),
+            kMaximumPassSpeedMps);
+        packet.predicted_ball_time_s = dequantize_range_6bit(
+            static_cast<std::uint8_t>(
+                (lifecycle_and_metrics >> 10U) & kSixBitMaximum),
+            kMaximumPredictedBallTimeS);
         return packet;
     }
     packet.kind = TeamCommPacketKind::State;
-    packet.sender_player_number = static_cast<std::uint8_t>((header & 0x07U) + 1U);
+    const std::uint8_t sender_bits = header & 0x07U;
+    if (sender_bits >= 7U) {
+        throw std::runtime_error("Invalid state-packet sender encoding");
+    }
+    packet.sender_player_number = static_cast<std::uint8_t>(sender_bits + 1U);
     const std::uint8_t role_bits = static_cast<std::uint8_t>((header >> 3U) & 0x07U);
     packet.current_role = role_bits == kUnknownRoleBits
         ? static_cast<std::int8_t>(-1)
@@ -212,6 +278,8 @@ PassIntentRecord TeamCommCodec::to_pass_intent_record(const TeamCommPacket& pack
         packet.pass_target_y_m,
         packet.requested_ball_speed_mps,
         packet.predicted_ball_time_s,
+        packet.pass_intent_author,
+        static_cast<int>(packet.pass_peer_player_number),
     };
 }
 

@@ -7,7 +7,10 @@
 #include "src/decision/field_geometry.h"
 #include "src/decision/role_behaviors.h"
 #include "src/math/math_utils.h"
+#include "src/strategy/tactical_state.h"
+#include "src/world/frame_normalizer.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <optional>
@@ -20,8 +23,14 @@ struct BehaviorContext {
     const world::WorldSnapshot& snapshot;
     Blackboard& blackboard;
     RoleManager& role_manager;
+    TeamTactics& team_tactics;
+    RestartCoordinator& restart_coordinator;
+    RoleBehaviorSet& role_behaviors;
+    world::PlayMode& previous_play_mode;
+    double& kickoff_hold_until_s;
     bool enable_pass_strategy;
     bool enable_targeted_kick;
+    const std::optional<ExecutionFeedback>& execution_feedback;
 };
 
 using NodeResult = bt::NodeResult<BehaviorContext>;
@@ -44,6 +53,10 @@ bool needs_beam(const BehaviorContext& context) {
 bool is_set_play_mode(const BehaviorContext& context) {
     return context.snapshot.play_mode_group == world::PlayModeGroup::OurKick ||
            context.snapshot.play_mode_group == world::PlayModeGroup::TheirKick;
+}
+
+bool is_game_over(const BehaviorContext& context) {
+    return context.snapshot.play_mode == world::PlayMode::GameOver;
 }
 
 // Humanoid robots walk forward only, so while farther than kFaceTargetRadiusM
@@ -95,7 +108,8 @@ WalkCommand walk_to_current_role_position(BehaviorContext& context) {
 }
 
 HighLevelCommand make_beam_command(BehaviorContext& context) {
-    reset_role_behavior_state();
+    context.role_behaviors.reset();
+    context.restart_coordinator.reset();
     // The role manager has not yet run at beam time, so we cannot map this
     // player to a formation slot. Use the player-number pose table, with a
     // deeper front-player pose only when the next kickoff belongs to the other
@@ -107,22 +121,312 @@ HighLevelCommand make_beam_command(BehaviorContext& context) {
     return BeamCommand{pose[0], pose[1], pose[2]};
 }
 
-HighLevelCommand make_get_up_command(BehaviorContext&) {
-    reset_role_behavior_state();
+HighLevelCommand make_get_up_command(BehaviorContext& context) {
+    context.role_behaviors.reset();
     return GetUpCommand{};
 }
 
-NodeResult compute_formation(BehaviorContext& context) {
-    auto [role_id, role_pos] = context.role_manager.get_role(context.snapshot);
+std::optional<std::array<double, 2>> observed_player_position(
+    const world::WorldSnapshot& snapshot,
+    int player_number) {
+    if (player_number == snapshot.player_number) {
+        if (is_fallen(snapshot)) return std::nullopt;
+        return std::array<double, 2>{
+            snapshot.self.position_m[0], snapshot.self.position_m[1]};
+    }
+    for (const auto& teammate : snapshot.teammates) {
+        const bool fresh = teammate.seen ||
+            (teammate.last_seen_time >= 0.0 &&
+             snapshot.server_time - teammate.last_seen_time <= 2.0);
+        if (teammate.player_number == player_number && fresh &&
+            !teammate.fallen) {
+            return std::array<double, 2>{
+                teammate.position_m[0], teammate.position_m[1]};
+        }
+    }
+    return std::nullopt;
+}
 
+bool restart_team_positioned(
+    const world::WorldSnapshot& snapshot,
+    const std::vector<RoleAssignment>& assignments,
+    const std::optional<RestartPlan>& plan) {
+    if (!plan.has_value()) return false;
+    if (!plan->requires_receiver_ready) {
+        const auto taker = observed_player_position(
+            snapshot, plan->taker_player_number);
+        return taker.has_value() &&
+            math::planar_dist(*taker, plan->ball_anchor_m) <= 1.25;
+    }
+    for (const auto& assignment : assignments) {
+        const auto position = observed_player_position(
+            snapshot, assignment.player_number);
+        if (!position.has_value()) return false;
+
+        std::array<double, 2> target = assignment.role_position_m;
+        double tolerance_m = 1.5;
+        if (assignment.player_number == plan->receiver_player_number) {
+            target = plan->receiver_target_m;
+            tolerance_m = 0.9;
+        } else if (assignment.player_number == plan->taker_player_number) {
+            target = plan->ball_anchor_m;
+            tolerance_m = 1.25;
+        }
+        if (math::planar_dist(*position, target) > tolerance_m) return false;
+    }
+    return true;
+}
+
+bool restart_receiver_ready(
+    const world::WorldSnapshot& snapshot,
+    const std::optional<RestartPlan>& plan) {
+    if (!plan.has_value() || !plan->requires_receiver_ready ||
+        plan->receiver_player_number <= 0) {
+        return plan.has_value() && !plan->requires_receiver_ready;
+    }
+    const auto receiver = observed_player_position(
+        snapshot, plan->receiver_player_number);
+    if (!receiver.has_value() ||
+        math::planar_dist(*receiver, plan->receiver_target_m) > 0.75) {
+        return false;
+    }
+    if (plan->receiver_player_number != snapshot.player_number) return true;
+
+    const std::array<double, 2> ball{
+        snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+    const double yaw_deg =
+        world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+            snapshot.self.orientation_wxyz);
+    const double face_error_deg = std::abs(math::normalize_deg(
+        math::vector_angle_deg(math::vec2_sub(ball, *receiver)) - yaw_deg));
+    const double speed_mps = math::norm2({
+        snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]});
+    return face_error_deg <= 25.0 && speed_mps <= 0.35;
+}
+
+bool restart_taker_aligned(
+    const world::WorldSnapshot& snapshot,
+    const std::optional<RestartPlan>& plan) {
+    if (!plan.has_value() ||
+        plan->taker_player_number != snapshot.player_number ||
+        !snapshot.ball.position_valid) {
+        return false;
+    }
+    constexpr double contact_behind_m = 0.33;
+    constexpr double longitudinal_tolerance_m = 0.03;
+    constexpr double lateral_tolerance_m = 0.03;
+    constexpr double orientation_tolerance_deg = 3.0;
+    constexpr double maximum_speed_mps = 0.20;
+    const double direction_rad = math::deg_to_rad(plan->contact_direction_deg);
+    const std::array<double, 2> direction{
+        std::cos(direction_rad), std::sin(direction_rad)};
+    const std::array<double, 2> lateral{-direction[1], direction[0]};
+    const std::array<double, 2> self_from_ball{
+        snapshot.self.position_m[0] - snapshot.ball.position_m[0],
+        snapshot.self.position_m[1] - snapshot.ball.position_m[1]};
+    const double behind_m = -(
+        self_from_ball[0] * direction[0] +
+        self_from_ball[1] * direction[1]);
+    const double lateral_m =
+        self_from_ball[0] * lateral[0] + self_from_ball[1] * lateral[1];
+    const double yaw_deg =
+        world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+            snapshot.self.orientation_wxyz);
+    const double speed_mps = math::norm2({
+        snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]});
+    return std::abs(behind_m - contact_behind_m) <= longitudinal_tolerance_m &&
+        std::abs(lateral_m) <= lateral_tolerance_m &&
+        std::abs(math::normalize_deg(plan->contact_direction_deg - yaw_deg)) <=
+            orientation_tolerance_deg &&
+        speed_mps <= maximum_speed_mps;
+}
+
+bool another_player_controls_released_ball(
+    const world::WorldSnapshot& snapshot,
+    const std::optional<RestartPlan>& plan) {
+    if (!plan.has_value() || !snapshot.ball.position_valid ||
+        math::planar_dist(
+            {snapshot.ball.position_m[0], snapshot.ball.position_m[1]},
+            plan->ball_anchor_m) < 0.35) {
+        return false;
+    }
+    const std::array<double, 2> ball{
+        snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+    for (const auto& teammate : snapshot.teammates) {
+        if (teammate.player_number == plan->taker_player_number ||
+            teammate.player_number <= 0 || teammate.fallen) {
+            continue;
+        }
+        const bool fresh = teammate.seen ||
+            (teammate.last_seen_time >= 0.0 &&
+             snapshot.server_time - teammate.last_seen_time <= 0.5);
+        if (fresh && math::planar_dist(
+                {teammate.position_m[0], teammate.position_m[1]}, ball) <=
+                0.55) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<RestartExecutionFeedback> restart_execution_feedback(
+    const std::optional<ExecutionFeedback>& feedback) {
+    if (!feedback.has_value() ||
+        feedback->request_kind != MotionRequestKind::Kick ||
+        !feedback->restart_epoch.has_value() ||
+        !feedback->restart_revision.has_value()) {
+        return std::nullopt;
+    }
+    RestartExecutionStatus status = RestartExecutionStatus::Running;
+    switch (feedback->status) {
+        case ExecutionStatus::Running:
+            status = RestartExecutionStatus::Running;
+            break;
+        case ExecutionStatus::Completed:
+            status = RestartExecutionStatus::Completed;
+            break;
+        case ExecutionStatus::Rejected:
+            status = RestartExecutionStatus::Rejected;
+            break;
+        case ExecutionStatus::TimedOut:
+            status = RestartExecutionStatus::TimedOut;
+            break;
+    }
+    return RestartExecutionFeedback{
+        *feedback->restart_epoch, *feedback->restart_revision, status};
+}
+
+NodeResult compute_formation(BehaviorContext& context) {
     const std::array<double, 2> ball_position{
         context.snapshot.ball.position_m[0],
         context.snapshot.ball.position_m[1],
     };
-    const auto legal_role_pos =
-        field_geometry::legalize_set_play_target(role_pos, ball_position, context.snapshot.play_mode);
-    context.blackboard.set(Blackboard::kKeyCurrentRole, role_id);
-    context.blackboard.set(Blackboard::kKeyRolePos, legal_role_pos);
+    auto role_assignments = context.role_manager.assign(context.snapshot);
+    for (auto& assignment : role_assignments) {
+        assignment.role_position_m = field_geometry::legalize_set_play_target(
+            assignment.role_position_m,
+            ball_position,
+            context.snapshot.play_mode);
+    }
+
+    RestartCoordinatorInput restart_input;
+    restart_input.play_mode = context.snapshot.play_mode;
+    restart_input.server_time_s = context.snapshot.server_time;
+    restart_input.self_player_number = context.snapshot.player_number;
+    restart_input.ball_position_m = ball_position;
+    restart_input.ball_velocity_mps = {
+        context.snapshot.ball.velocity_mps[0],
+        context.snapshot.ball.velocity_mps[1]};
+    restart_input.ball_position_valid = context.snapshot.ball.position_valid;
+    restart_input.ball_velocity_valid = context.snapshot.ball.velocity_valid;
+    restart_input.role_assignments = role_assignments;
+    restart_input.team_positioned = restart_team_positioned(
+        context.snapshot, role_assignments,
+        context.restart_coordinator.plan());
+    restart_input.receiver_ready = restart_receiver_ready(
+        context.snapshot, context.restart_coordinator.plan());
+    restart_input.taker_aligned = restart_taker_aligned(
+        context.snapshot, context.restart_coordinator.plan());
+    restart_input.another_player_touched_ball =
+        another_player_controls_released_ball(
+            context.snapshot, context.restart_coordinator.plan());
+    restart_input.execution_feedback = restart_execution_feedback(
+        context.execution_feedback);
+    const RestartCoordinationDecision restart_decision =
+        context.restart_coordinator.update(restart_input);
+
+    const bool restart_active = restart_decision.plan.has_value() &&
+        restart_decision.phase != RestartPhase::Idle &&
+        restart_decision.phase != RestartPhase::Complete;
+    if (restart_active) {
+        for (auto& assignment : role_assignments) {
+            if (assignment.player_number ==
+                restart_decision.plan->receiver_player_number) {
+                assignment.role_position_m =
+                    restart_decision.plan->receiver_target_m;
+            }
+        }
+    }
+
+    TeamPlan team_plan = context.team_tactics.plan_all(
+        context.snapshot, role_assignments);
+    if (restart_active) {
+        const auto& restart_plan = *restart_decision.plan;
+        for (auto& assignment : team_plan.assignments) {
+            if (assignment.player_number == restart_plan.receiver_player_number) {
+                assignment.target = {
+                    TacticalDuty::Receive,
+                    restart_plan.receiver_target_m,
+                    restart_plan.ball_anchor_m,
+                    0,
+                    0.8};
+            } else if (assignment.player_number ==
+                       restart_plan.taker_player_number) {
+                assignment.target = {
+                    TacticalDuty::Pressure,
+                    restart_plan.ball_anchor_m,
+                    restart_plan.ball_anchor_m,
+                    0,
+                    0.9};
+            }
+        }
+    }
+    const auto* own_assignment = team_plan.for_player(
+        context.snapshot.player_number);
+    if (own_assignment == nullptr) return NodeResult::failure();
+
+    const auto role_it = std::find_if(
+        role_assignments.begin(), role_assignments.end(),
+        [&](const RoleAssignment& assignment) {
+            return assignment.player_number == context.snapshot.player_number;
+        });
+    if (role_it == role_assignments.end()) return NodeResult::failure();
+
+    std::array<double, 2> own_role_position = role_it->role_position_m;
+    TacticalTarget own_target = own_assignment->target;
+    if (restart_decision.self_locked_out &&
+        restart_decision.plan.has_value()) {
+        const double direction_rad = math::deg_to_rad(
+            restart_decision.plan->contact_direction_deg);
+        own_role_position = {
+            restart_decision.plan->ball_anchor_m[0] -
+                2.5 * std::cos(direction_rad),
+            restart_decision.plan->ball_anchor_m[1] -
+                2.5 * std::sin(direction_rad)};
+        own_role_position[0] = std::clamp(
+            own_role_position[0],
+            -field_geometry::kActualHalfLengthM +
+                field_geometry::kFormationFieldMarginM,
+            field_geometry::kActualHalfLengthM -
+                field_geometry::kFormationFieldMarginM);
+        own_role_position[1] = std::clamp(
+            own_role_position[1],
+            -field_geometry::kActualHalfWidthM +
+                field_geometry::kFormationFieldMarginM,
+            field_geometry::kActualHalfWidthM -
+                field_geometry::kFormationFieldMarginM);
+        own_target = {
+            TacticalDuty::Outlet,
+            own_role_position,
+            ball_position,
+            0,
+            0.9};
+    }
+
+    context.blackboard.set(
+        Blackboard::kKeyCurrentRole, own_assignment->role_id);
+    context.blackboard.set(
+        Blackboard::kKeyRolePos, own_role_position);
+    context.blackboard.set(
+        Blackboard::kKeyTacticalTarget, own_target);
+    context.blackboard.set(
+        Blackboard::kKeyTacticalRiskMode,
+        strategy::build_tactical_state(context.snapshot).risk_mode);
+    context.blackboard.set(Blackboard::kKeyTeamPlan, team_plan);
+    context.blackboard.set(
+        Blackboard::kKeyRoleAssignments, role_assignments);
+    context.blackboard.set(
+        Blackboard::kKeyRestartDecision, restart_decision);
     return NodeResult::success_only();
 }
 
@@ -134,25 +438,26 @@ NodeResult compute_formation(BehaviorContext& context) {
 // robot per process, mirroring the existing file-scope role state).
 constexpr double kKickoffHoldAfterPlayOnS = 3.0;
 
-struct KickoffHoldState {
-    world::PlayMode prev_play_mode{world::PlayMode::NotInitialized};
-    double hold_until_s{-1.0};
-};
-KickoffHoldState g_kickoff_hold;
-
-void update_kickoff_hold_state(const world::WorldSnapshot& snapshot) {
-    if (g_kickoff_hold.prev_play_mode == world::PlayMode::TheirKickOff &&
-        snapshot.play_mode == world::PlayMode::PlayOn) {
-        g_kickoff_hold.hold_until_s = snapshot.server_time + kKickoffHoldAfterPlayOnS;
+void update_kickoff_hold_state(BehaviorContext& context) {
+    if (context.previous_play_mode == world::PlayMode::TheirKickOff &&
+        context.snapshot.play_mode == world::PlayMode::PlayOn) {
+        context.kickoff_hold_until_s =
+            context.snapshot.server_time + kKickoffHoldAfterPlayOnS;
     }
-    g_kickoff_hold.prev_play_mode = snapshot.play_mode;
+    context.previous_play_mode = context.snapshot.play_mode;
 }
 
 bool is_kickoff_hold_active(const BehaviorContext& context) {
     const int player_number = context.snapshot.player_number;
     return (player_number == 6 || player_number == 7) &&
            context.snapshot.play_mode == world::PlayMode::PlayOn &&
-           context.snapshot.server_time < g_kickoff_hold.hold_until_s;
+           context.snapshot.server_time < context.kickoff_hold_until_s;
+}
+
+bool is_restart_taker_lockout(const BehaviorContext& context) {
+    return context.blackboard.exists(Blackboard::kKeyRestartDecision) &&
+        context.blackboard.get<RestartCoordinationDecision>(
+            Blackboard::kKeyRestartDecision).self_locked_out;
 }
 
 // During BeforeKickOff the server waits for the kicker to confirm before the
@@ -204,9 +509,9 @@ HighLevelCommand make_before_kickoff_hold_command(BehaviorContext& context) {
 
 HighLevelCommand make_set_play_command(BehaviorContext& context) {
     compute_formation(context);
-    if (context.snapshot.play_mode == world::PlayMode::TheirKickOff) {
-        reset_role_behavior_state();
-        return make_walk_in_place_command(context);
+    if (context.snapshot.play_mode_group == world::PlayModeGroup::TheirKick) {
+        context.role_behaviors.reset();
+        return walk_to_current_role_position(context);
     }
 
     const int role_id = current_role_from_blackboard(context.blackboard);
@@ -215,7 +520,7 @@ HighLevelCommand make_set_play_command(BehaviorContext& context) {
         context.snapshot.play_mode != world::PlayMode::OurGoalKick) {
         // OurGoalKick is excluded because the GK is the designated taker there
         // and an approaching AP would crowd the keeper's clearance.
-        auto selected = select_role_behavior(
+        auto selected = context.role_behaviors.select(
             context.snapshot, context.blackboard, context.role_manager,
             false, context.enable_targeted_kick);
         if (selected.has_value()) {
@@ -224,7 +529,7 @@ HighLevelCommand make_set_play_command(BehaviorContext& context) {
     }
 
     if (role_id == RoleManager::ROLE_GK) {
-        auto selected = select_role_behavior(
+        auto selected = context.role_behaviors.select(
             context.snapshot, context.blackboard, context.role_manager,
             false, context.enable_targeted_kick);
         if (selected.has_value()) {
@@ -232,12 +537,21 @@ HighLevelCommand make_set_play_command(BehaviorContext& context) {
         }
     }
 
+    if (context.blackboard.exists(Blackboard::kKeyRestartDecision) &&
+        context.blackboard.get<RestartCoordinationDecision>(
+            Blackboard::kKeyRestartDecision).self_is_receiver) {
+        auto selected = context.role_behaviors.select(
+            context.snapshot, context.blackboard, context.role_manager,
+            false, context.enable_targeted_kick);
+        if (selected.has_value()) return *selected;
+    }
+
     return walk_to_current_role_position(context);
 }
 
 NodeResult make_role_behavior_command(BehaviorContext& context) {
     const int role_id = current_role_from_blackboard(context.blackboard);
-    auto selected = select_role_behavior(
+    auto selected = context.role_behaviors.select(
         context.snapshot, context.blackboard, context.role_manager,
         context.enable_pass_strategy, context.enable_targeted_kick);
     if (!selected.has_value()) {
@@ -259,6 +573,10 @@ NodePtr make_top_level_tree() {
         bt::sequence<BehaviorContext>({
             bt::condition<BehaviorContext>(has_teammates),
             bt::fallback<BehaviorContext>({
+                bt::sequence<BehaviorContext>({
+                    bt::condition<BehaviorContext>(is_game_over),
+                    bt::command<BehaviorContext>(make_neutral_command),
+                }),
                 bt::sequence<BehaviorContext>({
                     bt::condition<BehaviorContext>(needs_beam),
                     bt::command<BehaviorContext>(make_beam_command),
@@ -283,7 +601,15 @@ NodePtr make_top_level_tree() {
                 }),
                 bt::sequence<BehaviorContext>({
                     bt::task<BehaviorContext>(compute_formation),
-                    bt::task<BehaviorContext>(make_role_behavior_command),
+                    bt::fallback<BehaviorContext>({
+                        bt::sequence<BehaviorContext>({
+                            bt::condition<BehaviorContext>(
+                                is_restart_taker_lockout),
+                            bt::command<BehaviorContext>(
+                                walk_to_current_role_position),
+                        }),
+                        bt::task<BehaviorContext>(make_role_behavior_command),
+                    }),
                 }),
             }),
         }),
@@ -298,13 +624,25 @@ HighLevelCommand BehaviorTree::evaluate(
     Blackboard& blackboard,
     RoleManager& role_manager,
     bool enable_pass_strategy,
-    bool enable_targeted_kick) const {
+    bool enable_targeted_kick,
+    const std::optional<ExecutionFeedback>& execution_feedback) const {
     blackboard.clear();
-    update_kickoff_hold_state(snapshot);
-
     BehaviorContext context{
-        snapshot, blackboard, role_manager, enable_pass_strategy,
-        enable_targeted_kick};
+        snapshot,
+        blackboard,
+        role_manager,
+        team_tactics_,
+        restart_coordinator_,
+        role_behaviors_,
+        previous_play_mode_,
+        kickoff_hold_until_s_,
+        enable_pass_strategy,
+        enable_targeted_kick,
+        execution_feedback};
+    if (execution_feedback.has_value()) {
+        role_behaviors_.apply_execution_feedback(*execution_feedback);
+    }
+    update_kickoff_hold_state(context);
     static const NodePtr top_level_tree = make_top_level_tree();
     const auto result = top_level_tree->tick(context);
     return result.command.value_or(NeutralCommand{});

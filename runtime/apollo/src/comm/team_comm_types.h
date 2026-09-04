@@ -16,6 +16,24 @@ enum class TeamCommPacketKind : std::uint8_t {
 enum class PassIntentState : std::uint8_t {
     Proposed,
     Ready,
+    Committed,
+    Commanded,
+    Executed,
+    ReceiverZone,
+    Received,
+    Intercepted,
+    Out,
+    Timeout,
+    Cancelled,
+    Expired,
+};
+
+/// Which participant authored a pass-lifecycle update. The other participant
+/// is encoded explicitly as the peer, so authorship never has to be inferred
+/// from the lifecycle state.
+enum class PassIntentAuthor : std::uint8_t {
+    Passer,
+    Receiver,
 };
 
 /// Quantizable state sent by one player over the server speech channel.
@@ -35,6 +53,8 @@ struct TeamCommPacket {
     std::int8_t current_role{-1};
 
     PassIntentState pass_intent_state{PassIntentState::Proposed};
+    PassIntentAuthor pass_intent_author{PassIntentAuthor::Passer};
+    std::uint8_t pass_peer_player_number{0U};
     std::uint8_t pass_sequence_id{0U};
     std::uint8_t passer_player_number{0U};
     std::uint8_t receiver_player_number{0U};
@@ -71,6 +91,8 @@ struct PassIntentRecord {
     double target_y_m{0.0};
     double requested_ball_speed_mps{0.0};
     double predicted_ball_time_s{0.0};
+    PassIntentAuthor author{PassIntentAuthor::Passer};
+    int peer_player_number{0};
 };
 
 struct OutgoingPassIntent {

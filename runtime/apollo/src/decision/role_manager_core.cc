@@ -4,6 +4,7 @@
 #include "src/decision/role_manager.h"
 
 #include "src/math/math_utils.h"
+#include "src/strategy/tactical_state.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,7 +21,9 @@ std::array<double, 2> fallback_position_for_player(int player_number) {
 }
 
 bool has_known_position(const world::WorldSnapshot& snapshot, const world::PlayerObservation& player) {
-    return player.player_number == snapshot.player_number || player.seen || player.last_seen_time >= 0.0;
+    return player.player_number == snapshot.player_number || player.seen ||
+        (player.last_seen_time >= 0.0 &&
+         snapshot.server_time - player.last_seen_time <= 2.0);
 }
 
 std::array<double, 2> effective_position(
@@ -49,6 +52,11 @@ std::vector<PlayerRoleCandidate> make_teammate_candidates(const world::WorldSnap
         candidate.comm_role = teammate.comm_role;
         candidates.push_back(candidate);
     }
+    std::sort(
+        candidates.begin(), candidates.end(),
+        [](const PlayerRoleCandidate& lhs, const PlayerRoleCandidate& rhs) {
+            return lhs.player_number < rhs.player_number;
+        });
     return candidates;
 }
 
@@ -234,6 +242,10 @@ std::vector<RoleAssignment> RoleManager::assign(
     ctx.play_mode = snapshot.play_mode;
     ctx.field_length_m = field_length_m_;
     ctx.field_width_m = field_width_m_;
+    const strategy::TacticalState tactical_state =
+        strategy::build_tactical_state(snapshot);
+    ctx.phase = tactical_state.phase;
+    ctx.risk_mode = tactical_state.risk_mode;
 
     const Formation formation;
     const auto formation_positions = formation.compute(ctx);

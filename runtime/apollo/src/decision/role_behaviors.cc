@@ -38,18 +38,20 @@ constexpr double kStrafeMaxDistM = 2.5;
 constexpr double kDribbleApproachDistanceM = 0.22;
 constexpr double kDribblePrecisionEntryDistanceM = 1.25;
 // Canonical server contact pose. Use the same longitudinal target for the
-// precision controller and release gate: server traces converge to
-// 0.319--0.325 m, which remains inside the strict 0.33 +/- 0.02 m envelope.
-constexpr double kKickContactBehindM = 0.33;
-constexpr double kDribbleCommandBehindM = 0.33;
+// precision controller and release gate. The small 0.04 m band includes the
+// observed -0.30 m monitor setup while keeping the lower edge at the explicit
+// 0.30 m minimum ball-contact distance.
+constexpr double kKickContactBehindM = 0.34;
+constexpr double kDribbleCommandBehindM = 0.34;
 constexpr double kDribbleTargetBallLocalYM = 0.0;
 // The learned walk has a small-command dead zone of roughly 0.08--0.10 m/s.
-// A gain of four keeps centimetre-scale setup errors observable while the
-// explicit speed clamps below retain the same safety envelope.
-constexpr double kDribbleLongitudinalGain = 4.0;
+// A gain of eight makes the final centimetre-scale reverse correction
+// observable in the server while the explicit speed clamps below retain the
+// same safety envelope.
+constexpr double kDribbleLongitudinalGain = 8.0;
 constexpr double kDribbleLateralGain = 4.0;
 constexpr double kDribbleMaxForwardSetupSpeedMps = 0.85;
-constexpr double kDribbleMaxReverseSetupSpeedMps = 0.25;
+constexpr double kDribbleMaxReverseSetupSpeedMps = 0.35;
 constexpr double kDribbleMaxLateralSetupSpeedMps = 0.35;
 constexpr double kDribbleSideDistanceM = 0.8;
 constexpr double kDribbleSideClearanceM = 0.55;
@@ -73,13 +75,14 @@ constexpr double kKickMaxBallDistanceM = 0.41;
 // Server zero-command sway is about two centimetres peak-to-peak. A 3 cm
 // release band remains well inside the residual runner's 9 cm contact
 // envelope while allowing the stable-hold timer to survive one gait cycle.
-constexpr double kKickSetupLongitudinalToleranceM = 0.03;
+constexpr double kKickSetupLongitudinalToleranceM = 0.04;
 constexpr double kKickSetupLateralToleranceM = 0.03;
 // The zero-command policy oscillates around roughly two degrees on the server.
 // Three degrees remains comfortably below the ten-degree action promotion gate
 // while admitting a continuous debounce window for the stable fallback.
 constexpr double kKickMaxOrientationErrorDeg = 3.0;
 constexpr double kKickSetupOrientationGain = 3.0;
+constexpr double kRejectedPassRetryDelayS = 0.5;
 
 bool is_our_set_play(const world::WorldSnapshot& snapshot) {
     return snapshot.play_mode_group == world::PlayModeGroup::OurKick;
@@ -90,6 +93,34 @@ std::array<double, 2> role_position_from_blackboard(const Blackboard& blackboard
         return {0.0, 0.0};
     }
     return blackboard.get<std::array<double, 2>>(Blackboard::kKeyRolePos);
+}
+
+const RestartCoordinationDecision* restart_decision_from_blackboard(
+    const Blackboard& blackboard) {
+    if (!blackboard.exists(Blackboard::kKeyRestartDecision)) return nullptr;
+    return &blackboard.get<RestartCoordinationDecision>(
+        Blackboard::kKeyRestartDecision);
+}
+
+void synchronize_restart_contact_state(
+    APState& state,
+    const RestartCoordinationDecision& decision) {
+    if (!state.active_kick_command.has_value() ||
+        !state.active_kick_command->restart_epoch.has_value() ||
+        !state.active_kick_command->restart_revision.has_value()) {
+        return;
+    }
+    const bool matching_plan = decision.plan.has_value() &&
+        *state.active_kick_command->restart_epoch == decision.plan->epoch &&
+        *state.active_kick_command->restart_revision == decision.plan->revision;
+    if (decision.execution_authorized && matching_plan) return;
+
+    state.active_kick_command.reset();
+    state.kick_active_until_s = 0.0;
+    if (!matching_plan) {
+        state.dribble_ready = false;
+        state.kick_setup_stable_since_s = 0.0;
+    }
 }
 
 WalkCommand make_walk_command(const std::array<double, 2>& target_position_m) {
@@ -227,13 +258,13 @@ struct GKDecisionContext {
     double ball_distance{0.0};
 };
 
-using GKNodePtr = bt::NodePtr<GKDecisionContext>;
-
 HighLevelCommand make_dribble_command(
     APDecisionContext& context,
     double absolute_direction_deg,
     const strategy::CooperativeAction* cooperative_action = nullptr,
-    bool allow_kick = true) {
+    bool allow_kick = true,
+    int motion_role_id = RoleManager::ROLE_AP,
+    const RestartPlan* restart_plan = nullptr) {
     const double now = context.snapshot.server_time;
     if (context.state.kick_active_until_s > now) {
         return context.state.active_kick_command.value_or(KickCommand{});
@@ -344,12 +375,12 @@ HighLevelCommand make_dribble_command(
             precision_command.orientation_deg = absolute_direction_deg;
             precision_command.orientation_absolute = true;
             precision_command.orientation_gain = kKickSetupOrientationGain;
-            precision_command.role_id = RoleManager::ROLE_AP;
+            precision_command.role_id = motion_role_id;
             return precision_command;
         }
         WalkCommand approach_command = make_walk_command_avoiding(
             approach_target, context.snapshot, std::nullopt, true, true,
-            RoleManager::ROLE_AP, true, false);
+            motion_role_id, true, false);
         approach_command.orientation_deg = absolute_direction_deg;
         approach_command.orientation_absolute = true;
         return approach_command;
@@ -379,8 +410,9 @@ HighLevelCommand make_dribble_command(
         context.state.kick_setup_stable_since_s > 0.0 &&
         now - context.state.kick_setup_stable_since_s >=
             kKickSetupStableHoldS;
-    const bool legal_open_play_kick =
-        context.snapshot.play_mode == world::PlayMode::PlayOn &&
+    const bool legal_kick =
+        (context.snapshot.play_mode == world::PlayMode::PlayOn ||
+         context.snapshot.play_mode_group == world::PlayModeGroup::OurKick) &&
         context.snapshot.ball.position_valid &&
         now >= context.state.next_kick_allowed_s &&
         context.ball_distance >= kKickMinBallDistanceM &&
@@ -391,13 +423,22 @@ HighLevelCommand make_dribble_command(
     // robot can drift slightly inside the valid contact envelope; gating only
     // on setup_ready here would otherwise permit a later unacknowledged kick.
     if (!allow_kick) {
-        WalkCommand hold_command = make_walk_command(context.self);
+        // A passer that is waiting for Ready must not keep driving through the
+        // ball. Hold a small, explicit behind-ball standoff so gait residuals
+        // cannot create an unannounced dribble and invalidate the proposal.
+        const std::array<double, 2> hold_target{
+            context.ball[0] - direction[0] * (kKickContactBehindM + 0.03),
+            context.ball[1] - direction[1] * (kKickContactBehindM + 0.03),
+        };
+        WalkCommand hold_command = make_walk_command_avoiding(
+            hold_target, context.snapshot, std::nullopt, true, true,
+            motion_role_id, true, false);
         hold_command.orientation_deg = absolute_direction_deg;
         hold_command.orientation_absolute = true;
-        hold_command.role_id = RoleManager::ROLE_AP;
+        hold_command.role_id = motion_role_id;
         return hold_command;
     }
-    if (legal_open_play_kick) {
+    if (legal_kick) {
         context.state.kick_active_until_s = now + kKickDurationS;
         context.state.next_kick_allowed_s =
             context.state.kick_active_until_s + kKickCooldownS;
@@ -413,6 +454,10 @@ HighLevelCommand make_dribble_command(
             kick_command.sequence_id = cooperative_action->sequence_id;
             kick_command.mode = KickMode::TargetedPass;
         }
+        if (restart_plan != nullptr) {
+            kick_command.restart_epoch = restart_plan->epoch;
+            kick_command.restart_revision = restart_plan->revision;
+        }
         context.state.active_kick_command = kick_command;
         return kick_command;
     }
@@ -425,13 +470,13 @@ HighLevelCommand make_dribble_command(
         align_command.orientation_deg = absolute_direction_deg;
         align_command.orientation_absolute = true;
         align_command.orientation_gain = kKickSetupOrientationGain;
-        align_command.role_id = RoleManager::ROLE_AP;
+        align_command.role_id = motion_role_id;
         return align_command;
     }
 
     return make_walk_command_avoiding(
         push_target, context.snapshot, std::nullopt, true, true,
-        RoleManager::ROLE_AP, false, false);
+        motion_role_id, false, false);
 }
 
 HighLevelCommand make_ap_push_ball_to_goal(APDecisionContext& context) {
@@ -463,6 +508,7 @@ bool matching_ready_intent(
     const strategy::CooperativeAction& pass) {
     for (const auto& intent : snapshot.team_comm_snapshot.pass_intents) {
         if (intent.state == comm::PassIntentState::Ready &&
+            intent.sender_player_number == pass.target_player_number &&
             intent.passer_player_number == snapshot.player_number &&
             intent.receiver_player_number == pass.target_player_number &&
             intent.sequence_id == pass.sequence_id) {
@@ -474,7 +520,8 @@ bool matching_ready_intent(
 
 bool pass_commit_is_valid(
     const world::WorldSnapshot& snapshot,
-    const strategy::CooperativeAction& pass) {
+    const strategy::CooperativeAction& pass,
+    const strategy::ActionCapabilityRegistry& capabilities) {
     if (pass.category != strategy::ActionCategory::Pass ||
         pass.target_player_number <= 0 ||
         pass.target_player_number == snapshot.player_number) {
@@ -491,9 +538,18 @@ bool pass_commit_is_valid(
     if (receiver.fallen) return false;
     const std::array<double, 2> ball{
         snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+    strategy::CooperativeAction current_request = pass;
+    current_request.start_ball_point_m = ball;
+    const auto target_delta = math::vec2_sub(pass.target_point_m, ball);
+    const double self_yaw_deg =
+        world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+            snapshot.self.orientation_wxyz);
+    const double relative_target_angle_deg = math::normalize_deg(
+        math::vector_angle_deg(target_delta) - self_yaw_deg);
     return std::abs(pass.target_point_m[0]) < field_geometry::kActualHalfLengthM - 0.5 &&
            std::abs(pass.target_point_m[1]) < field_geometry::kActualHalfWidthM - 0.5 &&
-           math::planar_dist(ball, pass.start_ball_point_m) <= 0.75;
+           math::planar_dist(ball, pass.start_ball_point_m) <= 0.75 &&
+           capabilities.executable(current_request, relative_target_angle_deg);
 }
 
 bool receiver_is_ready(
@@ -507,6 +563,7 @@ const comm::PassIntentRecord* incoming_pass_intent(
     const comm::PassIntentRecord* best = nullptr;
     for (const auto& intent : snapshot.team_comm_snapshot.pass_intents) {
         if (intent.state != comm::PassIntentState::Proposed ||
+            intent.sender_player_number != intent.passer_player_number ||
             intent.receiver_player_number != snapshot.player_number ||
             intent.passer_player_number == snapshot.player_number) {
             continue;
@@ -526,64 +583,6 @@ bool is_gk_our_goal_kick(const GKDecisionContext& context) {
     return context.snapshot.play_mode == world::PlayMode::OurGoalKick;
 }
 
-WalkCommand make_gk_walk_to_ball(GKDecisionContext& context) {
-    // On OurGoalKick the keeper walks straight at the ball.
-    return make_walk_command_avoiding(
-        context.ball, context.snapshot, std::nullopt, true, true,
-        RoleManager::ROLE_GK);
-}
-
-HighLevelCommand make_gk_hold_position(GKDecisionContext& /*context*/) {
-    // Stay parked at the keeper's hold point (kGkHoldDepthM in front of our
-    // goal line, on the centerline).
-    const std::array<double, 2> target{
-        -field_geometry::kActualHalfLengthM + field_geometry::kGkHoldDepthM,
-        0.0,
-    };
-    WalkCommand command;
-    command.target_2d_m = target;
-    command.target_absolute = true;
-    command.orientation_deg = std::nullopt;
-    command.orientation_absolute = true;
-    command.role_id = RoleManager::ROLE_GK;
-    return command;
-}
-
-const APBehavior& ap_behavior_instance() {
-    static const APBehavior instance;
-    return instance;
-}
-
-const SimpleRoleBehavior& cbm_behavior_instance() {
-    static const SimpleRoleBehavior instance{RoleManager::ROLE_CBM, false};
-    return instance;
-}
-
-const SimpleRoleBehavior& st_behavior_instance() {
-    static const SimpleRoleBehavior instance{RoleManager::ROLE_ST, false};
-    return instance;
-}
-
-const SimpleRoleBehavior& cbl_behavior_instance() {
-    static const SimpleRoleBehavior instance{RoleManager::ROLE_CBL, true};
-    return instance;
-}
-
-const SimpleRoleBehavior& cbr_behavior_instance() {
-    static const SimpleRoleBehavior instance{RoleManager::ROLE_CBR, true};
-    return instance;
-}
-
-const SimpleRoleBehavior& cdm_behavior_instance() {
-    static const SimpleRoleBehavior instance{RoleManager::ROLE_CDM, false};
-    return instance;
-}
-
-const GKBehavior& gk_behavior_instance() {
-    static const GKBehavior instance;
-    return instance;
-}
-
 }  // namespace
 
 int current_role_from_blackboard(const Blackboard& blackboard) {
@@ -594,6 +593,40 @@ int current_role_from_blackboard(const Blackboard& blackboard) {
 
 bool APBehavior::matches(const Blackboard& blackboard) const {
     return match_role(blackboard, RoleManager::ROLE_AP);
+}
+
+void APBehavior::apply_execution_feedback(
+    const ExecutionFeedback& feedback) const {
+    if (feedback.request_kind != MotionRequestKind::Kick ||
+        !is_failure(feedback.status) ||
+        !feedback.cooperative_action_id.has_value() ||
+        !feedback.sequence_id.has_value() ||
+        !state_.committed_pass.has_value() ||
+        !state_.active_kick_command.has_value()) {
+        return;
+    }
+
+    const auto& committed = *state_.committed_pass;
+    const auto& active_kick = *state_.active_kick_command;
+    const std::uint32_t action_id = *feedback.cooperative_action_id;
+    const std::uint8_t sequence_id = *feedback.sequence_id;
+    if (active_kick.mode != KickMode::TargetedPass ||
+        committed.action_id != action_id ||
+        committed.sequence_id != sequence_id ||
+        active_kick.action_id != action_id ||
+        active_kick.sequence_id != sequence_id) {
+        return;
+    }
+
+    state_.committed_pass.reset();
+    state_.active_kick_command.reset();
+    state_.pass_commit_until_s = 0.0;
+    state_.kick_active_until_s = 0.0;
+    state_.dribble_ready = false;
+    state_.kick_setup_stable_since_s = 0.0;
+    state_.pass_retry_after_s = std::max(
+        state_.pass_retry_after_s,
+        feedback.server_time + kRejectedPassRetryDelayS);
 }
 
 HighLevelCommand APBehavior::make_command(
@@ -615,6 +648,36 @@ HighLevelCommand APBehavior::make_command(
         {snapshot.self.position_m[0], snapshot.self.position_m[1]},
         0.0};
     context.ball_distance = math::planar_dist(context.ball, context.self);
+    // TeamTactics already assigned a phase/risk-aware AP target. Preserve it
+    // so ProtectLead can cover a lane instead of being silently overwritten by
+    // the legacy pressure default. Direct unit callers without a team plan
+    // still receive the historical pressure behavior.
+    if (!blackboard.exists(Blackboard::kKeyTacticalTarget)) {
+        blackboard.set(
+            Blackboard::kKeyTacticalTarget,
+            TacticalTarget{TacticalDuty::Pressure, context.ball, context.ball, 0, 1.0});
+    }
+
+    if (is_our_set_play(snapshot)) {
+        if (const auto* restart = restart_decision_from_blackboard(blackboard);
+            restart != nullptr) {
+            synchronize_restart_contact_state(state_, *restart);
+            if (!restart->plan.has_value() || !restart->self_is_taker ||
+                restart->self_locked_out ||
+                restart->phase == RestartPhase::Complete) {
+                return make_walk_command_avoiding(
+                    role_position_from_blackboard(blackboard), snapshot,
+                    std::nullopt, true, true, RoleManager::ROLE_AP);
+            }
+            return make_dribble_command(
+                context,
+                restart->plan->contact_direction_deg,
+                nullptr,
+                restart->execution_authorized,
+                RoleManager::ROLE_AP,
+                &*restart->plan);
+        }
+    }
 
     const strategy::ActionCapabilityRegistry capabilities(enable_targeted_kick);
     if (enable_pass_strategy && enable_targeted_kick &&
@@ -624,7 +687,8 @@ HighLevelCommand APBehavior::make_command(
 
         if (state_.committed_pass.has_value() &&
             (snapshot.server_time >= state_.pass_commit_until_s ||
-             !pass_commit_is_valid(snapshot, *state_.committed_pass))) {
+             !pass_commit_is_valid(
+                 snapshot, *state_.committed_pass, capabilities))) {
             state_.committed_pass.reset();
             state_.pass_commit_until_s = 0.0;
         }
@@ -643,6 +707,7 @@ HighLevelCommand APBehavior::make_command(
                 math::normalize_deg(target_heading_deg - self_yaw_deg);
         }
         if (!state_.committed_pass.has_value() && plan.selected.has_value() &&
+            snapshot.server_time >= state_.pass_retry_after_s &&
             capabilities.executable(*plan.selected, relative_target_angle_deg) &&
             context.ball_distance <= kPassPlanningEngageDistanceM) {
             strategy::CooperativeAction committed = *plan.selected;
@@ -709,6 +774,15 @@ HighLevelCommand SimpleRoleBehavior::make_command(
     Blackboard& blackboard) const {
     if (snapshot.play_mode == world::PlayMode::PlayOn) {
         if (const auto* intent = incoming_pass_intent(snapshot); intent != nullptr) {
+            blackboard.set(
+                Blackboard::kKeyTacticalTarget,
+                TacticalTarget{
+                    TacticalDuty::Receive,
+                    {intent->target_x_m, intent->target_y_m},
+                    std::array<double, 2>{
+                        snapshot.ball.position_m[0], snapshot.ball.position_m[1]},
+                    0,
+                    0.9});
             return make_walk_command_avoiding(
                 {intent->target_x_m, intent->target_y_m}, snapshot, std::nullopt,
                 true, true, role_id_, true);
@@ -739,8 +813,30 @@ HighLevelCommand SimpleRoleBehavior::make_command(
     if (defensive_opponent_clip_) {
         opponent_x_threshold = snapshot.ball.position_m[0] - 1.0;
     }
-    return make_walk_command_avoiding(
-        role_position_from_blackboard(blackboard), snapshot, opponent_x_threshold);
+    const TacticalTarget tactical_target = blackboard.exists(
+            Blackboard::kKeyTacticalTarget)
+        ? blackboard.get<TacticalTarget>(Blackboard::kKeyTacticalTarget)
+        : TacticalTarget{
+              TacticalDuty::Formation,
+              role_position_from_blackboard(blackboard),
+              std::nullopt,
+              0,
+              0.0};
+    blackboard.set(Blackboard::kKeyTacticalTarget, tactical_target);
+    if (tactical_target.duty != TacticalDuty::Formation) {
+        opponent_x_threshold.reset();
+    }
+    WalkCommand command = make_walk_command_avoiding(
+        tactical_target.position_m, snapshot, opponent_x_threshold);
+    const std::array<double, 2> self{
+        snapshot.self.position_m[0], snapshot.self.position_m[1]};
+    if (tactical_target.face_point_m.has_value() &&
+        math::planar_dist(self, tactical_target.position_m) <= kStrafeMaxDistM) {
+        command.orientation_deg = orientation_to_point_from_self(
+            snapshot, *tactical_target.face_point_m);
+        command.orientation_absolute = true;
+    }
+    return command;
 }
 
 bool GKBehavior::matches(const Blackboard& blackboard) const {
@@ -749,15 +845,7 @@ bool GKBehavior::matches(const Blackboard& blackboard) const {
 
 HighLevelCommand GKBehavior::make_command(
     const world::WorldSnapshot& snapshot,
-    Blackboard& /*blackboard*/) const {
-    static const GKNodePtr gk_tree = bt::fallback<GKDecisionContext>({
-        bt::sequence<GKDecisionContext>({
-            bt::condition<GKDecisionContext>(is_gk_our_goal_kick),
-            bt::command<GKDecisionContext>(make_gk_walk_to_ball),
-        }),
-        bt::command<GKDecisionContext>(make_gk_hold_position),
-    });
-
+    Blackboard& blackboard) const {
     GKDecisionContext context{
         snapshot,
         {snapshot.ball.position_m[0], snapshot.ball.position_m[1]},
@@ -765,31 +853,84 @@ HighLevelCommand GKBehavior::make_command(
         0.0};
     context.ball_distance = math::planar_dist(context.ball, context.self);
 
-    const auto result = gk_tree->tick(context);
-    return result.command.value_or(NeutralCommand{});
+    if (is_gk_our_goal_kick(context)) {
+        blackboard.set(
+            Blackboard::kKeyTacticalTarget,
+            TacticalTarget{
+                TacticalDuty::Pressure, context.ball, context.ball, 0, 0.8});
+        APDecisionContext clearance_context{
+            snapshot,
+            clearance_state_,
+            context.ball,
+            context.self,
+            context.ball_distance};
+        if (const auto* restart = restart_decision_from_blackboard(blackboard);
+            restart != nullptr) {
+            synchronize_restart_contact_state(clearance_state_, *restart);
+            if (!restart->plan.has_value() || !restart->self_is_taker ||
+                restart->self_locked_out ||
+                restart->phase == RestartPhase::Complete) {
+                return make_walk_command_avoiding(
+                    role_position_from_blackboard(blackboard), snapshot,
+                    std::nullopt, true, true, RoleManager::ROLE_GK, true);
+            }
+            return make_dribble_command(
+                clearance_context,
+                restart->plan->contact_direction_deg,
+                nullptr,
+                restart->execution_authorized,
+                RoleManager::ROLE_GK,
+                &*restart->plan);
+        }
+        return make_dribble_command(
+            clearance_context, 0.0, nullptr, true, RoleManager::ROLE_GK);
+    }
+    clearance_state_ = {};
+
+    const TacticalTarget tactical_target = blackboard.exists(
+            Blackboard::kKeyTacticalTarget)
+        ? blackboard.get<TacticalTarget>(Blackboard::kKeyTacticalTarget)
+        : TacticalTarget{
+              TacticalDuty::Formation,
+              role_position_from_blackboard(blackboard),
+              std::nullopt,
+              0,
+              0.0};
+    blackboard.set(Blackboard::kKeyTacticalTarget, tactical_target);
+    WalkCommand command = make_walk_command_avoiding(
+        tactical_target.position_m, snapshot, std::nullopt,
+        true, true, RoleManager::ROLE_GK, true);
+    if (tactical_target.face_point_m.has_value() &&
+        math::planar_dist(context.self, tactical_target.position_m) <=
+            kStrafeMaxDistM) {
+        command.orientation_deg = orientation_to_point_from_self(
+            snapshot, *tactical_target.face_point_m);
+        command.orientation_absolute = true;
+    }
+    return command;
 }
 
-std::optional<HighLevelCommand> select_role_behavior(
+std::optional<HighLevelCommand> RoleBehaviorSet::select(
     const world::WorldSnapshot& snapshot,
     Blackboard& blackboard,
     RoleManager& role_manager,
     bool enable_pass_strategy,
-    bool enable_targeted_kick) {
+    bool enable_targeted_kick) const {
     // AP is the only behavior that needs RoleManager (to latch the set-play
     // push); dispatch it directly and let the other behaviors share the
     // 2-param base interface.
-    if (ap_behavior_instance().matches(blackboard)) {
-        return ap_behavior_instance().make_command(
+    if (ap_.matches(blackboard)) {
+        return ap_.make_command(
             snapshot, blackboard, role_manager, enable_pass_strategy,
             enable_targeted_kick);
     }
-    static const std::array<const RoleBehavior*, 6> behaviors{
-        &cbm_behavior_instance(),
-        &st_behavior_instance(),
-        &cbl_behavior_instance(),
-        &cbr_behavior_instance(),
-        &cdm_behavior_instance(),
-        &gk_behavior_instance(),
+    const std::array<const RoleBehavior*, 6> behaviors{
+        &cbm_,
+        &st_,
+        &cbl_,
+        &cbr_,
+        &cdm_,
+        &gk_,
     };
 
     for (const auto* behavior : behaviors) {
@@ -800,9 +941,19 @@ std::optional<HighLevelCommand> select_role_behavior(
     return std::nullopt;
 }
 
-void reset_role_behavior_state() {
-    ap_behavior_instance().reset_state();
-    gk_behavior_instance().reset_state();
+void RoleBehaviorSet::reset() const {
+    ap_.reset_state();
+    cbm_.reset_state();
+    st_.reset_state();
+    cbl_.reset_state();
+    cbr_.reset_state();
+    cdm_.reset_state();
+    gk_.reset_state();
+}
+
+void RoleBehaviorSet::apply_execution_feedback(
+    const ExecutionFeedback& feedback) const {
+    ap_.apply_execution_feedback(feedback);
 }
 
 }  // namespace decision

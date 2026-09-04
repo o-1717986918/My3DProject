@@ -98,7 +98,7 @@ levels below.
 
 ## Current capability baseline
 
-Accepted competition baseline: commit `793c5af`.
+Accepted competition baseline: commit `3436d59`.
 
 Active locomotion candidate checkpoint (2026-09-01): the complete phase-v2
 actor is wired into Apollo as opt-in `FastWalkV2`, with all 21 body joints
@@ -116,8 +116,16 @@ Available now:
   assignment, simple ball-relative formation, and compact team communication;
 - stable approach/contact/recover fallback;
 - one-step direct and leading pass candidates;
+- an opt-in residual-table targeted pass over the currently measured
+  1.45--2.55 m, +/-2 degree, 1.43 m/s envelope;
 - `Proposed -> Ready` communication, receiver target motion, safe commitment
   expiry, and physical contact telemetry;
+- deterministic full-team tactical assignments for support, unmarking,
+  pressure, cover, marking, lane blocking, interception, and goalkeeper
+  goal-line defense;
+- restart coordination with deterministic taker election, receiver positioning,
+  execution feedback, release verification, bounded fallback, and post-release
+  lockout;
 - strict 7v7 evidence that the strategy-to-contact path runs without breaking
   the existing team loop.
 
@@ -134,9 +142,9 @@ contract for the retained walk, contact, neutral, and get-up actions.
 
 Binding capability gaps, in priority order:
 
-1. the current contact moves the ball only about 0.186--0.644 m in preserved
-   trials, so useful pass, shot, clear, and goalkeeper distribution do not yet
-   exist;
+1. the fixed contact moves the ball only about 0.186--0.644 m in preserved
+   trials, while the experimental residual table is limited to one short-pass
+   envelope; useful shot, clear, and goalkeeper distribution do not yet exist;
 2. the active motion layer ignores requested target speed/range and always
    executes the same forward-walk contact macro;
 3. the complete high-speed-walk actor passes wiring/coexistence but not lateral
@@ -147,8 +155,9 @@ Binding capability gaps, in priority order:
    clear, and hold candidates in one decision;
 6. the goalkeeper holds a center position or walks toward a goal-kick ball but
    lacks interception, block, recovery, and distribution;
-7. formations and role behaviors use little opponent, score/time, uncertainty,
-   support, marking, or passing-lane information;
+7. score/time risk modes and phase-specific formation changes are not yet
+   complete, although opponent, uncertainty, support, marking, lane, and
+   interception signals now feed the tactical plan;
 8. no labeled outcome corpus yet supports evaluator fitting, opponent modeling,
    or safe self-play.
 

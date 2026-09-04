@@ -23,8 +23,8 @@ decision::KickCommand make_targeted(double speed, double angle_deg) {
     decision::KickCommand command;
     const double angle_rad = angle_deg * 3.14159265358979323846 / 180.0;
     command.target_point_m = std::array<double, 2>{
-        1.0 + 4.0 * std::cos(angle_rad),
-        2.0 + 4.0 * std::sin(angle_rad),
+        1.0 + 2.0 * std::cos(angle_rad),
+        2.0 + 2.0 * std::sin(angle_rad),
     };
     command.requested_ball_speed_mps = speed;
     command.mode = decision::KickMode::TargetedPass;
@@ -58,7 +58,7 @@ int main() {
         fast.kind != behavior::KickProfileKind::ParameterizedContact ||
         !near(slow.local_drive_target_m[0], 0.50) ||
         !near(fast.local_drive_target_m[0], 0.85) ||
-        !near(slow.target_distance_m, 4.0) ||
+        !near(slow.target_distance_m, 2.0) ||
         slow.mode != decision::KickMode::TargetedPass ||
         !(fast.drive_duration_s > slow.drive_duration_s)) {
         std::cerr << "speed request was not mapped monotonically and boundedly\n";
@@ -66,13 +66,13 @@ int main() {
     }
 
     const auto left = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(10.0 / 9.0, 10.0), true);
+        snapshot, make_targeted(10.0 / 9.0, 1.5), true);
     const auto right = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(10.0 / 9.0, -10.0), true);
+        snapshot, make_targeted(10.0 / 9.0, -1.5), true);
     if (!(left.local_drive_target_m[1] > -0.04) ||
         !(right.local_drive_target_m[1] < -0.04) ||
-        !near(left.relative_target_angle_deg, 10.0, 1.0e-8) ||
-        !near(right.relative_target_angle_deg, -10.0, 1.0e-8)) {
+        !near(left.relative_target_angle_deg, 1.5, 1.0e-8) ||
+        !near(right.relative_target_angle_deg, -1.5, 1.0e-8)) {
         std::cerr << "target direction did not produce the expected lateral bias\n";
         return 1;
     }

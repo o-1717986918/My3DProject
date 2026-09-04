@@ -104,9 +104,11 @@ add_library(decision_core
     src/decision/behavior_tree.cc
     src/decision/decision_manager.cc
     src/decision/formation.cc
+    src/decision/restart_coordinator.cc
     src/decision/role_behaviors.cc
     src/decision/role_manager_core.cc
     src/decision/role_manager_assignment.cc
+    src/decision/team_tactics.cc
     src/decision/walk_planner.cc
 )
 
@@ -259,6 +261,12 @@ if(BUILD_TESTING)
     target_compile_options(field_geometry_test PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME field_geometry_test COMMAND field_geometry_test)
 
+    add_executable(formation_strategy_test tests/formation_strategy_test.cc)
+    target_link_libraries(formation_strategy_test PRIVATE decision_core)
+    target_include_directories(formation_strategy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(formation_strategy_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME formation_strategy_test COMMAND formation_strategy_test)
+
     add_executable(strategy_core_test tests/strategy_core_test.cc)
     target_link_libraries(strategy_core_test PRIVATE strategy_core)
     target_include_directories(strategy_core_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -284,6 +292,30 @@ if(BUILD_TESTING)
     target_include_directories(decision_strategy_integration_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(decision_strategy_integration_test PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME decision_strategy_integration_test COMMAND decision_strategy_integration_test)
+
+    add_executable(execution_feedback_test tests/execution_feedback_test.cc)
+    target_link_libraries(execution_feedback_test PRIVATE decision_core)
+    target_include_directories(execution_feedback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(execution_feedback_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME execution_feedback_test COMMAND execution_feedback_test)
+
+    add_executable(team_tactics_test tests/team_tactics_test.cc)
+    target_link_libraries(team_tactics_test PRIVATE decision_core)
+    target_include_directories(team_tactics_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(team_tactics_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME team_tactics_test COMMAND team_tactics_test)
+
+    add_executable(decision_safety_test tests/decision_safety_test.cc)
+    target_link_libraries(decision_safety_test PRIVATE decision_core)
+    target_include_directories(decision_safety_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(decision_safety_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME decision_safety_test COMMAND decision_safety_test)
+
+    add_executable(restart_coordinator_test tests/restart_coordinator_test.cc)
+    target_link_libraries(restart_coordinator_test PRIVATE decision_core)
+    target_include_directories(restart_coordinator_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(restart_coordinator_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME restart_coordinator_test COMMAND restart_coordinator_test)
 
     add_executable(kick_execution_profile_test
         tests/kick_execution_profile_test.cc

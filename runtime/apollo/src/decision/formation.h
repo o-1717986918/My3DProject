@@ -6,6 +6,7 @@
 #include <array>
 #include <vector>
 
+#include "src/strategy/tactical_state.h"
 #include "src/world/play_mode.h"
 
 namespace decision {
@@ -16,6 +17,8 @@ struct FormationContext {
     world::PlayMode play_mode{world::PlayMode::PlayOn};
     double field_length_m{55.0};
     double field_width_m{36.0};
+    strategy::TacticalPhase phase{strategy::TacticalPhase::Unknown};
+    strategy::TacticalRiskMode risk_mode{strategy::TacticalRiskMode::Balanced};
 };
 
 /// Computes fixed set-play or ball-relative open-play role positions.
