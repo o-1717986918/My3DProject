@@ -149,8 +149,9 @@ This evidence validates command-to-contact wiring, not useful pass range or
 receiver completion. The current fixed contact macro is weak and variable; it
 does not yet satisfy the roadmap's 2--5 m corridor or 16/20 completion gates.
 
-After the residual envelope was made explicit, the in-envelope 2 m scenario
-was rerun on 2026-09-04:
+An in-envelope 900-cycle trace was collected on 2026-09-04 using the same
+residual table (the final shared-envelope commit followed this trace). Its
+2.42 m target lies inside the now-declared envelope:
 
 ```bash
 APOLLO_ENABLE_PARAMETERIZED_KICK=1 MATCH_PASS_SCENARIO=1 \
@@ -161,8 +162,11 @@ APOLLO_ENABLE_PARAMETERIZED_KICK=1 MATCH_PASS_SCENARIO=1 \
 
 It completed 14/14 agents cleanly with zero server errors or illegal defense,
 12 parameterized-kick samples, 18 Ready samples, and one measured pass-contact
-event. The out-of-envelope 3.65 m fixture correctly produced no targeted kick;
-that is an intentional safety rejection, not a failed fixed-kick fallback.
+event. The final-envelope code has since passed the default 600-cycle 7v7
+gate and all unit tests; a repeat of the parameterized fixture is still a
+pending verification item because the receiver reset is timing-sensitive. The
+out-of-envelope 3.65 m fixture correctly produced no targeted kick; that is an
+intentional safety rejection, not a failed fixed-kick fallback.
 
 To inspect a preserved run:
 
