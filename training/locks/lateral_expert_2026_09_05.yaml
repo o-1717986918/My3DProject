@@ -1,7 +1,7 @@
 schema_version: 1
 recorded_at: 2026-09-05
 stage: lateral_left_expert
-status: predeclared_training_and_promotion_contract
+status: first_stage_below_speed_gate_speed_continuation_predeclared
 
 purpose:
   - train_one_pure_lateral_direction_without_forgetting_forward_assets
@@ -69,3 +69,41 @@ stop_rules:
   - reject_if_either_direct_left_or_mirrored_right_fails
   - reject_if_speed_improves_by_sacrificing_upright_completion
   - do_not_call_the_result_omnidirectional
+
+first_stage_result:
+  run: /home/win98/rl_runs/stable-motion/lateral-left-expert-s20261171-v1
+  source_revision: 4f21c5cc903f0baa0f26c5748aa0696b4db28c3f
+  requested_and_effective_timesteps: 1179648
+  initial_sampled_fall_rate: 0.0625
+  midpoint_sampled_fall_rate: 0.0625
+  final_sampled_fall_rate: 0.1875
+  midpoint_model_sha256: 8091e97c7b9cb6e85ff7123422e83c62a1229d783793f2af53ee8d076e4d2c4a
+  final_model_sha256: 3bee6448c66ad312be4876f9cdec11e5e10c2c5e52b0bb2ff0c9eca599b9f671
+  fixed_seed: 20261172
+  fixed_030_mps_final:
+    left_upright: 64
+    right_mirrored_upright: 64
+    left_actual_mps: 0.2020914500268272
+    right_actual_mps: -0.2053326778853039
+    promotion_speed_gate_passed: false
+  fixed_045_mps_final_diagnostic:
+    left_upright: 64
+    right_mirrored_upright: 64
+    left_actual_mps: 0.33803643027631514
+    right_actual_mps: -0.3416644327524311
+  decision: retain_as_continuation_checkpoint_not_runtime_asset
+
+speed_continuation:
+  stage: lateral_left_speed
+  initialization_checkpoint: /home/win98/rl_runs/stable-motion/lateral-left-expert-s20261171-v1/checkpoints/000001179648
+  requested_timesteps: 1179648
+  seed: 20261177
+  rationale:
+    - upstream_t1_recipe_trains_lateral_commands_up_to_one_mps
+    - first_stage_proved_bilateral_stability_but_undertracked_low_speed
+    - separate_speed_learning_from_later_handoff_recovery
+  additional_fixed_045_mps_gates:
+    absolute_median_lateral_speed_mps_gte: 0.38
+    median_lateral_tracking_rmse_mps_lte: 0.12
+    upright_completion_rate_gte: 0.95
+  required_next_stage_if_speed_passes: lateral_transition_recovery

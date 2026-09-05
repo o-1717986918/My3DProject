@@ -380,6 +380,43 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.pose": -0.04,
         "reward.fall": -180.0,
     },
+    # Speed-focused continuation after the first lateral expert has established
+    # a stable bilateral primitive through exact reflection. The broader
+    # command magnitude follows the upstream T1 walk recipe's genuinely lateral
+    # command surface; handoff noise is deliberately reduced here and restored
+    # in the next transition-recovery stage.
+    "lateral_left_speed": {
+        "lin_vel_x": [0.0, 0.0],
+        "lin_vel_y": [0.30, 0.75],
+        "ang_vel_yaw": [0.0, 0.0],
+        "gait_frequency": [1.5, 2.1],
+        "stand_probability": 0.10,
+        "axis_aligned_command_probability": 0.0,
+        "command_resample_steps": 100,
+        "reset_joint_noise": 0.015,
+        "reset_joint_velocity_noise": 0.4,
+        "reset_policy_action_noise": 0.5,
+        "reset_root_velocity_noise": 0.06,
+        "reset_yaw_range": 0.08,
+        "push_enable": True,
+        "push_interval_steps": 200,
+        "push_magnitude": [0.01, 0.05],
+        "action_delay_max_steps": 1,
+        "reward.tracking_linear": 12.0,
+        "reward.tracking_yaw": 8.0,
+        "reward.upright": 3.0,
+        "reward.height": 2.0,
+        "reward.alive": 0.75,
+        "reward.lateral_tracking": -16.0,
+        "reward.yaw_rate_error": -8.0,
+        "reward.vertical_velocity": -0.50,
+        "reward.angular_xy": -0.45,
+        "reward.action_rate": -0.04,
+        "reward.action_acceleration": -0.018,
+        "reward.foot_slip": -0.03,
+        "reward.pose": -0.04,
+        "reward.fall": -180.0,
+    },
     # Directional expert used to repair the inherited policy's weakest action.
     # It is a distillation teacher, not a standalone competition replacement.
     "right_turn_expert": {

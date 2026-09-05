@@ -105,3 +105,17 @@ def test_lateral_left_expert_is_pure_and_transition_robust():
     assert stage["command_resample_steps"] < 100
     assert stage["reward.lateral_tracking"] <= -10.0
     assert stage["reward.fall"] <= -150.0
+
+
+def test_lateral_speed_continuation_increases_demand_without_coupled_axes():
+    stage = STAGES["lateral_left_speed"]
+    robust = STAGES["lateral_left_expert"]
+
+    assert stage["lin_vel_x"] == [0.0, 0.0]
+    assert stage["ang_vel_yaw"] == [0.0, 0.0]
+    assert stage["lin_vel_y"][0] >= 0.30
+    assert stage["lin_vel_y"][1] > robust["lin_vel_y"][1]
+    assert stage["reward.lateral_tracking"] < robust["reward.lateral_tracking"]
+    assert stage["reset_joint_velocity_noise"] < robust["reset_joint_velocity_noise"]
+    assert stage["reset_policy_action_noise"] < robust["reset_policy_action_noise"]
+    assert stage["reward.fall"] <= -150.0
