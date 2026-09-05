@@ -147,10 +147,10 @@ MATCH_REQUIRE_RAPID_TURN=1 scripts/run_web_match.sh 30000
 rollouts have zero flight phase, so runtime telemetry and project documentation
 call the capability `FastWalkV2`, not running. The launcher rejects a missing
 model and any model whose SHA-256 differs from
-`c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b`.
+`6214b656c28f0b95300287e5e3a26508078a6a8d036dbeda0ec5130051a190d6`.
 
 The source-tree WSL launchers mount parameterized contact, the bounded active
-learned kick, recovered FastWalkV2 forward specialist and RapidTurnV1 by
+learned kick, transition-recovered FastWalkV2 forward specialist and RapidTurnV1 by
 default:
 
 ```bash
@@ -199,12 +199,15 @@ training reward is higher. Promotion requires:
 The source-tree FastWalkV2/RapidTurnV1 composition is usable but still under
 training. It uses
 the exact 80-to-23 observation/decoder contract and full 21-body-joint policy
-targets, exact T1 joint-limit clamping, and Apollo head tracking. A 1,800-cycle
-combined run produced 47 FastWalk, 163 rapid-turn samples and four independent
-falls; stable-walk control produced none. The composition remains enabled
-because zero falls are not a prerequisite for useful play and recovery is
-automatic, but this difference is the next training target. Portable binary
-defaults remain off because the ONNX files are external-local assets.
+targets, exact T1 joint-limit clamping, and Apollo head tracking. The recovered
+parent composition produced 47 FastWalk, 163 rapid-turn samples and four
+independent falls in 1,800 cycles. After transition-recovery training, the same
+duration produced 39 FastWalk and 161 rapid-turn samples with one independent
+fall (five GetUp status samples), followed by successful recovery. Stable-walk
+control produced no falls. The composition remains enabled because zero falls
+are not a prerequisite for useful play; continued promotion compares
+time-to-position benefit against recovery loss. Portable binary defaults remain
+off because the ONNX files are external-local assets.
 
 The current v4/GMR result stays in the training workbench because it needs an
 external restricted reference and its 80-value input is incompatible with the

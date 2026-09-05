@@ -76,8 +76,8 @@ esac
 
 case "$fast_walk_mode" in
     1)
-        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-$HOME/rl_runs/stable-motion/fast-walk-recovery-s20261130-v1/policy.onnx}
-        fast_walk_sha256=${APOLLO_FAST_WALK_SHA256:-778614c0af7995e2b50d5f677ecbf27b1026c98942e07a22e85ddf2595b21337}
+        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-$HOME/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/policy.onnx}
+        fast_walk_sha256=${APOLLO_FAST_WALK_SHA256:-6214b656c28f0b95300287e5e3a26508078a6a8d036dbeda0ec5130051a190d6}
         if [[ -z "$fast_walk_model" || ! -f "$fast_walk_model" ]]; then
             echo "APOLLO_FAST_WALK_MODEL must name the phase-v2 ONNX file" >&2
             exit 2

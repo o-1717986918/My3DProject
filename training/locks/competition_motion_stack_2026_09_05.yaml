@@ -12,12 +12,27 @@ deployment_contract:
 
 fast_forward:
   runtime_name: FastWalkV2
-  path: /home/win98/rl_runs/stable-motion/fast-walk-recovery-s20261130-v1/policy.onnx
-  sha256: 778614c0af7995e2b50d5f677ecbf27b1026c98942e07a22e85ddf2595b21337
-  manifest_sha256: 24825f59e6295467b0f3ab90feaea1427d640a76d0eab97eaac571110c93a22f
-  onnx_parity_sha256: 47f71d3158f5211aac59d4ad555bb701707983f25f1e2f18fd2f14569a5c058a
-  requested_timesteps: 1048576
+  path: /home/win98/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/policy.onnx
+  sha256: 6214b656c28f0b95300287e5e3a26508078a6a8d036dbeda0ec5130051a190d6
+  manifest_sha256: ac592e1ac744613c5285975bef49b6cc6136d6215e27859e1d5f57ab74b5c62f
+  onnx_parity_sha256: ec308777c167abd627258025751af94a67c53c3d6b797aed4e95f6b86b05f0b2
+  parent_checkpoint: /home/win98/rl_runs/stable-motion/fast-walk-recovery-s20261130-v1/checkpoints/000001179648
+  source_revision: 6d584b6b5687bbc61054d8eae447c9e2f83e43b0
+  requested_timesteps: 1179648
   effective_timesteps: 1179648
+  onnx_parity_max_abs_error: 0.000011444091796875
+  sampled_hard_reset_evaluation:
+    initial_fall_rate: 0.25
+    final_fall_rate: 0.1875
+    initial_average_episode_length: 386.4375
+    final_average_episode_length: 415.625
+    final_foot_slip_cost: 169.9247589111328
+  frozen_command_suite:
+    path: /home/win98/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/eval-suite-s20261162
+    passed_commands: 7
+    total_commands: 10
+    failed_commands: [reverse, pure_right_strafe, pure_right_turn]
+    summary_sha256: f6886d10b8fd7902e02897bbefa3ef04225ee1f0415fe99f4f776843e8a78b2c
   active_envelope:
     minimum_forward_command_mps: 0.95
     maximum_absolute_lateral_command_mps: 0.04
@@ -62,7 +77,7 @@ server_evidence:
     fast_walk_samples: 57
     get_up_samples: 0
     ordered_file_set_sha256: 0f0251f15caf4dbc746ba710f7afd145c9a1311a549cfe003f9cf08a2b6f1518
-  composed_1800:
+  recovered_parent_composed_1800:
     path: /home/win98/rl_runs/stable-motion/server-composite-motion-s20261151
     fast_walk_samples: 47
     rapid_turn_left_samples: 82
@@ -70,6 +85,22 @@ server_evidence:
     distinct_fall_events: 4
     get_up_status_samples: 32
     ordered_file_set_sha256: d46cc3d8859451a60cc87b7c10e06193be2ef77ca11baf96a5702e3d0753c71d
+  transition_recovered_composed_1800:
+    path: /home/win98/rl_runs/stable-motion/server-transition-composite-s20261163
+    fast_walk_samples: 39
+    rapid_turn_left_samples: 102
+    rapid_turn_right_mirrored_samples: 59
+    distinct_fall_events: 1
+    get_up_status_samples: 5
+    all_clients_clean_exit: true
+    server_errors: 0
+    illegal_defense_events: 0
+    ordered_file_set_sha256: 8692727eb34f991602d5626a2d49aa780ded84bd03e4aaae4977decf2ce43049
+    fall_timeline:
+      player: My3D-A-3
+      get_up_cycles: [1700, 1710, 1720, 1730, 1740]
+      preceding_specialist_sample: RapidTurnV1Left_at_cycle_1620
+      interpretation: fall_emerged_during_subsequent_stable_walk_transition_not_uniquely_attributable_to_one_specialist
   stable_walk_control_1800:
     path: /home/win98/rl_runs/stable-motion/server-stable-1800-s20261152
     distinct_fall_events: 0

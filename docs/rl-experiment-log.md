@@ -1369,3 +1369,33 @@ All five server traces contain exactly 14 MuJoCo actuator warnings near
 initial beam activations and are not attributed to learned motion ownership.
 The complete asset and report hashes are recorded in
 `training/locks/competition_motion_stack_2026_09_05.yaml`.
+
+## Transition-recovered FastWalk promotion — 2026-09-05
+
+`fast_walk_transition_recovery` continues the recovered forward checkpoint for
+1,179,648 steps with randomized initial joint velocity, previous policy action,
+root velocity and one-frame action delay. The sampled hard-reset evaluation
+improves from a 0.25 to 0.1875 fall fraction and from 386.44 to 415.63 mean
+episode frames. Its final foot-slip cost is 169.925, slightly above the initial
+161.685, so the result is not described as a universal improvement. Exported
+ONNX/JAX parity passes at maximum absolute error `1.1444e-5`; model SHA-256 is
+`6214b656c28f0b95300287e5e3a26508078a6a8d036dbeda0ec5130051a190d6`.
+
+The frozen ten-command surface remains 7/10. Stand, precision/fast forward,
+left strafe, left turn and both curves pass; reverse, direct right strafe and
+direct right turn fail. This result therefore replaces only the narrow
+long-forward FastWalkV2 asset. RapidTurnV1 continues to own pure yaw, and stable
+walk owns all unsupported, precision and cooldown commands.
+
+The 1,800-cycle 7v7 A/B run at
+`/home/win98/rl_runs/stable-motion/server-transition-composite-s20261163`
+records 39 FastWalk, 102 direct-left-turn and 59 mirrored-right-turn status
+samples. All 14 clients exit cleanly, with no server or illegal-defense errors.
+One player enters one recoverable fall episode (five GetUp status samples at
+cycles 1700--1740), versus four events/32 samples for the parent composition.
+The last sampled specialist was a left turn at cycle 1620 and the height then
+degraded during ordinary walking, so attribution to one specialist would be
+unsupported. This evidence justifies promotion by lower recovery burden and
+continued match utility, while keeping transition training open. The ordered
+server file-set hash is
+`8692727eb34f991602d5626a2d49aa780ded84bd03e4aaae4977decf2ce43049`.

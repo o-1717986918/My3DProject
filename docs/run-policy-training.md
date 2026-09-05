@@ -1,6 +1,6 @@
 # RCSSServerMJ running-policy development plan
 
-Status: source-tree matches use a recovered FastWalkV2 forward specialist and
+Status: source-tree matches use a transition-recovered FastWalkV2 forward specialist and
 a bilateral RapidTurnV1 specialist by default, with stable v1 as the bounded
 fallback. Long 7v7 traces still contain falls, so transition replay,
 stable-forward and lateral training remains active as of 2026-09-05. Non-zero
@@ -288,10 +288,12 @@ completion, 1.499 m/s median CPU speed and 0.092 m/s tracking RMSE, but drifted
 5.45 m and had 0% qualifying aerial-phase episodes. A straight-recovery run
 reduced MJX drift further to 4.77 m but remained outside the 0.25 m gate.
 
-No candidate has been copied into the runtime and the original `walk.onnx`
-remains the competition default. Detailed commands, rejected runs and source
-choices are recorded in `rl-experiment-log.md` and
-`robot-soccer-action-research.md`.
+The original `walk.onnx` remains the bounded precision/fallback controller.
+Later narrow-domain FastWalkV2 and RapidTurnV1 specialists are mounted by the
+source-tree WSL launchers through explicit hash-locked flags; portable binary
+defaults remain off because those ONNX assets are external-local. Detailed
+commands, rejected runs and source choices are recorded in
+`rl-experiment-log.md` and `robot-soccer-action-research.md`.
 
 The rejected v4 actor and its external reference now have a guarded deployment
 adapter, not release status. A full-target 800-cycle 7v7 experiment completed
