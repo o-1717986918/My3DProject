@@ -74,6 +74,14 @@ constexpr double kDribbleSideClearanceM = 0.55;
 constexpr double kDribbleSideStepBehindThresholdM = 0.1;
 constexpr double kDribbleMaxLateralOffsetM = 0.08;
 constexpr double kDribbleMaxAheadM = 0.15;
+// Pressure possession must not inherit the precision action's centimetre-scale
+// setup. These values restore Apollo's proven continuous walk-through-ball
+// envelope as a separate, observable control path. A calm, explicitly selected
+// Dribble/Pass/Shoot/Clear action still uses the stricter contract below.
+constexpr double kPressurePushSetupDistanceM = 0.60;
+constexpr double kPressurePushSetupToleranceM = 0.25;
+constexpr double kPressurePushMaximumLateralOffsetM = 0.40;
+constexpr int kPressurePushSetupModeKey = 100;
 // Ported from the validated Python competition path. The motion layer drives
 // forward for 0.65 s and stabilizes for 0.35 s, so the decision layer owns the
 // KickCommand variant for the complete one-second macro.
@@ -404,6 +412,113 @@ HighLevelCommand make_dribble_command(
             context.snapshot.self.orientation_wxyz);
     const double orientation_error_deg = std::abs(
         math::normalize_deg(absolute_direction_deg - self_yaw_deg));
+
+    // No explicit cooperative action means this is ordinary possession or a
+    // pressure recovery, not permission to spend 1.2--1.8 seconds seeking a
+    // static procedural release slot. Restore the original Apollo two-phase
+    // continuous push: approach a broad point behind the ball, then keep
+    // walking one metre through it. This path deliberately emits WalkCommand;
+    // exact procedural contact remains available only for an explicitly
+    // selected Dribble/Pass/Shoot/Clear action.
+    const bool use_pressure_push =
+        cooperative_action == nullptr && restart_plan == nullptr &&
+        context.snapshot.play_mode == world::PlayMode::PlayOn;
+    if (use_pressure_push) {
+        if (context.state.kick_setup_mode_key != kPressurePushSetupModeKey) {
+            context.state.pressure_push_latched = false;
+            context.state.dribble_ready = false;
+            context.state.kick_pre_settling = false;
+            context.state.kick_pre_settle_stable_since_s = 0.0;
+            context.state.kick_setup_stable_since_s = 0.0;
+            context.state.kick_setup_started_s = 0.0;
+            context.state.kick_setup_last_update_s = 0.0;
+            context.state.kick_setup_best_pose_error_m = -1.0;
+            context.state.kick_setup_last_progress_s = 0.0;
+            context.state.last_kick_setup_gate = -1;
+        }
+        context.state.kick_setup_mode_key = kPressurePushSetupModeKey;
+
+        const std::array<double, 2> perpendicular{-direction[1], direction[0]};
+        const std::array<double, 2> setup_target{
+            context.ball[0] - direction[0] * kPressurePushSetupDistanceM,
+            context.ball[1] - direction[1] * kPressurePushSetupDistanceM,
+        };
+        const std::array<double, 2> push_target{
+            context.ball[0] + direction[0] * field_geometry::kPushPastBallM,
+            context.ball[1] + direction[1] * field_geometry::kPushPastBallM,
+        };
+        const std::array<double, 2> self_from_ball{
+            context.self[0] - context.ball[0],
+            context.self[1] - context.ball[1],
+        };
+        const double along_direction =
+            self_from_ball[0] * direction[0] +
+            self_from_ball[1] * direction[1];
+        const double signed_lateral_offset =
+            self_from_ball[0] * perpendicular[0] +
+            self_from_ball[1] * perpendicular[1];
+        const double lateral_offset = std::abs(signed_lateral_offset);
+        const bool needs_side_step =
+            along_direction > -kDribbleSideStepBehindThresholdM &&
+            lateral_offset < kDribbleSideClearanceM;
+        std::array<double, 2> approach_target = setup_target;
+        if (needs_side_step) {
+            const double side_sign = signed_lateral_offset < 0.0 ? -1.0 : 1.0;
+            approach_target = {
+                context.ball[0] + perpendicular[0] * side_sign *
+                    kDribbleSideDistanceM,
+                context.ball[1] + perpendicular[1] * side_sign *
+                    kDribbleSideDistanceM,
+            };
+        }
+        if (!context.state.pressure_push_latched &&
+            math::planar_dist(context.self, setup_target) <=
+                kPressurePushSetupToleranceM) {
+            context.state.pressure_push_latched = true;
+        }
+        const bool push_position_valid =
+            along_direction <= kDribbleMaxAheadM &&
+            lateral_offset <= kPressurePushMaximumLateralOffsetM &&
+            context.ball_distance <= field_geometry::kPushBallEngageDistanceM;
+        if (context.state.pressure_push_latched && !push_position_valid) {
+            context.state.pressure_push_latched = false;
+        }
+        const auto trace_pressure_phase = [&](int gate, const char* phase) {
+            if (context.state.last_kick_setup_gate == gate) return;
+            context.state.last_kick_setup_gate = gate;
+            std::cerr
+                << "MY3D_KICK_SETUP player=" << context.snapshot.player_number
+                << " mode=forward phase=" << phase
+                << " action_id=0 setup_elapsed=0"
+                << " ball_distance=" << context.ball_distance
+                << " behind_error="
+                << (-along_direction - kPressurePushSetupDistanceM)
+                << " lateral_error=" << signed_lateral_offset
+                << " yaw_error_deg=" << orientation_error_deg
+                << " speed="
+                << math::norm2({
+                       context.snapshot.self.lin_vel_b[0],
+                       context.snapshot.self.lin_vel_b[1]})
+                << " tilt_rate_deg_s=0 leg_rate_deg_s=0\n";
+        };
+        if (!context.state.pressure_push_latched) {
+            trace_pressure_phase(
+                needs_side_step ? 101 : 102,
+                needs_side_step ? "pressure-side-relocate" :
+                                  "pressure-approach");
+            WalkCommand approach_command = make_walk_command_avoiding(
+                approach_target, context.snapshot, std::nullopt, true, true,
+                motion_role_id, true, false);
+            approach_command.orientation_deg = absolute_direction_deg;
+            approach_command.orientation_absolute = true;
+            return approach_command;
+        }
+        trace_pressure_phase(103, "pressure-push");
+        return make_walk_command_avoiding(
+            push_target, context.snapshot, std::nullopt, true, true,
+            motion_role_id, false, false);
+    }
+    context.state.pressure_push_latched = false;
 
     // Setup time belongs to one semantic action, not merely to a similar
     // heading. Without this key, a newly selected Dribble/Shoot/Clear action

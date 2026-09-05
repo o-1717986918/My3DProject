@@ -103,6 +103,12 @@ Strategy code is isolated in `runtime/apollo/src/strategy/` and compiled as
   (2.0 m for a leading target). Commitment is bounded to six seconds.
 - The receiver moves toward the proposed target while facing the ball. Lost or
   stale intents cannot permanently block the existing behavior.
+- Open play now separates two execution contracts. With no admitted
+  cooperative action, the AP uses the original broad continuous
+  walk-through-ball envelope; only an explicitly committed
+  Dribble/Pass/Shoot/Clear action enters precision positioning, settling and a
+  typed kick request. This prevents failed high-level admission from silently
+  degrading ordinary pressure tempo.
 - Telemetry includes score/time, phase, possession, candidate and rejection
   counts, pass type, action/sequence IDs, receiver, ready state, target,
   interception margin, utility, and exact kick mode.

@@ -25,6 +25,18 @@ the deterministic kick bank and forward contact as explicit fallbacks. Tactical
 value still requires matched-seed, side-swapped evidence rather than source
 complexity or one favourable score.
 
+The latest execution audit found a separate offensive regression: an ordinary
+AP push with no selected cooperative action still inherited the precision
+controller's 0.34 m contact target and centimetre-scale settle loop. Across
+recent full matches this produced roughly 8,000--10,500 sampled `forward`
+approach states but only a handful of actual fallback contacts. The ordinary
+path is now separated from exact ball actions and restores Apollo's permissive
+0.60 m setup, 0.25 m latch tolerance, 0.40 m lateral envelope and continuous
+walk one metre through the ball. Two post-fix comparisons both drew 0:0 and
+kept the ball predominantly in the opponent half. That is a repeatable recovery
+from the preceding loss pattern, but two draws still do not establish
+superiority.
+
 ## 2. Evidence from the retained match
 
 Run directory:
@@ -232,6 +244,40 @@ strategy tuning. A stable lateral step/body-block primitive, followed by a
 separately evaluated dive, is now a real goalkeeper capability requirement;
 more smother depth constants cannot substitute for it.
 
+### 4.9 Pressure-push separation and first repeated recovery
+
+The tactics-off comparison
+`apollo-vs-base-tactics-off-s20261239-v1` finished 0:2. Known-possession samples
+were 3079:7308 and the visible-ball opponent-half fraction was 22.37%. Because
+the server stack is stochastic, this single ablation does not prove every
+`TeamTactics` duty is useful, but it gives no support to deleting the whole
+team layer. Its strongest diagnostic was instead 10,494 `forward approach`
+samples and only 16 fallback-contact transitions.
+
+Source comparison then found that the developed generic AP path had ceased to
+be behaviorally equivalent to pristine Apollo. Even after specialist admission
+failed, it attempted the exact action's 0.34 m setup, three-degree heading and
+settle state. Pristine Apollo uses a broad 0.60 m setup point, latches within
+0.25 m, accepts 0.40 m lateral displacement and continuously walks to a point
+one metre beyond the ball. The runtime now has two explicit paths:
+
+- an ordinary/pressured continuous `WalkCommand` push using that broad Apollo
+  envelope; and
+- an explicitly selected Dribble/Pass/Shoot/Clear action using the narrow
+  procedural contract, transition checks and bounded named fallback.
+
+`apollo-vs-base-pressure-push-s20261240-v1` finished 0:0. Known possession was
+5259:5533; visible-ball median x was +5.52 m and 77.02% of visible cycles were
+in the opponent half. The independent follow-up
+`apollo-vs-base-pressure-push-s20261241-v1` also finished 0:0, with known
+possession 5206:6403, visible-ball median x +14.91 m and 92.09% opponent-half
+occupancy. The ball reached the opponent goal line, but near the corner rather
+than through the goal. Exact kick samples remained zero in both runs, and 21
+then 17 independent GetUp episodes were still observed, mostly after ordinary
+Walk. The result is therefore a repeatable territory/defensive recovery and a
+clear final-third/action-training target, not a claim that the team is already
+better than base.
+
 ## 5. What is actually better, and what is not yet proven
 
 The following improvements are supported by code invariants and tests rather
@@ -290,9 +336,10 @@ is sufficient by itself.
 
 ## 7. Immediate development order
 
-1. Finish matched-seed validation of goalkeeper occlusion and best-effort
-   trajectory blocking; do not replace observed failure analysis with more
-   depth thresholds.
+1. Preserve the separated pressure-push path and audit final-third sequences:
+   the next improvement must turn repeated opponent-half territory into an
+   executable shot or controlled second contact without reintroducing settle
+   starvation.
 2. Build a phase-conditioned BC/DAgger striker student from successful complete
    approach-release trajectories; do not repeat unsupervised residual PPO.
 3. Train and promote stable long-forward, rapid-turn, and later lateral skills

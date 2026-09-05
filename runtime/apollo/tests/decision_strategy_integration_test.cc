@@ -431,7 +431,7 @@ int main() {
 
     world::WorldSnapshot pressured_snapshot = make_open_pass_snapshot();
     pressured_snapshot.teammates.clear();
-    pressured_snapshot.self.position_m = {-0.34, 0.0, 0.8};
+    pressured_snapshot.self.position_m = {-0.60, 0.0, 0.8};
     decision::APBehavior pressured_behavior;
     decision::Blackboard pressured_blackboard;
     decision::TeamPlan pressured_team_plan;
@@ -444,20 +444,21 @@ int main() {
     pressured_team_plan.tactical_state.nearest_opponent_ball_time_s = 0.0;
     pressured_blackboard.set(
         decision::Blackboard::kKeyTeamPlan, pressured_team_plan);
-    const auto pressured_settle = pressured_behavior.make_command(
+    const auto pressured_push = pressured_behavior.make_command(
         pressured_snapshot, pressured_blackboard, role_manager, false, true);
-    if (std::holds_alternative<decision::KickCommand>(pressured_settle)) {
-        std::cerr << "pressured contact skipped its base-action debounce\n";
+    const auto* pressured_walk =
+        std::get_if<decision::WalkCommand>(&pressured_push);
+    if (pressured_walk == nullptr || pressured_walk->target_absolute ||
+        pressured_walk->target_2d_m[0] <= 1.0) {
+        std::cerr << "pressured AP did not enter the permissive continuous push\n";
         return 1;
     }
     pressured_snapshot.server_time += 0.26;
-    const auto pressured_release = pressured_behavior.make_command(
+    const auto pressured_continuation = pressured_behavior.make_command(
         pressured_snapshot, pressured_blackboard, role_manager, false, true);
-    const auto* pressured_contact =
-        std::get_if<decision::KickCommand>(&pressured_release);
-    if (pressured_contact == nullptr ||
-        pressured_contact->mode != decision::KickMode::ForwardContact) {
-        std::cerr << "pressured AP did not preserve the base contact path\n";
+    if (!std::holds_alternative<decision::WalkCommand>(
+            pressured_continuation)) {
+        std::cerr << "pressured AP replaced continuous contact with a kick setup\n";
         return 1;
     }
 
@@ -512,23 +513,24 @@ int main() {
     }
 
     // Preserve the original Apollo tempo when no precision action has been
-    // admitted: the longer window above is specific to an explicit local or
-    // pass action, not a blanket delay on contested forward contact.
+    // admitted. Ordinary possession is a continuous walk-through-ball path,
+    // not a delayed one-shot contact macro.
     world::WorldSnapshot legacy_snapshot = make_open_pass_snapshot();
     legacy_snapshot.teammates.clear();
     legacy_snapshot.self.position_m = {-0.50, -0.12, 0.8};
     decision::APBehavior legacy_behavior;
     decision::Blackboard legacy_blackboard;
-    (void)legacy_behavior.make_command(
+    const auto legacy_push = legacy_behavior.make_command(
         legacy_snapshot, legacy_blackboard, role_manager, false, false);
+    if (!std::holds_alternative<decision::WalkCommand>(legacy_push)) {
+        std::cerr << "legacy pressure path did not start continuous pushing\n";
+        return 1;
+    }
     legacy_snapshot.server_time = 1.46;
-    const auto legacy_release = legacy_behavior.make_command(
+    const auto legacy_continuation = legacy_behavior.make_command(
         legacy_snapshot, legacy_blackboard, role_manager, false, false);
-    const auto* legacy_contact =
-        std::get_if<decision::KickCommand>(&legacy_release);
-    if (legacy_contact == nullptr ||
-        legacy_contact->mode != decision::KickMode::ForwardContact) {
-        std::cerr << "legacy forward contact lost its fast fallback window\n";
+    if (!std::holds_alternative<decision::WalkCommand>(legacy_continuation)) {
+        std::cerr << "legacy pressure path stopped continuous pushing\n";
         return 1;
     }
 

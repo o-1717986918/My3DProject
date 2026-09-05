@@ -30,6 +30,10 @@ public:
 /// Persistent attacker state carried between decision cycles.
 struct APState {
     bool dribble_ready{false};
+    // Ordinary contested play uses a permissive continuous walk-through-ball
+    // latch. Keep it separate from dribble_ready: that flag denotes the
+    // centimetre-scale release pose of an explicitly selected ball action.
+    bool pressure_push_latched{false};
     bool kick_pre_settling{false};
     bool set_play_released{false};
     double previous_ball_distance{0.0};

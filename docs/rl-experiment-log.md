@@ -1608,3 +1608,42 @@ the keeper remained about 2.3 m across the goal from the ball. Neither event
 entered the new behind-body guard. This is negative evidence against further
 goalkeeper threshold tuning as the primary fix: lateral step/body-block and
 dive skills must be trained and evaluated as distinct actions.
+
+## Continuous pressure-push recovery — 2026-09-06
+
+The full tactics-off run
+`/home/win98/rl_runs/apollo-vs-base-tactics-off-s20261239-v1` lost 0:2, with
+3079:7308 known-possession samples and only 22.37% visible-ball opponent-half
+occupancy. More importantly, 10,494 sampled setup states remained in ordinary
+`forward approach`, while only 16 transitions reached fallback contact. Recent
+tactics-on runs showed the same structural pattern. This rejected the working
+assumption that the fallback still preserved pristine Apollo's continuous
+push.
+
+The cause was a shared controller: when no cooperative action was admitted,
+the generic AP branch still used the precision path's 0.34 m contact target,
+centimetre-scale lateral correction and settle loop. It now uses a separate
+Apollo-compatible pressure path: approach 0.60 m behind the ball, latch within
+0.25 m, retain contact inside a 0.40 m lateral/1.0 m radial envelope, then
+continuously walk one metre through the ball. Exact Dribble/Pass/Shoot/Clear
+requests retain their narrow release and transition contracts. Integration
+tests verify that pressured play stays in `WalkCommand`, while an explicitly
+selected action still reaches its typed `KickCommand`.
+
+Two independent complete comparisons produced the first repeated post-change
+recovery:
+
+- `/home/win98/rl_runs/apollo-vs-base-pressure-push-s20261240-v1`: 0:0,
+  5259:5533 known possession, visible-ball median x +5.52 m, 77.02% of visible
+  cycles in the opponent half, 21 GetUp episodes;
+- `/home/win98/rl_runs/apollo-vs-base-pressure-push-s20261241-v1`: 0:0,
+  5206:6403 known possession, visible-ball median x +14.91 m, 92.09% of visible
+  cycles in the opponent half, 17 GetUp episodes.
+
+Both runs had zero exact procedural kick samples. In the second, the ball
+reached approximately `(27.5,18.0)`, i.e. the opponent corner rather than the
+goal. An earlier central attack moved from roughly `(23.0,-2.0)` toward the
+goal mouth but was recovered by the base goalkeeper. The team has therefore
+recovered pressure tempo and territory, but still needs a stable
+approach-to-contact/continuous-dribble learner and a final-third release that
+can execute before the goalkeeper recovers. Two draws are not superiority.
