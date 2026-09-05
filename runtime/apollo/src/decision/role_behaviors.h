@@ -40,11 +40,17 @@ struct APState {
     double kick_setup_started_s{0.0};
     double kick_setup_last_update_s{0.0};
     double kick_setup_direction_deg{0.0};
+    double kick_setup_best_pose_error_m{-1.0};
+    double kick_setup_last_progress_s{0.0};
+    std::uint32_t kick_setup_action_id{0U};
     double pass_commit_until_s{0.0};
     double pass_retry_after_s{0.0};
+    double local_action_commit_until_s{0.0};
+    int kick_setup_mode_key{-1};
     int last_kick_setup_gate{-1};
     std::uint8_t next_pass_sequence_id{0U};
     std::optional<strategy::CooperativeAction> committed_pass;
+    std::optional<strategy::CooperativeAction> committed_local_action;
     std::optional<KickCommand> active_kick_command;
     PassLifecycle pass_lifecycle;
 };

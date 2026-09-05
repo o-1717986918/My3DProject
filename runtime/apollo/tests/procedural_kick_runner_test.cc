@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "src/behavior/procedural_kick_runner.h"
+#include "src/decision/kick_contract.h"
 
 #include <algorithm>
 #include <cmath>
@@ -88,6 +89,20 @@ int main() {
     snapshot.ball.position_m[1] = 0.0651;
     if (runner.begin(snapshot, profile)) {
         std::cerr << "short-touch outside the dispatch margin was accepted\n";
+        return 1;
+    }
+    snapshot = make_snapshot();
+    snapshot.ball.position_m[0] =
+        decision::kick_contract::kProceduralDribbleBallLocalXM +
+        decision::kick_contract::kProceduralDribbleBallLocalXToleranceM -
+        1.0e-4;
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "decision-contract longitudinal boundary was rejected\n";
+        return 1;
+    }
+    snapshot.ball.position_m[0] += 2.0e-4;
+    if (runner.begin(snapshot, profile)) {
+        std::cerr << "short-touch outside longitudinal contract was accepted\n";
         return 1;
     }
     snapshot = make_snapshot();

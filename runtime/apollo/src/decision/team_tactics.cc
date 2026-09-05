@@ -429,10 +429,17 @@ TacticalTarget plan_goalkeeper(
     // 2026-12-24 comparison the keeper was already on the correct angular
     // cover point while the ball sat at x=-25.8 m, y=2.2 m, but the old common
     // depth gate kept it on the line until only one second remained. Three
-    // metres is still wholly inside the 4 m goalkeeper area; requiring a
+    // 3.5 metres is still wholly inside the 4 m goalkeeper area; requiring a
     // near-post y coordinate preserves the opponent-first race rule centrally.
-    constexpr double early_near_post_depth_m = 3.0;
+    // Keep the challenge active through the observed near-post cutback. A
+    // 3.0 m edge made the duty oscillate as perception alternated around
+    // x=-24.5, causing a long turn back toward the goal just before the shot.
+    constexpr double early_near_post_depth_m = 3.5;
     constexpr double early_near_post_max_eta_s = 2.75;
+    constexpr double early_central_depth_m = 3.75;
+    constexpr double early_central_max_eta_s = 3.25;
+    bool unreachable_goal_bound_crossing = false;
+    std::optional<Position2> best_effort_block_target;
     if (snapshot.ball.velocity_valid && snapshot.ball.velocity_mps[0] < -0.20) {
         const double time_to_line =
             (hold_x - ball[0]) / snapshot.ball.velocity_mps[0];
@@ -443,7 +450,7 @@ TacticalTarget plan_goalkeeper(
                 const Position2 target = clamp_goalkeeper({hold_x, crossing_y});
                 const strategy::ReachTimeModel reach_model(
                     strategy::ReachTimeModel::Parameters{
-                        1.10, 120.0, 0.20, 0.15, 0.10});
+                        1.10, 30.0, 0.20, 0.15, 0.10});
                 if (reach_model.estimate_s(
                         goalkeeper_position, target, goalkeeper_yaw_deg) +
                         0.10 <= time_to_line) {
@@ -453,6 +460,40 @@ TacticalTarget plan_goalkeeper(
                         ball,
                         0,
                         std::clamp(1.0 - time_to_line / 5.0, 0.4, 1.0)};
+                }
+                unreachable_goal_bound_crossing = true;
+                // When a mostly longitudinal shot is too fast for the keeper
+                // to reach the goal-line crossing, standing still is not the
+                // best remaining body block. Move toward the closest point on
+                // the live ball-to-line segment instead. This is deliberately
+                // not used for steep lateral trajectories: turning after a
+                // fast ball moving across the mouth can remove a useful
+                // central block before the ball reaches the line.
+                const double abs_vx = std::abs(snapshot.ball.velocity_mps[0]);
+                const double abs_vy = std::abs(snapshot.ball.velocity_mps[1]);
+                if (abs_vy <= 0.60 * abs_vx) {
+                    const Position2 shot_segment = math::vec2_sub(target, ball);
+                    const double segment_len_sq =
+                        shot_segment[0] * shot_segment[0] +
+                        shot_segment[1] * shot_segment[1];
+                    if (segment_len_sq > 1.0e-9) {
+                        const Position2 keeper_from_ball =
+                            math::vec2_sub(goalkeeper_position, ball);
+                        const double projection = std::clamp(
+                            (keeper_from_ball[0] * shot_segment[0] +
+                             keeper_from_ball[1] * shot_segment[1]) /
+                                segment_len_sq,
+                            0.0,
+                            1.0);
+                        const Position2 projected = math::vec2_add(
+                            ball, math::vec2_scale(shot_segment, projection));
+                        const Position2 legal_target =
+                            clamp_goalkeeper_area(projected);
+                        if (math::planar_dist(
+                                goalkeeper_position, legal_target) >= 0.15) {
+                            best_effort_block_target = legal_target;
+                        }
+                    }
                 }
             }
         }
@@ -477,7 +518,7 @@ TacticalTarget plan_goalkeeper(
         target = clamp_goalkeeper_area(target);
         const strategy::ReachTimeModel keeper_reach(
             strategy::ReachTimeModel::Parameters{
-                1.10, 120.0, 0.20, 0.15, 0.10});
+                1.10, 30.0, 0.20, 0.15, 0.10});
         const strategy::ReachTimeModel opponent_reach(
             strategy::ReachTimeModel::Parameters{
                 1.35, 180.0, 0.10, 0.35, 0.05});
@@ -505,9 +546,21 @@ TacticalTarget plan_goalkeeper(
             std::abs(ball[1]) >= field_geometry::kGoalHalfWidthM - 0.25 &&
             std::abs(ball[1]) <= field_geometry::kGoalHalfWidthM + 1.00 &&
             keeper_eta_s <= early_near_post_max_eta_s;
-        if (ball_speed_mps <= 1.8 && keeper_eta_s <= 3.0 &&
-            (keeper_eta_s + 0.25 < opponent_eta_s ||
-             immediate_goal_mouth_challenge || early_near_post_challenge)) {
+        // A slow central carry inside the last 3.75 m is already a shooting
+        // emergency. The former opponent-first rule held the keeper until the
+        // ball was less than one metre from goal (2026-09-06, cycle 10240),
+        // leaving no time for the forward-domain walk to close it down.
+        const bool early_central_challenge =
+            ball[0] <= -field_geometry::kActualHalfLengthM +
+                    early_central_depth_m &&
+            std::abs(ball[1]) <= field_geometry::kGoalHalfWidthM + 0.25 &&
+            ball_speed_mps <= 1.0 &&
+            keeper_eta_s <= early_central_max_eta_s;
+        const bool safe_race_claim =
+            keeper_eta_s <= 4.0 && keeper_eta_s + 0.25 < opponent_eta_s;
+        if (ball_speed_mps <= 1.8 &&
+            (safe_race_claim || immediate_goal_mouth_challenge ||
+             early_near_post_challenge || early_central_challenge)) {
             return {
                 TacticalDuty::GoalkeeperSmother,
                 target,
@@ -515,6 +568,26 @@ TacticalTarget plan_goalkeeper(
                 0,
                 std::clamp(1.0 - keeper_eta_s / 4.0, 0.5, 0.95)};
         }
+    }
+    if (unreachable_goal_bound_crossing) {
+        if (best_effort_block_target.has_value()) {
+            return {
+                TacticalDuty::GoalkeeperIntercept,
+                *best_effort_block_target,
+                ball,
+                0,
+                0.85};
+        }
+        // Without a promoted lateral step or dive, turning after a steep
+        // cross-goal trajectory can remove the keeper from the only body block
+        // it still provides. Hold the current legal pose and face the threat;
+        // the learned omnidirectional route can replace this fallback.
+        return {
+            TacticalDuty::GoalkeeperHold,
+            clamp_goalkeeper(goalkeeper_position),
+            ball,
+            0,
+            0.9};
     }
     // Stand on a short goal-centred arc. A fixed 10% y scaling left the
     // keeper near the centre while an attacker carried the ball across the
@@ -625,6 +698,11 @@ TeamPlan TeamTactics::plan_all(
     const auto clear_support_latches = [this]() {
         for (auto& latch : support_latches_) latch = {};
     };
+    const auto goalkeeper_assignment = std::find_if(
+        result.assignments.begin(), result.assignments.end(),
+        [](const TeamTacticalAssignment& assignment) {
+            return assignment.role_id == RoleManager::ROLE_GK;
+        });
     const bool fresh_ball = snapshot.ball.position_valid &&
         (snapshot.ball.visible || snapshot.ball.position_age_s <= 0.75);
     if (snapshot.play_mode != world::PlayMode::PlayOn || !fresh_ball) {
@@ -638,15 +716,36 @@ TeamPlan TeamTactics::plan_all(
                 -field_geometry::kActualHalfLengthM +
                     field_geometry::kGkHoldDepthM,
                 0.0};
-            for (auto& assignment : result.assignments) {
-                if (assignment.role_id != RoleManager::ROLE_GK) continue;
-                assignment.target = {
-                    TacticalDuty::GoalkeeperHold,
-                    safe_keeper_hold,
-                    Position2{0.0, 0.0},
-                    0,
-                    0.9};
-                break;
+            if (goalkeeper_assignment != result.assignments.end()) {
+                const bool local_keeper_near_contact =
+                    goalkeeper_assignment->player_number ==
+                        snapshot.player_number &&
+                    snapshot.ball.position_valid &&
+                    snapshot.ball.near_contact_track &&
+                    snapshot.ball.position_age_s <=
+                        world::kNearContactBallTrackLifetimeS;
+                if (local_keeper_near_contact) {
+                    const Position2 ball{
+                        snapshot.ball.position_m[0],
+                        snapshot.ball.position_m[1]};
+                    const Position2 keeper_position{
+                        snapshot.self.position_m[0],
+                        snapshot.self.position_m[1]};
+                    goalkeeper_assignment->target = plan_goalkeeper(
+                        snapshot,
+                        ball,
+                        keeper_position,
+                        known_opponents(snapshot),
+                        world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+                            snapshot.self.orientation_wxyz));
+                } else {
+                    goalkeeper_assignment->target = {
+                        TacticalDuty::GoalkeeperHold,
+                        safe_keeper_hold,
+                        Position2{0.0, 0.0},
+                        0,
+                        0.9};
+                }
             }
         }
         clear_support_latches();
@@ -665,17 +764,18 @@ TeamPlan TeamTactics::plan_all(
         math::vec2_sub(own_goal, ball), {-1.0, 0.0});
 
     std::optional<TacticalTarget> goalkeeper_target;
-    const auto goalkeeper_assignment = std::find_if(
-        result.assignments.begin(), result.assignments.end(),
-        [](const TeamTacticalAssignment& assignment) {
-            return assignment.role_id == RoleManager::ROLE_GK;
-        });
     if (goalkeeper_assignment != result.assignments.end()) {
         const Position2 keeper_position = player_position(
             snapshot, goalkeeper_assignment->player_number)
                 .value_or(goalkeeper_assignment->target.position_m);
+        const std::optional<double> keeper_yaw_deg =
+            goalkeeper_assignment->player_number == snapshot.player_number
+            ? std::optional<double>{
+                  world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+                      snapshot.self.orientation_wxyz)}
+            : std::nullopt;
         goalkeeper_target = plan_goalkeeper(
-            snapshot, ball, keeper_position, opponents);
+            snapshot, ball, keeper_position, opponents, keeper_yaw_deg);
     }
 
     // Allocate the two attacking support lanes once for the full team.  A

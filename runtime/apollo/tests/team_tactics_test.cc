@@ -141,6 +141,11 @@ int main() {
     goalkeeper.ball.position_m = {-23.0, 0.0, 0.11};
     goalkeeper.ball.velocity_valid = true;
     goalkeeper.ball.velocity_mps = {-1.0, 0.25, 0.0};
+    const double reachable_heading_half_rad =
+        math::deg_to_rad(114.0 * 0.5);
+    goalkeeper.self.orientation_wxyz = {
+        std::cos(reachable_heading_half_rad), 0.0, 0.0,
+        std::sin(reachable_heading_half_rad)};
     const auto reachable = tactics.plan(
         goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
     if (reachable.duty != decision::TacticalDuty::GoalkeeperIntercept ||
@@ -151,6 +156,7 @@ int main() {
 
     goalkeeper.ball.position_m = {-26.0, 0.0, 0.11};
     goalkeeper.ball.velocity_mps = {-2.0, 3.0, 0.0};
+    goalkeeper.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
     const auto unreachable = tactics.plan(
         goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
     if (unreachable.duty != decision::TacticalDuty::GoalkeeperHold) {
@@ -158,8 +164,36 @@ int main() {
         return 1;
     }
 
+    // Regression from the 2026-09-06 comparison: a mostly longitudinal
+    // 3.7 m/s shot crossed the keeper's current depth about 0.6 m to its side.
+    // The full goal-line crossing was unreachable, but the former fallback
+    // held the current pose instead of contesting the closer trajectory point.
+    goalkeeper.ball.position_m = {-23.6848, -1.24576, 0.11};
+    goalkeeper.ball.velocity_mps = {-3.68538, 0.509408, 0.0};
+    goalkeeper.self.position_m = {-26.242, -0.270, 0.8};
+    const double direct_shot_heading_half_rad =
+        math::deg_to_rad(-146.553 * 0.5);
+    goalkeeper.self.orientation_wxyz = {
+        std::cos(direct_shot_heading_half_rad), 0.0, 0.0,
+        std::sin(direct_shot_heading_half_rad)};
+    const auto best_effort_block = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (best_effort_block.duty !=
+            decision::TacticalDuty::GoalkeeperIntercept ||
+        best_effort_block.position_m[0] >= -25.8 ||
+        best_effort_block.position_m[1] >= -0.65 ||
+        std::hypot(
+            best_effort_block.position_m[0] - goalkeeper.self.position_m[0],
+            best_effort_block.position_m[1] - goalkeeper.self.position_m[1]) >=
+            0.9) {
+        std::cerr << "goalkeeper did not attempt the closer shot-line block\n";
+        return 1;
+    }
+
     goalkeeper.ball.position_m = {-25.2, 1.0, 0.11};
     goalkeeper.ball.velocity_valid = false;
+    goalkeeper.self.position_m = {-27.0, 0.0, 0.8};
+    goalkeeper.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
     goalkeeper.opponents = {player(1, -20.0, 4.0, false)};
     const auto smother = tactics.plan(
         goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
@@ -172,13 +206,26 @@ int main() {
     goalkeeper.opponents = {player(1, -25.1, 1.0, false)};
     const auto contested_smother = tactics.plan(
         goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
-    if (contested_smother.duty == decision::TacticalDuty::GoalkeeperSmother) {
-        std::cerr << "goalkeeper smother ignored an opponent-first race\n";
+    if (contested_smother.duty != decision::TacticalDuty::GoalkeeperSmother) {
+        std::cerr << "goalkeeper yielded a central last-area carry\n";
+        return 1;
+    }
+    goalkeeper.ball.position_m = {-24.1, 1.0, 0.11};
+    goalkeeper.opponents = {player(1, -24.0, 1.0, false)};
+    const auto outside_emergency = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (outside_emergency.duty == decision::TacticalDuty::GoalkeeperSmother) {
+        std::cerr << "goalkeeper ignored an opponent-first race outside the emergency depth\n";
         return 1;
     }
 
     goalkeeper.ball.position_m = {-27.35, 1.0, 0.11};
     goalkeeper.self.position_m = {-27.0, 0.0, 0.8};
+    const double emergency_heading_half_rad =
+        math::deg_to_rad(109.3 * 0.5);
+    goalkeeper.self.orientation_wxyz = {
+        std::cos(emergency_heading_half_rad), 0.0, 0.0,
+        std::sin(emergency_heading_half_rad)};
     goalkeeper.opponents = {player(1, -27.2, 1.0, false)};
     const auto emergency_smother = tactics.plan(
         goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
@@ -194,6 +241,9 @@ int main() {
     // position this must be treated as an imminent goal-mouth challenge.
     goalkeeper.ball.position_m = {-27.0, 2.19, 0.11};
     goalkeeper.self.position_m = {-27.0, 1.15, 0.8};
+    goalkeeper.self.orientation_wxyz = {
+        std::cos(math::deg_to_rad(90.0 * 0.5)), 0.0, 0.0,
+        std::sin(math::deg_to_rad(90.0 * 0.5))};
     goalkeeper.opponents = {player(1, -27.0, 2.19, false)};
     const auto outside_post_smother = tactics.plan(
         goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
@@ -210,6 +260,11 @@ int main() {
     // emergency claim must begin now even when the opponent is ball-side.
     goalkeeper.ball.position_m = {-25.80, 2.21, 0.11};
     goalkeeper.self.position_m = {-26.86, 0.89, 0.8};
+    const double near_post_heading_half_rad =
+        math::deg_to_rad(51.2 * 0.5);
+    goalkeeper.self.orientation_wxyz = {
+        std::cos(near_post_heading_half_rad), 0.0, 0.0,
+        std::sin(near_post_heading_half_rad)};
     goalkeeper.opponents = {player(3, -25.80, 2.21, false)};
     const auto early_goal_mouth_smother = tactics.plan(
         goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
@@ -219,8 +274,27 @@ int main() {
         return 1;
     }
 
+    // Do not flip into a turn-away retreat when the perceived ball crosses
+    // the old 3.0 m depth edge during a live near-post cutback.
+    goalkeeper.ball.position_m = {-24.45, 2.55, 0.11};
+    goalkeeper.self.position_m = {-25.80, 1.50, 0.8};
+    const double cutback_heading_half_rad =
+        math::deg_to_rad(37.9 * 0.5);
+    goalkeeper.self.orientation_wxyz = {
+        std::cos(cutback_heading_half_rad), 0.0, 0.0,
+        std::sin(cutback_heading_half_rad)};
+    goalkeeper.opponents = {player(3, -24.45, 2.55, false)};
+    const auto near_post_cutback = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (near_post_cutback.duty !=
+        decision::TacticalDuty::GoalkeeperSmother) {
+        std::cerr << "goalkeeper abandoned a live near-post cutback\n";
+        return 1;
+    }
+
     goalkeeper.ball.position_m = {-23.0, 5.0, 0.11};
     goalkeeper.self.position_m = {-27.0, 0.0, 0.8};
+    goalkeeper.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
     goalkeeper.opponents.clear();
     const auto angular_hold = tactics.plan(
         goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
@@ -394,6 +468,37 @@ int main() {
              decision::field_geometry::kGkHoldDepthM)) > 1.0e-9 ||
         std::abs(stale_keeper->target.position_m[1]) > 1.0e-9) {
         std::cerr << "stale ball did not produce the safe goalkeeper hold\n";
+        return 1;
+    }
+
+    // A local goalkeeper owns a longer near-contact track because its torso
+    // naturally occludes the ball during a smother. Field players must still
+    // remain in formation under the same globally stale observation.
+    world::WorldSnapshot occluded_keeper = stale_ball;
+    occluded_keeper.player_number = 1;
+    occluded_keeper.self.position_m = {-25.65, 0.94, 0.8};
+    occluded_keeper.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
+    occluded_keeper.ball.position_m = {-25.32, 0.94, 0.11};
+    occluded_keeper.ball.position_age_s = 1.0;
+    occluded_keeper.ball.near_contact_track = true;
+    occluded_keeper.ball.velocity_valid = false;
+    occluded_keeper.opponents = {player(3, -25.32, 0.94, false)};
+    occluded_keeper.opponents.front().last_seen_time =
+        occluded_keeper.server_time;
+    const auto occluded_plan = tactics.plan_all(occluded_keeper, roles);
+    const auto* occluded_keeper_duty = occluded_plan.for_role(
+        decision::RoleManager::ROLE_GK);
+    const bool occluded_field_player_left_shape = std::any_of(
+        occluded_plan.assignments.begin(), occluded_plan.assignments.end(),
+        [](const decision::TeamTacticalAssignment& assignment) {
+            return assignment.role_id != decision::RoleManager::ROLE_GK &&
+                assignment.target.duty != decision::TacticalDuty::Formation;
+        });
+    if (occluded_plan.fresh || occluded_keeper_duty == nullptr ||
+        occluded_keeper_duty->target.duty !=
+            decision::TacticalDuty::GoalkeeperSmother ||
+        occluded_field_player_left_shape) {
+        std::cerr << "goalkeeper abandoned an occluded near-contact smother\n";
         return 1;
     }
     return 0;

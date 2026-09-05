@@ -1,6 +1,6 @@
 # Robot-soccer action research and adoption record
 
-Last source refresh: 2026-09-01
+Last source refresh: 2026-09-06
 
 Rule: refresh repository HEADs and primary papers before every training
 milestone; do not turn remembered hyperparameters into project facts.
@@ -36,7 +36,7 @@ policy airborne.
 | Source | Current evidence | Adopt | Boundary |
 |---|---|---|---|
 | Chasing Autonomy / robot_rl | G1 running library at 1.2–3.6 m/s, periodic hybrid-domain trajectory optimisation, CLF-guided RL, released configs and trajectory consumers | periodic half-cycle-symmetric reference design and later CLF/library concepts | G1/Isaac gap; whole-body generator not released; repository and asset licensing are not safe for copying |
-| FC Portugal / RuN | exact RoboCup 3D analytic-step residual controller; separate G1 conditional-generator-plus-residual result | reference-centred residual action is the immediate next architecture | GPL isolation for FCP; RuN has no official implementation located |
+| FC Portugal / RuN | official FCPCodebase revision `22d9e2f` provides a continuous learned dribble around an analytic step generator, approach/visibility transitions, a basic kick and open-loop penalty dives; separate RuN work describes an analytic-step residual controller | reuse the phase split, ball-relative state, smoothed direction command and shared step primitive as clean-room T1 training requirements | GPL-3.0 and NAO/R0--R4 morphology; pickle policies, IK scale and dive joint slots are not T1-compatible; RuN has no official implementation located |
 | BeyondMimic / MJLab | whole-body tracking, reference reset and adaptive failure-phase sampling; maintained MJWarp implementation | adaptive phase curriculum and root/foot/velocity rewards | G1 tasks; independently port algorithms into the exact T1 environment |
 | MuJoCo Playground current T1 | official MJWarp task and ONNX; local CPU replay is stable at 0.4–1.0 m/s | regression baseline and implementation reference | no repeated flight and large lateral displacement; not a run teacher |
 | Daffan et al., ICRA 2026 humanoid striker | T1 teacher PPO, explicit cosine/sine gait phase, geometric foot-edge contact, later DAgger/P3O adaptation | phase observation, 1–2 Hz gait scheduling, swing reward, teacher-first curriculum | Isaac Gym code is not the competition physics; evaluate independently in RCSS |
@@ -107,6 +107,32 @@ aerial interval, zero non-foot pitch collision, and mean root yaw rate
 Reward-only continuation and action-scale calibration are closed negative
 branches. They are not reasons to promote a model that misses contact or drift
 gates.
+
+## FC Portugal source audit — 2026-09-06
+
+The official `m-abr/FCPCodebase` was refreshed into the WSL reference area at
+revision `22d9e2ff9f12a271ff882868c39cc672e56cc625`. The useful part is the
+control decomposition, not a drop-in model:
+
+- phase 0 walks to a ball-relative slot (`0.18..0.25 m` longitudinal and about
+  `+/-0.05 m` lateral), requires current visibility, and slows the final
+  approach;
+- phase 1 runs a continuous dribble policy instead of alternating independent
+  kick clips; the observation includes gait phase, IMU, foot reaction data,
+  joint state, local ball position/velocity and a rate-limited target heading;
+- the policy outputs ankle position/rotation and arm residuals around a shared
+  analytic step generator, with exponential action smoothing and an explicit
+  wind-down transition;
+- the penalty goalkeeper first tracks laterally, then chooses a fixed left or
+  right dive. The released dive is a short NAO joint-slot sequence, not a
+  trajectory-prediction or T1-compatible model.
+
+For My3D this strengthens the planned continuous-dribble student: train one
+phase-aware policy over approach handoff, repeated contact and wind-down, using
+the current T1 step/reference implementation and exact local ball state. It
+also defines a separate goalkeeper curriculum (lateral step/body block first,
+dive later). Copying the released pickle networks or joint XML would be both a
+morphology error and an unnecessary GPL coupling.
 
 ## Search-quality policy
 

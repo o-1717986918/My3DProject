@@ -21,6 +21,14 @@ world::WorldSnapshot make_open_pass_snapshot() {
     snapshot.ball.position_valid = true;
     snapshot.ball.position_age_s = 0.0;
     snapshot.ball.position_m = {0.0, 0.0, 0.11};
+    for (const char* name : {
+             "Left_Hip_Pitch", "Left_Hip_Roll", "Left_Hip_Yaw",
+             "Left_Knee_Pitch", "Left_Ankle_Pitch", "Left_Ankle_Roll",
+             "Right_Hip_Pitch", "Right_Hip_Roll", "Right_Hip_Yaw",
+             "Right_Knee_Pitch", "Right_Ankle_Pitch", "Right_Ankle_Roll"}) {
+        snapshot.self.joint_positions_deg[name] = 0.0;
+        snapshot.self.joint_velocities_deg_s[name] = 0.0;
+    }
     snapshot.teammates.resize(7);
     for (int number = 1; number <= 7; ++number) {
         auto& player = snapshot.teammates[static_cast<std::size_t>(number - 1)];
@@ -274,7 +282,9 @@ int main() {
     world::WorldSnapshot braking_snapshot = make_open_pass_snapshot();
     braking_snapshot.teammates.clear();
     braking_snapshot.self.position_m = {-0.50, -0.04, 0.8};
-    braking_snapshot.self.lin_vel_b = {0.30, 0.0, 0.0};
+    // The strategy admission gate spans the same 0.50 m/s envelope as the
+    // motion runner; the pre-settle controller, not admission, owns braking.
+    braking_snapshot.self.lin_vel_b = {0.45, 0.0, 0.0};
     decision::APBehavior braking_behavior;
     decision::Blackboard braking_blackboard;
     const auto braking_command = braking_behavior.make_command(
@@ -289,6 +299,53 @@ int main() {
         braking_snapshot, braking_blackboard, role_manager, false, true);
     if (!std::holds_alternative<decision::NeutralCommand>(braking_debounce)) {
         std::cerr << "pre-settle brake accepted a single low-speed sample\n";
+        return 1;
+    }
+
+    // The calm, low-speed checks admit a local action into setup; they must
+    // not cancel it on the next cycle merely because the positioning command
+    // has accelerated the torso.  The action remains bounded by its own
+    // timeout, ball visibility and opponent-race cancellation.
+    world::WorldSnapshot committed_snapshot = make_open_pass_snapshot();
+    committed_snapshot.teammates.clear();
+    committed_snapshot.self.position_m = {-0.50, -0.04, 0.8};
+    decision::APBehavior committed_behavior;
+    decision::Blackboard committed_blackboard;
+    const auto committed_entry = committed_behavior.make_command(
+        committed_snapshot, committed_blackboard, role_manager, false, true);
+    if (!std::holds_alternative<decision::WalkCommand>(committed_entry)) {
+        std::cerr << "local action did not enter bounded precision setup\n";
+        return 1;
+    }
+    committed_snapshot.server_time += 0.02;
+    committed_snapshot.self.lin_vel_b = {0.40, 0.0, 0.0};
+    decision::Blackboard committed_next_blackboard;
+    const auto committed_next = committed_behavior.make_command(
+        committed_snapshot, committed_next_blackboard, role_manager,
+        false, true);
+    if (!std::holds_alternative<decision::NeutralCommand>(committed_next) ||
+        !committed_next_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction) ||
+        committed_next_blackboard.get<strategy::CooperativeAction>(
+            decision::Blackboard::kKeySelectedCooperativeAction).category !=
+            strategy::ActionCategory::Dribble) {
+        std::cerr << "local action was cancelled by its own setup speed\n";
+        return 1;
+    }
+    committed_snapshot.server_time += 0.02;
+    decision::Blackboard lost_race_blackboard;
+    decision::TeamPlan lost_race_plan;
+    lost_race_plan.tactical_state.possession =
+        strategy::PossessionOwner::Theirs;
+    lost_race_plan.tactical_state.nearest_teammate_ball_time_s = 1.0;
+    lost_race_plan.tactical_state.nearest_opponent_ball_time_s = 0.0;
+    lost_race_blackboard.set(
+        decision::Blackboard::kKeyTeamPlan, lost_race_plan);
+    static_cast<void>(committed_behavior.make_command(
+        committed_snapshot, lost_race_blackboard, role_manager, false, true));
+    if (lost_race_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "local action survived a decisive opponent race loss\n";
         return 1;
     }
 
@@ -317,6 +374,42 @@ int main() {
         !procedural_kick->target_point_m.has_value() ||
         std::abs(procedural_kick->requested_ball_speed_mps - 0.90) > 1.0e-9) {
         std::cerr << "enabled procedural dribble did not emit its exact contract\n";
+        return 1;
+    }
+
+    // The decision release contract must include every dynamic guard used by
+    // the procedural runner. Otherwise a high-rate gait transition is
+    // announced as a kick and rejected one cycle later by the motion layer.
+    world::WorldSnapshot transition_snapshot = make_open_pass_snapshot();
+    transition_snapshot.teammates.clear();
+    transition_snapshot.self.position_m = {-0.32, -0.04, 0.8};
+    transition_snapshot.self.gyro_deg_s[0] = 40.0;
+    transition_snapshot.self.joint_velocities_deg_s["Right_Knee_Pitch"] = 80.0;
+    decision::APBehavior transition_behavior;
+    decision::Blackboard transition_blackboard;
+    const auto dynamic_hold = transition_behavior.make_command(
+        transition_snapshot, transition_blackboard, role_manager, false, true);
+    if (!std::holds_alternative<decision::NeutralCommand>(dynamic_hold)) {
+        std::cerr << "procedural kick ignored its shared dynamic entry guard\n";
+        return 1;
+    }
+    transition_snapshot.server_time += 0.05;
+    transition_snapshot.self.gyro_deg_s[0] = 0.0;
+    transition_snapshot.self.joint_velocities_deg_s["Right_Knee_Pitch"] = 0.0;
+    const auto transition_settle = transition_behavior.make_command(
+        transition_snapshot, transition_blackboard, role_manager, false, true);
+    if (!std::holds_alternative<decision::NeutralCommand>(transition_settle)) {
+        std::cerr << "procedural transition skipped its stable-entry debounce\n";
+        return 1;
+    }
+    transition_snapshot.server_time += 0.05;
+    const auto guarded_release = transition_behavior.make_command(
+        transition_snapshot, transition_blackboard, role_manager, false, true);
+    if (const auto* guarded_kick =
+            std::get_if<decision::KickCommand>(&guarded_release);
+        guarded_kick == nullptr ||
+        guarded_kick->mode != decision::KickMode::DribbleTouch) {
+        std::cerr << "procedural kick did not release after dynamic settling\n";
         return 1;
     }
     decision::ExecutionFeedback rejected_dribble;
@@ -392,6 +485,13 @@ int main() {
         }
     }
     fallback_snapshot.server_time = 1.46;
+    const auto precision_window = fallback_behavior.make_command(
+        fallback_snapshot, fallback_blackboard, role_manager, false, true);
+    if (std::holds_alternative<decision::KickCommand>(precision_window)) {
+        std::cerr << "precision action inherited the legacy fast fallback delay\n";
+        return 1;
+    }
+    fallback_snapshot.server_time = 2.21;
     const auto fallback_release = fallback_behavior.make_command(
         fallback_snapshot, fallback_blackboard, role_manager, false, true);
     const auto* fallback_contact =
@@ -408,6 +508,48 @@ int main() {
                     decision::Blackboard::kKeySelectedCooperativeAction).category);
         }
         std::cerr << '\n';
+        return 1;
+    }
+
+    // Preserve the original Apollo tempo when no precision action has been
+    // admitted: the longer window above is specific to an explicit local or
+    // pass action, not a blanket delay on contested forward contact.
+    world::WorldSnapshot legacy_snapshot = make_open_pass_snapshot();
+    legacy_snapshot.teammates.clear();
+    legacy_snapshot.self.position_m = {-0.50, -0.12, 0.8};
+    decision::APBehavior legacy_behavior;
+    decision::Blackboard legacy_blackboard;
+    (void)legacy_behavior.make_command(
+        legacy_snapshot, legacy_blackboard, role_manager, false, false);
+    legacy_snapshot.server_time = 1.46;
+    const auto legacy_release = legacy_behavior.make_command(
+        legacy_snapshot, legacy_blackboard, role_manager, false, false);
+    const auto* legacy_contact =
+        std::get_if<decision::KickCommand>(&legacy_release);
+    if (legacy_contact == nullptr ||
+        legacy_contact->mode != decision::KickMode::ForwardContact) {
+        std::cerr << "legacy forward contact lost its fast fallback window\n";
+        return 1;
+    }
+
+    // Switching from the legacy path to a newly admitted local action must
+    // start a fresh setup timer even when both requests point in nearly the
+    // same direction.
+    world::WorldSnapshot switched_snapshot = make_open_pass_snapshot();
+    switched_snapshot.teammates.clear();
+    switched_snapshot.self.position_m = {-0.50, -0.12, 0.8};
+    decision::APBehavior switched_behavior;
+    decision::Blackboard switched_blackboard;
+    (void)switched_behavior.make_command(
+        switched_snapshot, switched_blackboard, role_manager, false, false);
+    switched_snapshot.server_time = 1.44;
+    (void)switched_behavior.make_command(
+        switched_snapshot, switched_blackboard, role_manager, false, false);
+    switched_snapshot.server_time = 1.46;
+    const auto switched_to_precision = switched_behavior.make_command(
+        switched_snapshot, switched_blackboard, role_manager, false, true);
+    if (std::holds_alternative<decision::KickCommand>(switched_to_precision)) {
+        std::cerr << "new local action inherited a prior forward setup timer\n";
         return 1;
     }
 
@@ -438,6 +580,50 @@ int main() {
         preferred_kick->mode != decision::KickMode::DribbleTouch ||
         !preferred_kick->target_point_m.has_value()) {
         std::cerr << "exact procedural release lost to contact fallback\n";
+        return 1;
+    }
+
+    // At the hard timeout the accepted 25 mm post-entry drift band remains a
+    // real procedural slot. The fallback must not use the narrower 20 mm
+    // first-entry threshold to steal the two-cycle dynamic-settle debounce.
+    world::WorldSnapshot latched_timeout_snapshot = make_open_pass_snapshot();
+    latched_timeout_snapshot.teammates.clear();
+    latched_timeout_snapshot.self.position_m = {-0.32, -0.04, 0.8};
+    latched_timeout_snapshot.self.gyro_deg_s[0] = 40.0;
+    decision::APBehavior latched_timeout_behavior;
+    decision::Blackboard latched_timeout_blackboard;
+    (void)latched_timeout_behavior.make_command(
+        latched_timeout_snapshot, latched_timeout_blackboard,
+        role_manager, false, true);
+    for (const double now : {1.40, 1.80, 2.20, 2.60}) {
+        latched_timeout_snapshot.server_time = now;
+        const auto dynamic_wait = latched_timeout_behavior.make_command(
+            latched_timeout_snapshot, latched_timeout_blackboard,
+            role_manager, false, true);
+        if (!std::holds_alternative<decision::NeutralCommand>(dynamic_wait)) {
+            std::cerr << "dynamic release guard did not survive to hard timeout\n";
+            return 1;
+        }
+    }
+    latched_timeout_snapshot.server_time = 2.84;
+    latched_timeout_snapshot.self.position_m[1] = -0.0644;
+    latched_timeout_snapshot.self.gyro_deg_s[0] = 0.0;
+    const auto timeout_settle = latched_timeout_behavior.make_command(
+        latched_timeout_snapshot, latched_timeout_blackboard,
+        role_manager, false, true);
+    if (!std::holds_alternative<decision::NeutralCommand>(timeout_settle)) {
+        std::cerr << "fallback stole the latched release slot at hard timeout\n";
+        return 1;
+    }
+    latched_timeout_snapshot.server_time += 0.05;
+    const auto timeout_release = latched_timeout_behavior.make_command(
+        latched_timeout_snapshot, latched_timeout_blackboard,
+        role_manager, false, true);
+    if (const auto* timeout_kick =
+            std::get_if<decision::KickCommand>(&timeout_release);
+        timeout_kick == nullptr ||
+        timeout_kick->mode != decision::KickMode::DribbleTouch) {
+        std::cerr << "latched release did not complete after hard timeout\n";
         return 1;
     }
 
@@ -517,7 +703,28 @@ int main() {
         std::cerr << "goalkeeper smother did not enter the clear lifecycle\n";
         return 1;
     }
-    goalkeeper_snapshot.server_time += 0.10;
+    const std::uint32_t committed_goalkeeper_clear_id =
+        goalkeeper_blackboard.get<strategy::CooperativeAction>(
+            decision::Blackboard::kKeySelectedCooperativeAction).action_id;
+    // Keep the local ball pose unchanged while moving the world position by
+    // two centimetres. The planner will generate a different quantized clear
+    // target, but the keeper must retain its already admitted action long
+    // enough to finish the release debounce.
+    goalkeeper_snapshot.server_time += 0.02;
+    goalkeeper_snapshot.ball.position_m[0] += 0.02;
+    goalkeeper_snapshot.self.position_m[0] += 0.02;
+    const auto goalkeeper_committed = goalkeeper_behavior.make_command(
+        goalkeeper_snapshot, goalkeeper_blackboard, true);
+    if (std::holds_alternative<decision::KickCommand>(goalkeeper_committed) ||
+        !goalkeeper_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction) ||
+        goalkeeper_blackboard.get<strategy::CooperativeAction>(
+            decision::Blackboard::kKeySelectedCooperativeAction).action_id !=
+            committed_goalkeeper_clear_id) {
+        std::cerr << "goalkeeper clear was replanned during precision setup\n";
+        return 1;
+    }
+    goalkeeper_snapshot.server_time += 0.08;
     const auto goalkeeper_release = goalkeeper_behavior.make_command(
         goalkeeper_snapshot, goalkeeper_blackboard, true);
     const auto* goalkeeper_clear =
@@ -552,6 +759,40 @@ int main() {
         emergency_goalkeeper, emergency_goalkeeper_blackboard, true);
     if (!std::holds_alternative<decision::NeutralCommand>(emergency_block)) {
         std::cerr << "goalkeeper abandoned its last-line body block\n";
+        return 1;
+    }
+
+    // Regression from the 2026-09-06 full match: after closing down a shot,
+    // the ball was just behind the torso plane and duty changed back to Hold.
+    // The generic turn-first retreat then removed the keeper from the goal
+    // path. The body guard must not depend on retaining Smother for one more
+    // noisy perception cycle.
+    world::WorldSnapshot behind_goalkeeper = make_open_pass_snapshot();
+    behind_goalkeeper.player_number = 1;
+    behind_goalkeeper.ball.position_m = {-26.7069, -1.14694, 0.11};
+    behind_goalkeeper.self.position_m = {-26.214, -1.177, 0.8};
+    const double behind_half_yaw_rad = math::deg_to_rad(-86.5087 * 0.5);
+    behind_goalkeeper.self.orientation_wxyz = {
+        std::cos(behind_half_yaw_rad),
+        0.0,
+        0.0,
+        std::sin(behind_half_yaw_rad)};
+    decision::GKBehavior behind_goalkeeper_behavior;
+    decision::Blackboard behind_goalkeeper_blackboard;
+    behind_goalkeeper_blackboard.set(
+        decision::Blackboard::kKeyTacticalTarget,
+        decision::TacticalTarget{
+            decision::TacticalDuty::GoalkeeperHold,
+            {-26.789, -1.02812},
+            std::array<double, 2>{
+                behind_goalkeeper.ball.position_m[0],
+                behind_goalkeeper.ball.position_m[1]},
+            0,
+            0.9});
+    const auto behind_block = behind_goalkeeper_behavior.make_command(
+        behind_goalkeeper, behind_goalkeeper_blackboard, true);
+    if (!std::holds_alternative<decision::NeutralCommand>(behind_block)) {
+        std::cerr << "goalkeeper turned away from a ball behind its body plane\n";
         return 1;
     }
 

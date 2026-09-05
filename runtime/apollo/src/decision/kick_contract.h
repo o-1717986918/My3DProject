@@ -13,6 +13,15 @@ inline constexpr double kMaximumTargetAngleDeg = 15.0;
 inline constexpr double kMinimumRequestedSpeedMps = 0.8;
 inline constexpr double kMaximumRequestedSpeedMps = 3.5;
 
+// Shared transition envelope for every static-base procedural trajectory.
+// Decision must not announce a releasable kick that the motion runner will
+// reject one cycle later. Keep these limits here rather than duplicating them
+// across the two layers.
+inline constexpr double kProceduralMaximumStartPlanarSpeedMps = 0.50;
+inline constexpr double kProceduralMaximumStartTiltRateDegS = 30.0;
+inline constexpr double kProceduralMaximumStartLegPositionDeg = 45.0;
+inline constexpr double kProceduralMaximumStartLegVelocityDegS = 70.0;
+
 struct ParameterizedPassAnchorContract {
     double target_distance_m;
     double maximum_distance_error_m;
@@ -82,6 +91,13 @@ inline constexpr double kProceduralDribbleMaximumTargetDistanceM = 0.65;
 // stricter directional actions retain their measured release envelopes.
 inline constexpr double kProceduralDribbleMaximumTargetAngleDeg = 6.0;
 inline constexpr double kProceduralDribbleRequestedSpeedMps = 0.90;
+// These are the live ball-pose limits encoded by right_dribble_055m_v1.
+// Decision and motion must use the same envelope: a decision-layer release
+// outside it is guaranteed to be rejected before the first trajectory frame.
+inline constexpr double kProceduralDribbleBallLocalXM = 0.32;
+inline constexpr double kProceduralDribbleBallLocalXToleranceM = 0.02;
+inline constexpr double kProceduralDribbleBallLocalYM = 0.04;
+inline constexpr double kProceduralDribbleBallLocalYToleranceM = 0.025;
 inline constexpr double kProceduralDribbleMinimumBallLocalYM = 0.02;
 inline constexpr double kProceduralDribbleMaximumBallLocalYM = 0.06;
 

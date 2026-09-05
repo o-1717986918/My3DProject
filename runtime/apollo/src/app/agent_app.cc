@@ -206,6 +206,24 @@ std::string AgentApp::process_perception_message(const std::string& message) {
         const auto motion_result = motion_manager_.step(snapshot, command, reset);
         last_active_motion_ = motion_result.active_motion;
         last_execution_status_ = motion_result.status;
+        // Periodic MY3D_STATUS samples can miss a one-cycle rejection or the
+        // first frame of a specialized kick. Emit sparse event telemetry for
+        // every new kick request and every terminal motion result so match
+        // evidence can distinguish "decision released" from "motion ran".
+        if ((reset &&
+             motion_result.request_kind == decision::MotionRequestKind::Kick) ||
+            motion_result.status != behavior::SkillExecutionStatus::Running) {
+            std::cerr
+                << "MY3D_EXECUTION_EVENT team=" << config_.team_name
+                << " player=" << config_.player_number
+                << " cycle=" << frame.server_cycle
+                << " request_id=" << next_execution_request_id_
+                << " kind=" << decision::to_string(motion_result.request_kind)
+                << " status=" << behavior::to_string(motion_result.status)
+                << " motion=" << motion_result.active_motion
+                << " kick_mode=" << kick_mode_name(command)
+                << '\n';
+        }
         pending_execution_feedback_ = make_execution_feedback(
             next_execution_request_id_++, snapshot.server_time,
             motion_result, command);

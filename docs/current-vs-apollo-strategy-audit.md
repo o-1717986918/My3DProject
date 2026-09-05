@@ -1,25 +1,29 @@
 # Current team versus pristine Apollo: strategy and action audit
 
-Status: code audit complete; opponent-diverse match evidence pending
+Status: superiority not established; repeated comparison and action work active
 
-Audit date: 2026-09-05
+Audit date: 2026-09-06
 
 Compared upstream revision: `71018c968969d6e55130b0e1987cd5b4f5c3b4df`
 
 ## 1. Bottom line
 
 The developed strategy is structurally safer and more expressive than pristine
-Apollo, but it is not yet demonstrated to be stronger overall.  The retained
-comparison match ended `My3D-Current 0 - 1 Apollo-Base`.  That result exposed a
-specific action-integration regression: the developed side selected passes,
-dribbles, shots, and clears but never entered an exact kick motion, while the
-base side could still score through its simple walk-through-ball behavior.
+Apollo, but repeated full matches do **not** yet show it to be stronger. The
+exact procedural path now executes end to end: in
+`apollo-vs-base-contract-sync-s20261235-v1` a natural dribble request entered
+`ProceduralKickExecute` and completed. Its observed post-visibility ball
+displacement was only about 0.15 m, however, and the match still ended 0:1.
 
-The correct response is therefore neither to remove the new team strategy nor
-to hide the loss behind more tactical complexity.  This revision restores a
-bounded, explicit forward-contact fallback, loosens the exact release contract,
-and adds a team-tactics ablation switch.  Tactical value will be decided with
-repeatable A/B evidence after the action path can actually realize its choices.
+The subsequent goalkeeper/possession run
+`apollo-vs-base-gk-occlusion-s20261237-v1` also ended 0:1. It improved visible
+opponent-half occupancy to 41.5% and narrowed known possession to 4771:5593,
+but conceded to a fast direct shot after the goalkeeper declared the full
+goal-line crossing unreachable and held its current pose. The response is to
+repair concrete decision-to-motion and goalkeeper branches, while retaining
+the deterministic kick bank and forward contact as explicit fallbacks. Tactical
+value still requires matched-seed, side-swapped evidence rather than source
+complexity or one favourable score.
 
 ## 2. Evidence from the retained match
 
@@ -88,13 +92,15 @@ previously rejected after only a 1.79-degree localization-yaw change between
 decision alignment and motion dispatch. Shot and clear retain their narrower
 one-degree contracts.
 
-After 0.45 seconds of continuous near-ball setup for dribble/shot/clear, or
-1.20 seconds for a coordinated pass, a request inside a separate broad contact
-corridor may explicitly use pristine Apollo's forward-contact macro. An exact
-procedural release slot always wins over this timeout. Telemetry names the
-fallback explicitly; an ordinary unsupported targeted request still returns
-`RejectedTargetedKickHold`. The fallback is therefore a declared fail-soft
-action, not a silent claim that a fixed contact is precise.
+Procedural actions and coordinated passes now share a progress-aware fallback:
+the broad contact corridor becomes eligible after 1.20 seconds only when setup
+has made no meaningful progress for 0.50 seconds, and a hard 1.80-second bound
+prevents indefinite dithering. Non-procedural local contacts retain the fast
+0.45-second path. An exact procedural release slot always wins over the
+timeout. Telemetry names the fallback explicitly; an ordinary unsupported
+targeted request still returns `RejectedTargetedKickHold`. The fallback is
+therefore a declared fail-soft action, not a silent claim that a fixed contact
+is precise.
 
 ### 4.2 Terminal pass freeze and permanent retry delay
 
@@ -137,7 +143,7 @@ next 20 cycles. Earlier samples show the actual regression: the ball stayed
 near `x=-25.8 m, y=2.2 m` while the goalkeeper held the correct angular cover
 point, and `GoalkeeperSmother` did not arm until cycle 11380. The emergency
 logic now permits an earlier ETA-gated near-post challenge within the final
-three metres, while the central opponent-first race rule and legal goalkeeper
+3.5 metres, while the central opponent-first race rule and legal goalkeeper
 area clamp remain unchanged. A regression test uses the observed match
 geometry.
 
@@ -171,6 +177,60 @@ throughout because the match never entered the near-post test geometry, so the
 new challenge branch is covered by regression test but not yet by this server
 run. This draw validates attribution and legality, not superiority or exact
 kick readiness.
+
+### 4.7 Shared release contract and natural server execution
+
+`apollo-vs-base-latched-transition-s20261234-v1` produced a genuine decision
+release but no procedural motion. The live release pose was approximately
+`ball_local_x=0.356 m`: it satisfied the decision layer's former
+`0.335 +/- 0.035 m` contract but violated the runner YAML's
+`0.320 +/- 0.020 m` anchor. The two layers now use one shared dribble pose
+contract from `kick_contract.h`, and runner tests cover both sides of the
+boundary. Sparse `MY3D_EXECUTION_EVENT` records every kick request and terminal
+result so a one-cycle rejection can no longer disappear between periodic
+status samples.
+
+With that correction, `apollo-vs-base-contract-sync-s20261235-v1` recorded the
+first natural full-match procedural start and completion. It still lost 0:1,
+and the ball moved only about 0.15 m after visibility recovered. This proves
+dispatch integration, not dribble quality or promotion of a learned kick.
+
+### 4.8 Goalkeeper continuity and direct-shot fallback
+
+`apollo-vs-base-nearpost-continuity-s20261236-v1` lost 0:1 after the goalkeeper
+closed to about 0.3 m, its torso occluded the ball, and the global 0.75-second
+freshness rule returned it to `GoalkeeperHold`. The local assigned goalkeeper
+now retains its 3.5-second near-contact track during open play; field players
+still fall back to formation under the same globally stale observation.
+
+The next run, `apollo-vs-base-gk-occlusion-s20261237-v1`, confirmed that the
+old occlusion failure did not recur, but exposed a different fast-shot branch.
+At cycle 4975 the ball was at `(-23.685,-1.246)` travelling about
+`(-3.685,+0.509) m/s`; the keeper at `(-26.242,-0.270)` could not reach the full
+goal-line intersection. Holding the pose left the trajectory roughly 0.6 m to
+its side. For mostly longitudinal goal-bound shots, the fallback now targets
+the closest legal point on the current ball-to-line segment. Steep cross-goal
+trajectories retain the body-hold fallback because turning after them can remove
+a useful central block. The same-seed
+`apollo-vs-base-gk-best-effort-s20261237-v1` run again lost 0:1 and showed that
+the server match is not strictly deterministic: possession, falls and field
+progress differed despite the same configured seed. The new intercept branch
+ran for 15 status samples, but the eventual goal occurred later, after a
+smother had brought the ball just behind the keeper's torso plane. Duty then
+returned to Hold, the generic turn-first retreat pulled the keeper away and it
+fell. A final-metre guard now holds the body whenever a goal-mouth ball is
+within 0.65 m and no more than 0.10 m ahead of the torso plane, regardless of
+one-cycle Smother/Hold classification. Neither change is credited as a match
+improvement until a multi-run comparison supports it.
+
+`apollo-vs-base-gk-lastline-guard-s20261238-v1` finished 0:2. The new body
+guard did not cause either goal, but it also could not help: the first approach
+had a correct smother target about 0.73 m away while the composed turn/walk
+drifted in the opposite global direction, and the second shot found the keeper
+about 2.3 m away laterally. These traces set a useful boundary on further
+strategy tuning. A stable lateral step/body-block primitive, followed by a
+separately evaluated dive, is now a real goalkeeper capability requirement;
+more smother depth constants cannot substitute for it.
 
 ## 5. What is actually better, and what is not yet proven
 
@@ -230,13 +290,17 @@ is sufficient by itself.
 
 ## 7. Immediate development order
 
-1. Validate the earlier near-post goalkeeper challenge in one retained match,
-   with corrected `FallbackKick*` attribution rather than inferred contacts.
+1. Finish matched-seed validation of goalkeeper occlusion and best-effort
+   trajectory blocking; do not replace observed failure analysis with more
+   depth thresholds.
 2. Build a phase-conditioned BC/DAgger striker student from successful complete
    approach-release trajectories; do not repeat unsupervised residual PPO.
-3. Keep the 2/3.5/5 m deterministic bank and original forward contact as
+3. Train and promote stable long-forward, rapid-turn, and later lateral skills
+   with explicit fall, drift, speed and transition tests; ordinary Walk is also
+   implicated in current falls and must remain in the audit.
+4. Keep the 2/3.5/5 m deterministic bank and original forward contact as
    explicit fallbacks while collecting server outcome traces.
-4. Calibrate reach time and action utility from deployed FastWalk/turn logs,
+5. Calibrate reach time and action utility from deployed FastWalk/turn logs,
    then repeat tactics-on/tactics-off and side-swapped comparisons.
-5. Decide superiority only from repeated full matches; retain every loss and
+6. Decide superiority only from repeated full matches; retain every loss and
    draw instead of selecting favourable scores.

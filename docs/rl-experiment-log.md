@@ -1534,3 +1534,77 @@ observable, but that the server-side exact release transition is still the
 main action-integration defect. The goalkeeper stayed in Hold because no
 near-post challenge situation occurred, so that branch remains unit-tested but
 not server-exercised by this match.
+
+## Shared release contract and goalkeeper continuity — 2026-09-06
+
+Three retained full comparisons separated decision release, motion dispatch,
+physical contact quality and goalkeeper state continuity.
+
+`/home/win98/rl_runs/apollo-vs-base-latched-transition-s20261234-v1`
+finished 0:0 and produced one decision-side `release`, but no procedural motion.
+The release pose had approximately `ball_local_x=0.356 m`. This satisfied the
+decision layer's old `0.335 +/- 0.035 m` target while violating the procedural
+runner YAML's `0.320 +/- 0.020 m` anchor. Dribble release geometry is now defined
+once in `kick_contract.h` and consumed by both layers. Boundary tests cover
+accepted and rejected poses.
+
+`/home/win98/rl_runs/apollo-vs-base-contract-sync-s20261235-v1`
+finished 0:1. It recorded the first natural full-match
+`ProceduralKickExecute -> ProceduralKickHold -> Completed` chain, proving that
+the repaired release crosses the decision/motion boundary. The ball moved only
+about 0.15 m after visibility recovered, materially below the nominal 0.55 m
+touch. This is dispatch evidence, not a successful dribble result. New sparse
+`MY3D_EXECUTION_EVENT` telemetry records every kick request and terminal result
+without relying on the periodic status interval.
+
+`/home/win98/rl_runs/apollo-vs-base-nearpost-continuity-s20261236-v1`
+also finished 0:1. The goalkeeper smothered and closed to about 0.3 m, then its
+torso occluded the ball and the globally conservative 0.75-second tactical
+freshness limit switched it back to Hold. The local assigned goalkeeper now
+continues planning from its 3.5-second near-contact track during PlayOn; all
+field players remain in formation under the same stale global observation.
+
+The post-fix run
+`/home/win98/rl_runs/apollo-vs-base-gk-occlusion-s20261237-v1`
+finished 0:1 but did not repeat the stale-ball transition. It recorded 0 current
+illegal-defense penalties versus 31 for base, 4771:5593 known-possession samples,
+and a 41.54% visible-ball opponent-half fraction (616 of 1483 visible cycles).
+There were 16 GetUp entries; the immediately preceding sampled motion was Walk
+for 15 and Neutral for one, so FastWalk alone does not explain the instability.
+No exact procedural action occurred; 22 fallback contacts started and 19
+completed.
+
+The remaining goal was a different direct-shot failure. At cycle 4975 the ball
+was at about `(-23.685,-1.246)` with velocity `(-3.685,+0.509) m/s`, while the
+keeper was at `(-26.242,-0.270)`. The complete goal-line intersection was
+correctly classified as unreachable, but the former fallback held the current
+pose. The new bounded fallback sends the keeper toward the closest legal point
+on the ball-to-line segment for mostly longitudinal goal-bound shots. It keeps
+the old body-hold behavior for steep lateral trajectories. The change has an
+observed-geometry regression test and awaits a same-seed full-match result.
+
+The same-seed follow-up
+`/home/win98/rl_runs/apollo-vs-base-gk-best-effort-s20261237-v1`
+also finished 0:1. The best-effort branch did execute for 15 sampled statuses,
+but the run differed substantially from its configured-seed predecessor (10
+instead of 16 GetUp entries and only 11.64% instead of 41.54% visible
+opponent-half occupancy), so the live stack is not deterministic enough for a
+single same-seed replay to isolate causality. The later goal occurred after a
+smother closed to the ball; when the ball became approximately 0.06 m behind
+the torso plane at 0.49 m range, yaw-sensitive reach classification returned to
+Hold. The turn-first retreat moved the keeper out of the path and it fell. A
+new final-metre runtime guard holds the body for a goal-mouth ball within
+0.65 m that is no more than 0.10 m ahead of the torso plane, independent of
+the current Smother/Hold label. This has a decision-level regression test; it
+is not yet credited with a save or a match-score improvement.
+
+`/home/win98/rl_runs/apollo-vs-base-gk-lastline-guard-s20261238-v1`
+finished 0:2, with 0 current and 61 base illegal-defense penalties. It reached
+`x=15.664 m` and spent 41.28% of visible cycles in the opponent half, but known
+possession was only 4177:8519 and no exact procedural action ran. The first
+goal occurred while a correct smother target was roughly 0.73 m away; the
+turn/walk composition drifted in the opposite global direction. On the second,
+the keeper remained about 2.3 m across the goal from the ball. Neither event
+entered the new behind-body guard. This is negative evidence against further
+goalkeeper threshold tuning as the primary fix: lateral step/body-block and
+dive skills must be trained and evaluated as distinct actions.

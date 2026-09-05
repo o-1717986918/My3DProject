@@ -3,6 +3,7 @@
 #include "src/behavior/procedural_kick_runner.h"
 
 #include "src/math/math_utils.h"
+#include "src/decision/kick_contract.h"
 #include "src/robot/t1_joint_limits.h"
 #include "src/world/frame_normalizer.h"
 
@@ -18,12 +19,6 @@ namespace behavior {
 
 namespace {
 
-constexpr double kMaximumStartLegPositionDeg = 45.0;
-constexpr double kMaximumStartLegVelocityDegS = 70.0;
-// Match the decision-layer release window. The trajectory captures the live
-// pose, and the shorter two-cycle debounce limits root drift before entry.
-constexpr double kMaximumStartPlanarSpeedMps = 0.50;
-constexpr double kMaximumStartTiltRateDegS = 30.0;
 constexpr double kCaptureDurationS = 0.18;
 
 constexpr std::array<double, 14> kParameterLower{
@@ -162,9 +157,11 @@ bool ProceduralKickRunner::begin(
         !std::isfinite(profile.relative_target_angle_deg) ||
         !std::isfinite(profile.requested_speed_mps) ||
         math::norm2({snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]}) >
-            kMaximumStartPlanarSpeedMps ||
-        std::abs(snapshot.self.gyro_deg_s[0]) > kMaximumStartTiltRateDegS ||
-        std::abs(snapshot.self.gyro_deg_s[1]) > kMaximumStartTiltRateDegS) {
+            decision::kick_contract::kProceduralMaximumStartPlanarSpeedMps ||
+        std::abs(snapshot.self.gyro_deg_s[0]) >
+            decision::kick_contract::kProceduralMaximumStartTiltRateDegS ||
+        std::abs(snapshot.self.gyro_deg_s[1]) >
+            decision::kick_contract::kProceduralMaximumStartTiltRateDegS) {
         return false;
     }
 
@@ -177,14 +174,15 @@ bool ProceduralKickRunner::begin(
         }
         captured_pose_rad_[i] = math::deg_to_rad(position->second);
         if (i >= 11U && std::abs(position->second) >
-                kMaximumStartLegPositionDeg) {
+                decision::kick_contract::kProceduralMaximumStartLegPositionDeg) {
             return false;
         }
         const auto velocity = snapshot.self.joint_velocities_deg_s.find(name);
         if (i >= 11U &&
             (velocity == snapshot.self.joint_velocities_deg_s.end() ||
              !std::isfinite(velocity->second) ||
-             std::abs(velocity->second) > kMaximumStartLegVelocityDegS)) {
+             std::abs(velocity->second) >
+                 decision::kick_contract::kProceduralMaximumStartLegVelocityDegS)) {
             return false;
         }
     }
