@@ -1,4 +1,4 @@
-from tools.train_run import STAGES
+from tools.train_run import STAGES, _effective_timesteps
 
 
 def test_motion_reference_initialization_is_scoped_to_motion_stages():
@@ -61,3 +61,19 @@ def test_fast_walk_recovery_trains_forward_and_both_turns_without_lateral():
     assert stage["axis_command_weights"][1] == 0.0
     assert stage["yaw_negative_probability"] > 0.5
     assert stage["reward.fall"] <= -120.0
+
+
+def test_effective_timesteps_rounds_to_complete_ppo_epochs():
+    assert _effective_timesteps(196_608, 196_608) == 196_608
+    assert _effective_timesteps(1_048_576, 196_608) == 1_179_648
+
+
+def test_right_turn_expert_is_scoped_to_negative_yaw_teacher_data():
+    stage = STAGES["right_turn_expert"]
+
+    assert stage["lin_vel_x"] == [0.0, 0.0]
+    assert stage["lin_vel_y"] == [0.0, 0.0]
+    assert stage["ang_vel_yaw"][1] < 0.0
+    assert stage["command_resample_steps"] <= 100
+    assert stage["push_enable"] is True
+    assert stage["reward.fall"] < STAGES["rapid_turn"]["reward.fall"]

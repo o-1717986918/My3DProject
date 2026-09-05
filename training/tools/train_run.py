@@ -307,6 +307,38 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.pose": -0.04,
         "reward.fall": -150.0,
     },
+    # Directional expert used to repair the inherited policy's weakest action.
+    # It is a distillation teacher, not a standalone competition replacement.
+    "right_turn_expert": {
+        "lin_vel_x": [0.0, 0.0],
+        "lin_vel_y": [0.0, 0.0],
+        "ang_vel_yaw": [-0.90, -0.35],
+        "gait_frequency": [1.2, 2.0],
+        "stand_probability": 0.15,
+        "axis_aligned_command_probability": 0.0,
+        "command_resample_steps": 100,
+        "reset_joint_noise": 0.025,
+        "reset_root_velocity_noise": 0.04,
+        "reset_yaw_range": 0.15,
+        "push_enable": True,
+        "push_interval_steps": 200,
+        "push_magnitude": [0.01, 0.06],
+        "action_delay_max_steps": 1,
+        "reward.tracking_linear": 4.0,
+        "reward.tracking_yaw": 10.0,
+        "reward.upright": 3.0,
+        "reward.height": 2.0,
+        "reward.alive": 0.75,
+        "reward.lateral_tracking": -8.0,
+        "reward.yaw_rate_error": -8.0,
+        "reward.vertical_velocity": -0.45,
+        "reward.angular_xy": -0.45,
+        "reward.action_rate": -0.05,
+        "reward.action_acceleration": -0.02,
+        "reward.foot_slip": -0.035,
+        "reward.pose": -0.04,
+        "reward.fall": -180.0,
+    },
     # Stage C: only after A and B survive held-out tests, expand into genuine
     # pure-lateral and coupled commands rather than hiding them in curves.
     "soccer_lateral": {
@@ -431,6 +463,13 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _effective_timesteps(requested: int, epoch_size: int) -> int:
+    """Round a requested rollout budget up to the trainer's full PPO epoch."""
+    if requested < 1 or epoch_size < 1:
+        raise ValueError("requested timesteps and epoch size must be positive")
+    return (requested + epoch_size - 1) // epoch_size * epoch_size
 
 
 def _teacher_restore_params(
@@ -570,7 +609,9 @@ def main() -> None:
     minimum_epoch_timesteps = (
         profile.batch_size * profile.num_minibatches * profile.unroll_length
     )
-    effective_num_timesteps = max(args.num_timesteps, minimum_epoch_timesteps)
+    effective_num_timesteps = _effective_timesteps(
+        args.num_timesteps, minimum_epoch_timesteps
+    )
 
     args.run_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = args.run_dir / "checkpoints"
