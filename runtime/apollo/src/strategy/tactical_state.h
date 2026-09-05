@@ -25,8 +25,8 @@ enum class TacticalPhase {
 };
 
 /// Risk preference derived only when a valid late-match clock is available.
-/// The threshold is explicit so a simulator with an unknown match duration
-/// stays Balanced instead of guessing from a hard-coded game length.
+/// The default is the final minute of RCSSServerMJ's five-minute match.  Tests
+/// and alternate runtimes may still provide an explicit threshold.
 enum class TacticalRiskMode {
     Balanced,
     ProtectLead,
@@ -34,7 +34,7 @@ enum class TacticalRiskMode {
 };
 
 struct TacticalRiskParameters {
-    double late_match_threshold_s{300.0};
+    double late_match_threshold_s{240.0};
 };
 
 struct TacticalState {

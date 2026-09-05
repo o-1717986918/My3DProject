@@ -159,17 +159,22 @@ int main() {
     static_cast<void>(expired_pass_behavior.make_command(
         expired_pass_snapshot, expired_pass_blackboard, role_manager,
         true, true));
-    expired_pass_snapshot.server_time = 7.1;
+    expired_pass_snapshot.server_time = 3.6;
     expired_pass_snapshot.teammates[5].last_seen_time =
         expired_pass_snapshot.server_time;
-    const auto terminal_wait = expired_pass_behavior.make_command(
+    const auto terminal_recovery = expired_pass_behavior.make_command(
         expired_pass_snapshot, expired_pass_blackboard, role_manager,
         true, true);
-    if (!std::holds_alternative<decision::NeutralCommand>(terminal_wait)) {
-        std::cerr << "expired pass did not broadcast a terminal hold\n";
+    static_cast<void>(terminal_recovery);
+    const auto& terminal_recovery_plan = expired_pass_blackboard.get<
+        strategy::PlanningResult>(decision::Blackboard::kKeyStrategyPlan);
+    if (!terminal_recovery_plan.selected.has_value() ||
+        terminal_recovery_plan.selected->category ==
+            strategy::ActionCategory::Pass) {
+        std::cerr << "expired pass blocked immediate local recovery\n";
         return 1;
     }
-    expired_pass_snapshot.server_time = 8.0;
+    expired_pass_snapshot.server_time = 4.5;
     expired_pass_snapshot.teammates[5].last_seen_time =
         expired_pass_snapshot.server_time;
     static_cast<void>(expired_pass_behavior.make_command(
@@ -231,9 +236,69 @@ int main() {
         std::get_if<decision::KickCommand>(&procedural_release);
     if (procedural_kick == nullptr ||
         procedural_kick->mode != decision::KickMode::DribbleTouch ||
+        procedural_kick->allow_forward_contact_fallback ||
         !procedural_kick->target_point_m.has_value() ||
         std::abs(procedural_kick->requested_ball_speed_mps - 0.90) > 1.0e-9) {
         std::cerr << "enabled procedural dribble did not emit its exact contract\n";
+        return 1;
+    }
+    decision::ExecutionFeedback rejected_dribble;
+    rejected_dribble.request_kind = decision::MotionRequestKind::Kick;
+    rejected_dribble.status = decision::ExecutionStatus::Rejected;
+    rejected_dribble.server_time = procedural_snapshot.server_time;
+    rejected_dribble.cooperative_action_id = procedural_kick->action_id;
+    rejected_dribble.sequence_id = procedural_kick->sequence_id;
+    procedural_behavior.apply_execution_feedback(rejected_dribble);
+    procedural_snapshot.server_time += 0.01;
+    const auto retry_after_rejection = procedural_behavior.make_command(
+        procedural_snapshot, procedural_blackboard, role_manager, false, true);
+    if (const auto* repeated =
+            std::get_if<decision::KickCommand>(&retry_after_rejection);
+        repeated != nullptr && repeated->action_id == procedural_kick->action_id) {
+        std::cerr << "rejected dribble remained latched until nominal timeout\n";
+        return 1;
+    }
+
+    // A live match may never settle inside the centimetre-scale procedural
+    // slot. After a continuous near-ball attempt, recover the original
+    // Apollo walk-through contact explicitly instead of oscillating forever.
+    world::WorldSnapshot fallback_snapshot = make_open_pass_snapshot();
+    fallback_snapshot.teammates.clear();
+    fallback_snapshot.self.position_m = {-0.50, -0.12, 0.8};
+    decision::APBehavior fallback_behavior;
+    decision::Blackboard fallback_blackboard;
+    const auto fallback_setup = fallback_behavior.make_command(
+        fallback_snapshot, fallback_blackboard, role_manager, false, true);
+    if (!std::holds_alternative<decision::WalkCommand>(fallback_setup)) {
+        std::cerr << "broad contact pose skipped the bounded setup attempt\n";
+        return 1;
+    }
+    for (const double now : {1.40, 1.80}) {
+        fallback_snapshot.server_time = now;
+        const auto still_setting_up = fallback_behavior.make_command(
+            fallback_snapshot, fallback_blackboard, role_manager, false, true);
+        if (std::holds_alternative<decision::KickCommand>(still_setting_up)) {
+            std::cerr << "forward-contact fallback fired before its timeout\n";
+            return 1;
+        }
+    }
+    fallback_snapshot.server_time = 2.21;
+    const auto fallback_release = fallback_behavior.make_command(
+        fallback_snapshot, fallback_blackboard, role_manager, false, true);
+    const auto* fallback_contact =
+        std::get_if<decision::KickCommand>(&fallback_release);
+    if (fallback_contact == nullptr ||
+        fallback_contact->mode != decision::KickMode::DribbleTouch ||
+        !fallback_contact->allow_forward_contact_fallback) {
+        std::cerr << "stalled setup did not request an explicit contact fallback"
+                  << " variant=" << fallback_release.index();
+        if (fallback_blackboard.exists(
+                decision::Blackboard::kKeySelectedCooperativeAction)) {
+            std::cerr << " selected=" << strategy::to_string(
+                fallback_blackboard.get<strategy::CooperativeAction>(
+                    decision::Blackboard::kKeySelectedCooperativeAction).category);
+        }
+        std::cerr << '\n';
         return 1;
     }
 

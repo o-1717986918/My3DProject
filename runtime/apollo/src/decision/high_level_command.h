@@ -53,6 +53,11 @@ struct KickCommand {
     std::optional<std::uint64_t> restart_epoch;
     std::optional<std::uint32_t> restart_revision;
     KickMode mode{KickMode::ForwardContact};
+    // A target-aware request may opt in to the original Apollo-style
+    // walk-through contact only after the decision layer's bounded setup
+    // timeout. MotionManager reports that path with an explicit Fallback name;
+    // it must never silently reinterpret an ordinary targeted request.
+    bool allow_forward_contact_fallback{false};
 };
 /// Requests the neutral standing keyframe.
 struct NeutralCommand {};

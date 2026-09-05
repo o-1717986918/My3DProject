@@ -252,13 +252,13 @@ int main() {
     world::WorldSnapshot risk_snapshot = open;
     risk_snapshot.own_score = 1;
     risk_snapshot.opponent_score = 0;
-    risk_snapshot.match_time_s = 299.0;
+    risk_snapshot.match_time_s = 239.0;
     if (strategy::build_tactical_state(risk_snapshot).risk_mode !=
         strategy::TacticalRiskMode::Balanced) {
         std::cerr << "late-match threshold triggered too early\n";
         return 1;
     }
-    risk_snapshot.match_time_s = 300.0;
+    risk_snapshot.match_time_s = 240.0;
     if (strategy::build_tactical_state(risk_snapshot).risk_mode !=
         strategy::TacticalRiskMode::ProtectLead) {
         std::cerr << "protect-lead mode was not selected\n";

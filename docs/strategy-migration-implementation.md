@@ -14,10 +14,11 @@ implemented, observable 3D match action. During `PlayOn`, the attacking player
 can generate direct and one-metre leading-pass candidates, reject physically
 or tactically unsafe candidates, announce the selected target, wait for the
 receiver's readiness message, align behind the ball, and issue a typed
-targeted-pass command. An unsupported or rejected targeted request is now
-converted to a neutral no-contact hold at the motion boundary; the previous
-forward-contact macro is available only when the strategy explicitly requests
-the fixed-contact capability.
+targeted-pass command. An unsupported or rejected targeted request is normally
+converted to a neutral no-contact hold at the motion boundary. After a bounded
+continuous setup timeout, the strategy may explicitly authorize the previous
+forward-contact macro inside a wider contact corridor; telemetry labels that
+degradation as fallback and never reports it as target-accurate execution.
 
 The delivered loop is:
 
@@ -73,8 +74,11 @@ Strategy code is isolated in `runtime/apollo/src/strategy/` and compiled as
   utility, and confidence.
 - `KickCommand` carries the target, requested speed, receiver, action ID,
   sequence ID, exact `KickMode`, and (for restarts) an epoch/revision pair.
-  A default command still means the former safe forward contact, while an
-  invalid targeted request is rejected into a neutral no-contact hold.
+  A default command still means the former safe forward contact. An invalid
+  targeted request is rejected into a neutral no-contact hold unless the
+  decision layer explicitly authorizes the bounded timeout fallback; that
+  path preserves the target metadata but is logged as `FallbackKick*` and does
+  not claim target accuracy.
 - `TacticalState` records possession, phase, pressure proxies, score, and time.
 - The initial ball model uses the measured 1.43 m/s contact speed, 0.08 m/s²
   rolling deceleration, and 0.20 m/s minimum controlled speed. These are seed

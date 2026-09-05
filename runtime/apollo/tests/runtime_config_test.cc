@@ -36,7 +36,8 @@ int main() {
         "ApolloCodeBase", "--team", "My3D", "--player-number", "7",
         "--host", "localhost", "--port", "61000", "--max-cycles", "800",
         "--status-interval", "20",
-        "--disable-pass-strategy", "--enable-parameterized-kick",
+        "--disable-pass-strategy", "--disable-team-tactics",
+        "--enable-parameterized-kick",
         "--enable-fast-walk", "--fast-walk-model", "/tmp/fast-walk.onnx",
         "--enable-rapid-turn", "--rapid-turn-model", "/tmp/rapid-turn.onnx",
         "--shadow-learned-kick", "--learned-kick-model",
@@ -46,7 +47,8 @@ int main() {
     if (config.team_name != "My3D" || config.player_number != 7 ||
         config.host != "localhost" || config.port != 61000 ||
         config.max_cycles != 800U || config.status_interval_cycles != 20U ||
-        config.enable_pass_strategy || !config.enable_parameterized_kick ||
+        config.enable_pass_strategy || config.enable_team_tactics ||
+        !config.enable_parameterized_kick ||
         !config.enable_fast_walk ||
         config.fast_walk_model != "/tmp/fast-walk.onnx" ||
         !config.enable_rapid_turn ||
@@ -63,9 +65,16 @@ int main() {
         std::cerr << "pass strategy could not be re-enabled\n";
         return 1;
     }
+    const app::RuntimeConfig tactics_enabled = parse({
+        "ApolloCodeBase", "--disable-team-tactics", "--enable-team-tactics"});
+    if (!tactics_enabled.enable_team_tactics) {
+        std::cerr << "team tactics could not be re-enabled\n";
+        return 1;
+    }
 
     const app::RuntimeConfig safe_default = parse({"ApolloCodeBase"});
-    if (safe_default.enable_parameterized_kick) {
+    if (safe_default.enable_parameterized_kick ||
+        !safe_default.enable_team_tactics) {
         std::cerr << "experimental parameterized kick was enabled by default\n";
         return 1;
     }

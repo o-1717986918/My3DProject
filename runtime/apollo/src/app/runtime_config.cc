@@ -60,6 +60,10 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
             config.enable_pass_strategy = false;
         } else if (arg == "--enable-pass-strategy") {
             config.enable_pass_strategy = true;
+        } else if (arg == "--disable-team-tactics") {
+            config.enable_team_tactics = false;
+        } else if (arg == "--enable-team-tactics") {
+            config.enable_team_tactics = true;
         } else if (arg == "--enable-parameterized-kick") {
             config.enable_parameterized_kick = true;
         } else if (arg == "--disable-parameterized-kick") {

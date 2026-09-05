@@ -51,6 +51,8 @@ int main() {
         !enabled.executable(make_dribble(0.55, 0.90), 0.0) ||
         enabled.state(strategy::SkillCapability::DribbleTouch) !=
             strategy::CapabilityState::Experimental ||
+        !enabled.executable(make_dribble(0.55, 0.90), 2.50) ||
+        enabled.executable(make_dribble(0.55, 0.90), 3.01) ||
         enabled.executable(make_dribble(0.70, 0.90), 0.0) ||
         enabled.executable(make_dribble(0.55, 0.95), 0.0)) {
         std::cerr << "procedural dribble capability envelope is incorrect\n";

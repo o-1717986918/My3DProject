@@ -1399,3 +1399,48 @@ unsupported. This evidence justifies promotion by lower recovery burden and
 continued match utility, while keeping transition training open. The ordered
 server file-set hash is
 `8692727eb34f991602d5626a2d49aa780ded84bd03e4aaae4977decf2ce43049`.
+
+## Mirrored lateral specialist exploration — 2026-09-05
+
+Before new training, the transition-recovered FastWalk actor completes 64/64
+episodes at `vy=+0.30 m/s` and an exact reflected route completes 64/64 at
+`vy=-0.30 m/s`; direct negative-y execution completes only 57/64. This supports
+one learned direction plus exact observation/action reflection, but measured
+speed is only approximately `+0.190/-0.192 m/s`.
+
+The first 1,179,648-step `lateral_left_expert` continuation retains 64/64 fixed
+command completion on both reflected sides. At a `0.30 m/s` request it reaches
+only `+0.202/-0.205 m/s`, below the predeclared `0.24 m/s` gate. A diagnostic
+`0.45 m/s` request reaches `+0.338/-0.342 m/s`, so the primitive exists but
+undertracks lower commands. The candidate remains training-only.
+
+A separately predeclared speed continuation increases the training command
+range to `0.30..0.75 m/s`. It does not produce a material speed gain: held-out
+`0.45 m/s` execution remains `+0.337/-0.341 m/s`, while unwanted yaw grows from
+about `0.123` to `0.202 rad/s`. A 2.0 Hz gait-frequency diagnostic changes
+neither result materially. Both directions remain 64/64 upright, so the result
+is evidence for a yaw-coupling defect, not absence of lateral balance. This
+candidate is rejected; runtime continues to use turn-then-forward until a
+yaw-stabilized lateral expert passes. Full hashes and gates are in
+`training/locks/lateral_expert_2026_09_05.yaml`.
+
+## Natural kick release and explicit fallback — 2026-09-05
+
+`/home/win98/rl_runs/kick-release-failsoft-s20261191-v1` ran 1200 server cycles
+with 14/14 clean clients and no illegal defense. It recorded five explicit
+`fallback-forward-contact` setup transitions, 59 fallback motion samples,
+three physical contact events, and one pass contact. One exact dribble release
+was issued after settling at 0.233 m/s, but motion dispatch observed a
+1.79-degree relative target angle and rejected it against the former
+one-degree short-touch envelope. Six sampled statuses repeated that rejected
+request until nominal timeout.
+
+The correction widens only the 0.55 m dribble dispatch angle to three degrees
+(under 3 cm geometric lateral error), retains the one-degree Shot/Clear
+contracts, and clears any matching rejected local ball action on the next
+decision cycle. A second run at
+`/home/win98/rl_runs/kick-release-angle3-s20261192-v1` again completed 14/14
+with no illegal defense and two fallback contacts; it did not naturally enter
+an exact release slot. This is positive evidence for fail-soft continuity, not
+promotion evidence for the exact skill. Continuous chase-to-contact training
+remains the corrective path.

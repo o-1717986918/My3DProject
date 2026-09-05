@@ -24,7 +24,11 @@ inline constexpr double kParameterizedPassRequestedSpeedMps = 1.43;
 // anchors and the same held-out/server promotion gates.
 inline constexpr double kProceduralDribbleMinimumTargetDistanceM = 0.45;
 inline constexpr double kProceduralDribbleMaximumTargetDistanceM = 0.65;
-inline constexpr double kProceduralDribbleMaximumTargetAngleDeg = 1.0;
+// At 0.55 m, a three-degree body/target mismatch is under 3 cm laterally and
+// remains inside the short-touch control corridor. The former one-degree
+// boundary rejected a natural release after decision-time alignment because
+// localization yaw moved by 1.79 degrees before motion dispatch.
+inline constexpr double kProceduralDribbleMaximumTargetAngleDeg = 3.0;
 inline constexpr double kProceduralDribbleRequestedSpeedMps = 0.90;
 inline constexpr double kProceduralDribbleMinimumBallLocalYM = 0.02;
 inline constexpr double kProceduralDribbleMaximumBallLocalYM = 0.06;

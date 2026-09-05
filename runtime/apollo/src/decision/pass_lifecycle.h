@@ -20,7 +20,10 @@ namespace decision {
 class PassLifecycle {
 public:
     struct Parameters {
-        double proposal_timeout_s{6.0};
+        // A receiver that is already at a direct-pass target should answer in
+        // a few communication slots.  A six-second proposal stranded the ball
+        // owner whenever perception or orientation prevented Ready.
+        double proposal_timeout_s{2.5};
         double committed_timeout_s{4.0};
         double minimum_execution_displacement_m{0.12};
         double minimum_execution_speed_mps{0.30};

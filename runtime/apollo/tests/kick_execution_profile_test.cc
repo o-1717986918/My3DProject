@@ -97,7 +97,10 @@ int main() {
 
     const auto dribble = behavior::make_kick_execution_profile(
         snapshot, make_dribble(), true);
+    const auto angled_dribble = behavior::make_kick_execution_profile(
+        snapshot, make_dribble(2.50), true);
     if (dribble.kind != behavior::KickProfileKind::ProceduralContact ||
+        angled_dribble.kind != behavior::KickProfileKind::ProceduralContact ||
         !near(dribble.target_distance_m, 0.55) ||
         !near(dribble.requested_speed_mps, 0.90) ||
         dribble.mode != decision::KickMode::DribbleTouch) {

@@ -21,7 +21,8 @@ class DecisionManager {
 public:
     explicit DecisionManager(
         bool enable_pass_strategy = true,
-        bool enable_targeted_kick = false);
+        bool enable_targeted_kick = false,
+        bool enable_team_tactics = true);
 
     HighLevelCommand decide(
         const world::WorldSnapshot& snapshot,
@@ -38,6 +39,7 @@ private:
     BehaviorTree behavior_tree_;
     bool enable_pass_strategy_{true};
     bool enable_targeted_kick_{false};
+    bool enable_team_tactics_{true};
 };
 
 }  // namespace decision

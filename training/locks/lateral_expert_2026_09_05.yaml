@@ -1,7 +1,7 @@
 schema_version: 1
 recorded_at: 2026-09-05
 stage: lateral_left_expert
-status: first_stage_below_speed_gate_speed_continuation_predeclared
+status: speed_continuation_rejected_yaw_stabilization_required
 
 purpose:
   - train_one_pure_lateral_direction_without_forgetting_forward_assets
@@ -107,3 +107,36 @@ speed_continuation:
     median_lateral_tracking_rmse_mps_lte: 0.12
     upright_completion_rate_gte: 0.95
   required_next_stage_if_speed_passes: lateral_transition_recovery
+
+speed_continuation_result:
+  run: /home/win98/rl_runs/stable-motion/lateral-left-speed-s20261177-v1
+  source_revision: c9382815dfba72b1d4acf98fec4d8e8da68ca759
+  run_manifest_sha256: 2d09efdc8a3907a68cd209588ccf94f837bd442ae4d265744668cfdef0014b77
+  final_model_sha256: a86624bfa0d27dc0fcf296bfdecc2a4fa6e6b6eedbdbdd211602c166b3ec964a
+  onnx_parity_max_abs_error: 0.000009059906005859375
+  fixed_seed: 20261180
+  fixed_030_mps:
+    left_upright: 64
+    right_mirrored_upright: 64
+    left_actual_mps: 0.20871168206935692
+    right_actual_mps: -0.21006758717977972
+    left_yaw_rate_rad_s: -0.2019814512769496
+    right_yaw_rate_rad_s: 0.20268249310719583
+  fixed_045_mps:
+    left_upright: 64
+    right_mirrored_upright: 64
+    left_actual_mps: 0.33666978202919895
+    right_actual_mps: -0.3407283276280909
+    left_yaw_rate_rad_s: -0.2010556162196256
+    right_yaw_rate_rad_s: 0.2016505248381132
+  gait_frequency_2hz_speed_gain_observed: false
+  decision: rejected_speed_gain_negligible_and_yaw_drift_regressed
+
+next_iteration:
+  objective: suppress_lateral_yaw_drift_before_any_runtime_mount
+  method:
+    - restore_first_stage_final_not_rejected_speed_continuation
+    - retain_pure_positive_lateral_command_and_exact_right_reflection
+    - increase_zero_yaw_tracking_weight_without_increasing_speed_range
+    - evaluate_fixed_030_and_045_before_transition_recovery
+  runtime_fallback_until_passed: turn_then_forward_with_stable_walk

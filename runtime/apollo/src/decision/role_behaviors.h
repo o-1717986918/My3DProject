@@ -35,6 +35,9 @@ struct APState {
     double kick_active_until_s{0.0};
     double next_kick_allowed_s{0.0};
     double kick_setup_stable_since_s{0.0};
+    double kick_setup_started_s{0.0};
+    double kick_setup_last_update_s{0.0};
+    double kick_setup_direction_deg{0.0};
     double pass_commit_until_s{0.0};
     double pass_retry_after_s{0.0};
     int last_kick_setup_gate{-1};

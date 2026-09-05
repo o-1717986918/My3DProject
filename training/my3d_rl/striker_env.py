@@ -53,11 +53,20 @@ def default_config() -> config_dict.ConfigDict:
     config.kick_full_radius = 0.07
     config.kick_heading_radius = 0.45
     config.kick_full_heading = 0.10
-    config.kick_trigger_threshold = 1.00
-    config.kick_settled_distance = 0.11
-    config.kick_settled_heading = 0.10
-    config.kick_settled_confirmation_steps = 25
+    # A perfect activation of 1.0 plus a 25-cycle confirmation reproduced the
+    # runtime's release starvation: ordinary gait sway repeatedly crossed the
+    # boundary.  Keep a bounded pose gate, but let the learned transition own
+    # the final centimetres and gait phase after five consecutive 50 Hz steps.
+    config.kick_trigger_threshold = 0.80
+    config.kick_settled_distance = 0.14
+    config.kick_settled_heading = 0.15
+    config.kick_settled_confirmation_steps = 5
     config.kick_rearm_steps = 25
+    config.kick_prior_enabled = True
+    # Zero preserves the deployed kick-residual contract.  The staged T1
+    # striker curriculum raises this floor so the actor can first learn ball
+    # chasing and then a continuous chase-to-contact transition.
+    config.learned_approach_residual_floor = 0.0
     config.kick_walk_command = [0.50, -0.04, 0.0]
     config.kick_walk_duration_steps = 33
     config.fixed_kick_prior_index = -1
@@ -184,6 +193,8 @@ class LongHorizonStriker(DirectionalKick):
             raise ValueError("striker-v1 must preserve the 102 -> 23 boundary")
         if not 0.0 < self._config.kick_trigger_threshold <= 1.0:
             raise ValueError("kick_trigger_threshold must be in (0, 1]")
+        if not 0.0 <= self._config.learned_approach_residual_floor <= 1.0:
+            raise ValueError("learned_approach_residual_floor must be in [0, 1]")
         if (
             self._config.kick_settled_distance < self._config.kick_full_radius
             or self._config.kick_settled_distance
@@ -496,6 +507,7 @@ class LongHorizonStriker(DirectionalKick):
         )
         kick_trigger = (
             self._uses_kick_prior
+            & bool(self._config.kick_prior_enabled)
             & (state.info["kick_step"] < 0)
             & (state.info["kick_cooldown"] <= 0)
             & (
@@ -552,7 +564,13 @@ class LongHorizonStriker(DirectionalKick):
         )
         walk_action = self._walk_policy(walk_observation)
         correction_gate = jp.maximum(
-            features["activation"], kick_active.astype(jp.float32)
+            jp.maximum(
+                features["activation"], kick_active.astype(jp.float32)
+            ),
+            jp.asarray(
+                self._config.learned_approach_residual_floor,
+                dtype=jp.float32,
+            ),
         )
         learned_correction = (
             correction_gate

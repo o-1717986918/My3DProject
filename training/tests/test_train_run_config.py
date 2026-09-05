@@ -119,3 +119,15 @@ def test_lateral_speed_continuation_increases_demand_without_coupled_axes():
     assert stage["reset_joint_velocity_noise"] < robust["reset_joint_velocity_noise"]
     assert stage["reset_policy_action_noise"] < robust["reset_policy_action_noise"]
     assert stage["reward.fall"] <= -150.0
+
+
+def test_lateral_yaw_lock_targets_observed_drift_before_more_speed():
+    stage = STAGES["lateral_left_yaw_lock"]
+    baseline = STAGES["lateral_left_expert"]
+
+    assert stage["lin_vel_x"] == [0.0, 0.0]
+    assert stage["lin_vel_y"] == baseline["lin_vel_y"]
+    assert stage["ang_vel_yaw"] == [0.0, 0.0]
+    assert stage["reward.tracking_yaw"] > baseline["reward.tracking_yaw"]
+    assert stage["reward.yaw_rate_error"] < baseline["reward.yaw_rate_error"]
+    assert stage["reset_policy_action_noise"] > 0.0

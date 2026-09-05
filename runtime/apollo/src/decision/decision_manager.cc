@@ -7,16 +7,18 @@ namespace decision {
 
 DecisionManager::DecisionManager(
     bool enable_pass_strategy,
-    bool enable_targeted_kick)
+    bool enable_targeted_kick,
+    bool enable_team_tactics)
     : enable_pass_strategy_(enable_pass_strategy),
-      enable_targeted_kick_(enable_targeted_kick) {}
+      enable_targeted_kick_(enable_targeted_kick),
+      enable_team_tactics_(enable_team_tactics) {}
 
 HighLevelCommand DecisionManager::decide(
     const world::WorldSnapshot& snapshot,
     const std::optional<ExecutionFeedback>& execution_feedback) {
     return behavior_tree_.evaluate(
         snapshot, blackboard_, role_manager_, enable_pass_strategy_,
-        enable_targeted_kick_, execution_feedback);
+        enable_targeted_kick_, execution_feedback, enable_team_tactics_);
 }
 
 const strategy::PlanningResult* DecisionManager::strategy_plan() const {

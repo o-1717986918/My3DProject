@@ -30,6 +30,7 @@ struct BehaviorContext {
     double& kickoff_hold_until_s;
     bool enable_pass_strategy;
     bool enable_targeted_kick;
+    bool enable_team_tactics;
     const std::optional<ExecutionFeedback>& execution_feedback;
 };
 
@@ -373,8 +374,34 @@ NodeResult compute_formation(BehaviorContext& context) {
         }
     }
 
-    TeamPlan team_plan = context.team_tactics.plan_all(
-        context.snapshot, role_assignments);
+    TeamPlan team_plan;
+    if (context.enable_team_tactics) {
+        team_plan = context.team_tactics.plan_all(
+            context.snapshot, role_assignments);
+    } else {
+        // A controlled ablation keeps the upstream role/formation and all
+        // restart legality, while removing only the new open-play duty layer.
+        // This makes current-vs-base evidence attributable instead of forcing
+        // an all-or-nothing binary comparison.
+        team_plan.tactical_state =
+            strategy::build_tactical_state(context.snapshot);
+        team_plan.source_server_time_s = context.snapshot.server_time;
+        team_plan.fresh = context.snapshot.ball.position_valid &&
+            (context.snapshot.ball.visible ||
+             context.snapshot.ball.position_age_s <= 0.75);
+        for (const auto& role_assignment : role_assignments) {
+            team_plan.assignments.push_back({
+                role_assignment.player_number,
+                role_assignment.role_id,
+                TacticalTarget{
+                    TacticalDuty::Formation,
+                    role_assignment.role_position_m,
+                    ball_position,
+                    0,
+                    0.25},
+            });
+        }
+    }
     if (restart_active) {
         const auto& restart_plan = *restart_decision.plan;
         for (auto& assignment : team_plan.assignments) {
@@ -650,7 +677,8 @@ HighLevelCommand BehaviorTree::evaluate(
     RoleManager& role_manager,
     bool enable_pass_strategy,
     bool enable_targeted_kick,
-    const std::optional<ExecutionFeedback>& execution_feedback) const {
+    const std::optional<ExecutionFeedback>& execution_feedback,
+    bool enable_team_tactics) const {
     blackboard.clear();
     BehaviorContext context{
         snapshot,
@@ -663,6 +691,7 @@ HighLevelCommand BehaviorTree::evaluate(
         kickoff_hold_until_s_,
         enable_pass_strategy,
         enable_targeted_kick,
+        enable_team_tactics,
         execution_feedback};
     if (execution_feedback.has_value()) {
         role_behaviors_.apply_execution_feedback(*execution_feedback);

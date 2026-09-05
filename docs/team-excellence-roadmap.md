@@ -7,7 +7,12 @@ Last audited: 2026-09-05
 
 Authoritative runtime: `runtime/apollo/`
 
-Accepted committed baseline before this delivery: `9ff6348`
+Accepted committed baseline before this delivery: `27695b4`
+
+The developed-versus-pristine evidence and logic-by-logic assessment are kept
+in `current-vs-apollo-strategy-audit.md`. This roadmap defines intended team
+capability; the audit distinguishes implemented invariants from tactics whose
+competitive value is still unproven.
 
 ## Objective and definition of completion
 
@@ -78,13 +83,17 @@ Proposed or Committed ------------------------------> Cancelled / Expired
 facing the ball for a stable residence interval. `Completed` motion feedback
 only means the motor request ended. `Executed` requires ball movement;
 `Received`, `Intercepted`, and `Out` require world evidence. A terminal state
-is broadcast briefly before local state is cleared and replanning resumes.
+is broadcast briefly while local non-pass planning resumes; the pass may be
+recommitted only after its one-shot retry delay.
 
 The common action planner never silently changes semantics. In particular, an
 out-of-envelope targeted pass cannot become a fixed forward kick. Hold and Move
 remain available through the stable walk contract; experimental Dribble,
 TargetedPass, Shot and Clear are admitted only by their exact distance, speed
-and orientation contracts.
+and orientation contracts. Once such an action has been admitted and has spent
+1.20 seconds continuously attempting a valid near-ball setup, it may explicitly
+authorize a wider-corridor forward-contact fallback. That path is logged as
+`FallbackKick*` and never counted as target-accurate execution.
 
 ## Role behavior closure
 

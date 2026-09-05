@@ -567,7 +567,15 @@ play_on=$(
 )
 illegal_defense=$(grep -c "Illegal defense" "$run_dir/server.log" || true)
 kick_samples=$(
-    { grep -Eh "MY3D_STATUS.*motion=((Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold)|ProceduralKick(Execute|Hold))" \
+    { grep -Eh "MY3D_STATUS.*motion=((Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold)|ProceduralKick(Execute|Hold)|FallbackKick(Forward|Stabilize|Hold))" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+fallback_kick_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=FallbackKick(Forward|Stabilize|Hold)" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+fallback_pass_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=FallbackKick(Forward|Stabilize|Hold).*kick_mode=TargetedPass" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
 parameterized_kick_samples=$(
@@ -695,6 +703,8 @@ if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
         "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
         "server_errors=$server_errors illegal_defense=$illegal_defense " \
         "kick_samples=$kick_samples parameterized_kick_samples=$parameterized_kick_samples " \
+        "fallback_kick_samples=$fallback_kick_samples " \
+        "fallback_pass_samples=$fallback_pass_samples " \
         "learned_kick_samples=$learned_kick_samples " \
         "learned_kick_shadow_samples=$learned_kick_shadow_samples " \
         "procedural_kick_samples=$procedural_kick_samples " \
@@ -723,6 +733,8 @@ echo "Apollo 7v7 acceptance passed: cycles=$max_cycles clean_exits=$clean_exits 
     "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
     "server_errors=$server_errors illegal_defense=$illegal_defense " \
     "kick_samples=$kick_samples parameterized_kick_samples=$parameterized_kick_samples " \
+    "fallback_kick_samples=$fallback_kick_samples " \
+    "fallback_pass_samples=$fallback_pass_samples " \
     "learned_kick_samples=$learned_kick_samples " \
     "learned_kick_shadow_samples=$learned_kick_shadow_samples " \
     "procedural_kick_samples=$procedural_kick_samples " \

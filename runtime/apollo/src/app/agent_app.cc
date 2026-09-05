@@ -96,7 +96,10 @@ decision::ExecutionFeedback make_execution_feedback(
             feedback.restart_epoch = kick->restart_epoch;
             feedback.restart_revision = kick->restart_revision;
         }
-        if (kick != nullptr && kick->mode == decision::KickMode::TargetedPass) {
+        // Preserve action identity for every planned ball action, not only a
+        // pass. Otherwise a rejected dribble/shot/clear remains latched until
+        // its nominal duration and repeats the same rejected request.
+        if (kick != nullptr && kick->action_id != 0U) {
             feedback.cooperative_action_id = kick->action_id;
             feedback.sequence_id = kick->sequence_id;
         }
@@ -111,7 +114,8 @@ AgentApp::AgentApp(RuntimeConfig config)
       world_state_(config_.team_name, config_.player_number, 7),
       decision_manager_(
           config_.enable_pass_strategy,
-          config_.enable_parameterized_kick),
+          config_.enable_parameterized_kick,
+          config_.enable_team_tactics),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name) {}
 
@@ -120,7 +124,8 @@ AgentApp::AgentApp(RuntimeConfig config, std::unique_ptr<server::TcpLpmClient> c
       world_state_(config_.team_name, config_.player_number, 7),
       decision_manager_(
           config_.enable_pass_strategy,
-          config_.enable_parameterized_kick),
+          config_.enable_parameterized_kick,
+          config_.enable_team_tactics),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name),
       client_(std::move(client)) {}

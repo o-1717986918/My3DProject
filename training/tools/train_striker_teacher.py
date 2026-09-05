@@ -28,6 +28,35 @@ from my3d_rl.striker_env import (
 
 
 STAGES: dict[str, dict[str, Any]] = {
+    # Stage 1 follows the public ICRA 2026 Booster-T1 striker recipe: learn
+    # long-distance ball chasing before optimizing any contact.  The policy is
+    # allowed to correct the Apollo walk throughout the approach, while the
+    # kick prior is explicitly disabled.
+    "ball_chase": {
+        "robot_distance_range": [1.0, 4.0],
+        "robot_lateral_range": [-1.0, 1.0],
+        "robot_yaw_noise_range": [-1.0, 1.0],
+        "target_angle_range": [-3.141593, 3.141593],
+        "target_distance_range": [2.0, 5.0],
+        "reset_joint_noise": 0.02,
+        "reset_root_velocity_noise": 0.06,
+        "kick_prior_enabled": False,
+        "learned_approach_residual_floor": 1.0,
+    },
+    # Stage 2 resumes the chase teacher and enables a direction-conditioned
+    # contact prior.  A non-zero residual floor makes approach and strike one
+    # continuous policy instead of teaching only a narrow release window.
+    "directional_kick": {
+        "robot_distance_range": [1.0, 2.5],
+        "robot_lateral_range": [-0.50, 0.50],
+        "robot_yaw_noise_range": [-0.60, 0.60],
+        "target_angle_range": [-0.523599, 0.523599],
+        "target_distance_range": [2.0, 5.0],
+        "reset_joint_noise": 0.02,
+        "reset_root_velocity_noise": 0.06,
+        "kick_prior_enabled": True,
+        "learned_approach_residual_floor": 0.25,
+    },
     "near_ball": {
         "robot_distance_range": [0.42, 0.70],
         "robot_lateral_range": [-0.06, 0.06],

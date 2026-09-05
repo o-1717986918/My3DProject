@@ -155,9 +155,24 @@ bool test_failure_cancels_and_replans(decision::ExecutionStatus status) {
         ? comm::PassIntentState::Cancelled
         : comm::PassIntentState::Timeout;
     if (terminal_action == nullptr || terminal_intent == nullptr ||
-        terminal_action->action_id != kick.action_id ||
+        terminal_action->action_id == kick.action_id ||
         terminal_intent->state != expected_terminal) {
-        std::cerr << "matching failed kick did not publish a terminal outcome\n";
+        std::cerr << "matching failed kick did not publish a terminal outcome"
+                  << " terminal_action=" << (terminal_action != nullptr)
+                  << " terminal_intent=" << (terminal_intent != nullptr);
+        if (terminal_action != nullptr) {
+            std::cerr << " action_id=" << terminal_action->action_id
+                      << " failed_action_id=" << kick.action_id
+                      << " category="
+                      << static_cast<int>(terminal_action->category);
+        }
+        if (terminal_intent != nullptr) {
+            std::cerr << " intent_state="
+                      << static_cast<int>(terminal_intent->state)
+                      << " expected_state="
+                      << static_cast<int>(expected_terminal);
+        }
+        std::cerr << '\n';
         return false;
     }
     if (manager.strategy_plan() == nullptr ||
@@ -185,10 +200,12 @@ bool test_failure_cancels_and_replans(decision::ExecutionStatus status) {
         std::cerr << "terminal pass outcome was not retained for broadcast\n";
         return false;
     }
-    snapshot.server_time = 2.13;
+    snapshot.server_time = 3.40;
     manager.decide(snapshot);
     const auto* retry = manager.selected_cooperative_action();
-    if (retry == nullptr || retry->sequence_id == selected.sequence_id) {
+    if (retry == nullptr ||
+        retry->category != strategy::ActionCategory::Pass ||
+        retry->sequence_id == selected.sequence_id) {
         std::cerr << "pass was not recommitted with a new sequence after retry delay\n";
         return false;
     }

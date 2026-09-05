@@ -130,10 +130,16 @@ MotionStepResult MotionManager::step_kick(
     }
 
     const bool target_aware = command.mode != decision::KickMode::ForwardContact;
+    const bool specialized_executor_active =
+        kick_residual_active_ || procedural_kick_active_ ||
+        (learned_kick_enabled_ && learned_kick_active_);
+    const bool use_forward_contact_fallback =
+        target_aware && command.allow_forward_contact_fallback &&
+        !specialized_executor_active;
     if (target_aware &&
         (!parameterized_kick_enabled_ ||
-         (!kick_residual_active_ && !procedural_kick_active_ &&
-          !(learned_kick_enabled_ && learned_kick_active_)))) {
+         !specialized_executor_active) &&
+        !use_forward_contact_fallback) {
         kick_residual_active_ = false;
         procedural_kick_active_ = false;
         learned_kick_active_ = false;
@@ -212,14 +218,20 @@ MotionStepResult MotionManager::step_kick(
     return {
         true,
         macro_complete
-            ? (kick_residual_active_
+            ? (use_forward_contact_fallback
+                ? "FallbackKickHold"
+                : kick_residual_active_
                 ? "ParameterizedResidualKickHold"
                 : (parameterized ? "ParameterizedKickHold" : "KickHold"))
             : (drive_forward
-                ? (kick_residual_active_
+                ? (use_forward_contact_fallback
+                    ? "FallbackKickForward"
+                    : kick_residual_active_
                     ? "ParameterizedResidualKickForward"
                     : (parameterized ? "ParameterizedKickForward" : "KickForward"))
-                : (kick_residual_active_
+                : (use_forward_contact_fallback
+                    ? "FallbackKickStabilize"
+                    : kick_residual_active_
                     ? "ParameterizedResidualKickStabilize"
                     : (parameterized ? "ParameterizedKickStabilize" : "KickStabilize"))),
         result.joint_targets,

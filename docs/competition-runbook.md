@@ -163,7 +163,9 @@ left side is the current source tree with all supported abilities enabled; the
 right side is the clean online ApolloCodebase checkout pinned at
 `71018c968969d6e55130b0e1987cd5b4f5c3b4df`. The upstream binary is built into
 the WSL Linux filesystem under `/home/win98/.cache/my3d`, not onto drive C, and
-the match opens in the default Windows browser by default.
+the match opens in the default Windows browser by default. RCSSServerMJ renders
+the left/current team in blue and the right/pristine team in red; the Web HUD
+uses the same color mapping.
 
 ```bash
 scripts/run_web_match_vs_apollo_base.sh 120000
@@ -184,6 +186,18 @@ launcher checks the selected r2 actor SHA-256
 Use `APOLLO_LEARNED_KICK_MODE=shadow` for inference-only evidence. Stable walk
 is already the default; set `APOLLO_ENABLE_PARAMETERIZED_KICK=0` to disable
 experimental contact as well, in which case learned kick defaults to off.
+
+Set `APOLLO_ENABLE_TEAM_TACTICS=0` to remove only the developed open-play duty
+layer while retaining role assignment, formation, and restart legality. This
+is the preferred strategy ablation because it does not also change the action
+stack. Summarize any retained comparison directory with:
+
+```bash
+scripts/analyze_apollo_vs_base_match.py /home/win98/rl_runs/RUN_DIRECTORY
+```
+
+The current evidence and interpretation limits are recorded in
+`docs/current-vs-apollo-strategy-audit.md`.
 
 ## 6. Package and inspect
 

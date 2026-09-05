@@ -118,9 +118,14 @@ int main() {
         return 1;
     }
     profile = make_profile();
-    snapshot.self.lin_vel_b[0] = 0.21;
+    snapshot.self.lin_vel_b[0] = 0.49;
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "bounded moving release was not accepted\n";
+        return 1;
+    }
+    snapshot.self.lin_vel_b[0] = 0.51;
     if (runner.begin(snapshot, profile)) {
-        std::cerr << "moving robot bypassed the procedural release guard\n";
+        std::cerr << "excessive start speed bypassed the procedural release guard\n";
         return 1;
     }
     snapshot = make_snapshot();

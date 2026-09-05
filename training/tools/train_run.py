@@ -417,6 +417,42 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.pose": -0.04,
         "reward.fall": -180.0,
     },
+    # The speed continuation increased lateral velocity only by preserving a
+    # roughly 0.20 rad/s unintended yaw.  Return to the stable first lateral
+    # checkpoint and explicitly make yaw locking the next isolated objective
+    # before attempting another speed or coupled-command continuation.
+    "lateral_left_yaw_lock": {
+        "lin_vel_x": [0.0, 0.0],
+        "lin_vel_y": [0.18, 0.48],
+        "ang_vel_yaw": [0.0, 0.0],
+        "gait_frequency": [1.3, 1.9],
+        "stand_probability": 0.20,
+        "axis_aligned_command_probability": 0.0,
+        "command_resample_steps": 75,
+        "reset_joint_noise": 0.02,
+        "reset_joint_velocity_noise": 0.8,
+        "reset_policy_action_noise": 1.0,
+        "reset_root_velocity_noise": 0.10,
+        "reset_yaw_range": 0.10,
+        "push_enable": True,
+        "push_interval_steps": 175,
+        "push_magnitude": [0.01, 0.08],
+        "action_delay_max_steps": 1,
+        "reward.tracking_linear": 10.0,
+        "reward.tracking_yaw": 16.0,
+        "reward.upright": 3.0,
+        "reward.height": 2.0,
+        "reward.alive": 0.75,
+        "reward.lateral_tracking": -12.0,
+        "reward.yaw_rate_error": -20.0,
+        "reward.vertical_velocity": -0.50,
+        "reward.angular_xy": -0.45,
+        "reward.action_rate": -0.05,
+        "reward.action_acceleration": -0.02,
+        "reward.foot_slip": -0.035,
+        "reward.pose": -0.04,
+        "reward.fall": -180.0,
+    },
     # Directional expert used to repair the inherited policy's weakest action.
     # It is a distillation teacher, not a standalone competition replacement.
     "right_turn_expert": {

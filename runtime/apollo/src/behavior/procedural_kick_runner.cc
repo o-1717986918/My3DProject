@@ -20,7 +20,9 @@ namespace {
 
 constexpr double kMaximumStartLegPositionDeg = 45.0;
 constexpr double kMaximumStartLegVelocityDegS = 70.0;
-constexpr double kMaximumStartPlanarSpeedMps = 0.20;
+// Match the decision-layer release window. The trajectory captures the live
+// pose, and the shorter two-cycle debounce limits root drift before entry.
+constexpr double kMaximumStartPlanarSpeedMps = 0.50;
 constexpr double kMaximumStartTiltRateDegS = 30.0;
 constexpr double kCaptureDurationS = 0.18;
 

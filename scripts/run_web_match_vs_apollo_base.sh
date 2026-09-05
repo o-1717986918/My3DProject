@@ -127,6 +127,12 @@ case "${APOLLO_ENABLE_PASS_STRATEGY:-1}" in
     *) echo "APOLLO_ENABLE_PASS_STRATEGY must be 0 or 1" >&2; exit 2 ;;
 esac
 
+case "${APOLLO_ENABLE_TEAM_TACTICS:-1}" in
+    1) ;;
+    0) current_args+=(--disable-team-tactics) ;;
+    *) echo "APOLLO_ENABLE_TEAM_TACTICS must be 0 or 1" >&2; exit 2 ;;
+esac
+
 parameterized_kick_mode=${APOLLO_ENABLE_PARAMETERIZED_KICK:-1}
 case "$parameterized_kick_mode" in
     1) current_args+=(--enable-parameterized-kick) ;;

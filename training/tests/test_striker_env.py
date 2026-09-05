@@ -52,6 +52,16 @@ def test_approach_controller_keeps_kick_disabled_while_far_away():
     assert float(activation) == 0.0
 
 
+def test_striker_default_release_gate_is_bounded_but_not_perfect_pose_only():
+    config = default_config()
+
+    assert config.kick_trigger_threshold < 1.0
+    assert config.kick_settled_confirmation_steps <= 5
+    assert config.kick_full_radius < config.kick_settled_distance
+    assert config.kick_full_heading < config.kick_settled_heading
+    assert config.learned_approach_residual_floor == 0.0
+
+
 def test_numpy_and_jax_approach_controllers_match():
     kwargs = {
         "standoff": 0.31,

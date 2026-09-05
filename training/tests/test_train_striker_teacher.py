@@ -27,6 +27,18 @@ def test_striker_curriculum_expands_without_changing_stage_order():
     assert NORMALIZE_OBSERVATIONS is False
 
 
+def test_t1_striker_curriculum_separates_chase_from_directional_contact():
+    chase = STAGES["ball_chase"]
+    kick = STAGES["directional_kick"]
+
+    assert chase["robot_distance_range"] == [1.0, 4.0]
+    assert chase["kick_prior_enabled"] is False
+    assert chase["learned_approach_residual_floor"] == 1.0
+    assert kick["kick_prior_enabled"] is True
+    assert 0.0 < kick["learned_approach_residual_floor"] < 1.0
+    assert kick["robot_distance_range"][1] < chase["robot_distance_range"][1]
+
+
 def test_striker_parity_gate_requires_matching_verified_backend(tmp_path: Path):
     path = tmp_path / "parity.json"
     path.write_text(
