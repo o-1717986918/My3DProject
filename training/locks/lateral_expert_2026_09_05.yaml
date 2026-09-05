@@ -1,0 +1,71 @@
+schema_version: 1
+recorded_at: 2026-09-05
+stage: lateral_left_expert
+status: predeclared_training_and_promotion_contract
+
+purpose:
+  - train_one_pure_lateral_direction_without_forgetting_forward_assets
+  - obtain_right_lateral_motion_by_exact_observation_action_reflection
+  - defer_coupled_omnidirectional_training_until_the_primitive_is_reliable
+
+initialization:
+  checkpoint: /home/win98/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/checkpoints/000001179648
+  model: /home/win98/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/policy.onnx
+  model_sha256: 6214b656c28f0b95300287e5e3a26508078a6a8d036dbeda0ec5130051a190d6
+
+baseline_cpu_64_episodes:
+  seed: 20261170
+  command_mps: [0.0, 0.30, 0.0]
+  direct_left:
+    upright: 64
+    median_lateral_speed_mps: 0.19030048858770288
+    median_lateral_tracking_rmse_mps: 0.12382317816553151
+    report: /home/win98/rl_runs/stable-motion/lateral-mirror-eval-s20261170/left-direct.json
+  direct_right:
+    upright: 57
+    median_lateral_speed_mps: -0.37698299280010683
+    report: /home/win98/rl_runs/stable-motion/lateral-mirror-eval-s20261170/right-direct.json
+  mirrored_right:
+    upright: 64
+    median_lateral_speed_mps: -0.1923560649746906
+    median_lateral_tracking_rmse_mps: 0.12209613244504328
+    report: /home/win98/rl_runs/stable-motion/lateral-mirror-eval-s20261170/right-mirror.json
+
+training:
+  implementation: warp
+  num_envs: 64
+  requested_timesteps: 1179648
+  seeds: [20261171]
+  network_profile: legacy_phase_soccer_v3
+  command_domain:
+    vx_mps: [0.0, 0.0]
+    vy_mps: [0.18, 0.48]
+    yaw_rate_rad_s: [0.0, 0.0]
+  right_direction_training: prohibited_use_exact_reflection_instead
+
+promotion:
+  fixed_commands_mps:
+    direct_left: [0.0, 0.30, 0.0]
+    mirrored_right: [0.0, -0.30, 0.0]
+  episodes_each: 64
+  held_out_seeds: [20261172, 20261173, 20261174]
+  gates_each_direction_and_seed:
+    upright_completion_rate_gte: 0.95
+    absolute_median_lateral_speed_mps_gte: 0.24
+    median_lateral_tracking_rmse_mps_lte: 0.12
+    absolute_median_forward_speed_mps_lte: 0.08
+    absolute_median_yaw_rate_rad_s_lte: 0.12
+    all_values_finite: true
+  onnx_parity_max_abs_error_lte: 0.00002
+  runtime_scope_if_passed:
+    - pure_lateral_translation_only
+    - never_touch_kick_alignment_or_precision_ball_approach
+    - stable_walk_same_cycle_fallback
+    - posture_guard_cooldown_and_automatic_get_up
+  server_required_before_default_enable: true
+
+stop_rules:
+  - do_not_replace_fast_forward_or_rapid_turn_assets_with_this_specialist
+  - reject_if_either_direct_left_or_mirrored_right_fails
+  - reject_if_speed_improves_by_sacrificing_upright_completion
+  - do_not_call_the_result_omnidirectional

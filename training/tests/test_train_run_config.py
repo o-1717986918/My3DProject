@@ -90,3 +90,18 @@ def test_fast_walk_transition_recovery_trains_non_nominal_handoffs():
     assert stage["reset_joint_velocity_noise"] > 0.0
     assert stage["action_delay_max_steps"] == 1
     assert stage["reward.fall"] <= -150.0
+
+
+def test_lateral_left_expert_is_pure_and_transition_robust():
+    stage = STAGES["lateral_left_expert"]
+
+    assert stage["lin_vel_x"] == [0.0, 0.0]
+    assert stage["lin_vel_y"][0] > 0.0
+    assert stage["lin_vel_y"][1] >= 0.45
+    assert stage["ang_vel_yaw"] == [0.0, 0.0]
+    assert stage["stand_probability"] > 0.0
+    assert stage["reset_policy_action_noise"] > 0.0
+    assert stage["reset_joint_velocity_noise"] > 0.0
+    assert stage["command_resample_steps"] < 100
+    assert stage["reward.lateral_tracking"] <= -10.0
+    assert stage["reward.fall"] <= -150.0
