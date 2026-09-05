@@ -157,6 +157,25 @@ default:
 scripts/run_web_match.sh 30000
 ```
 
+For an explicit developed-team versus pristine-upstream comparison, use the
+separate launcher below. It never edits or reuses the self-play launcher. The
+left side is the current source tree with all supported abilities enabled; the
+right side is the clean online ApolloCodebase checkout pinned at
+`71018c968969d6e55130b0e1987cd5b4f5c3b4df`. The upstream binary is built into
+the WSL Linux filesystem under `/home/win98/.cache/my3d`, not onto drive C, and
+the match opens in the default Windows browser by default.
+
+```bash
+scripts/run_web_match_vs_apollo_base.sh 120000
+```
+
+Set `MATCH_OPEN_WINDOWS_BROWSER=0` for a server-only launch and open the printed
+URL manually. Override `APOLLO_BASE_REPO` or
+`APOLLO_BASE_EXPECTED_REVISION` only when intentionally comparing another clean
+upstream revision. Existing binaries are reused for fast, reliable startup;
+set `APOLLO_REBUILD_CURRENT=1` or `APOLLO_REBUILD_BASE=1` after changing the
+corresponding source/dependency tree.
+
 Set `APOLLO_ENABLE_FAST_WALK=0` or `APOLLO_ENABLE_RAPID_TURN=0` for independent
 stable-walk ablations. The learned kick actor controls joints only inside its measured fixed-2 m envelope;
 residual-table or procedural contact remains the same-cycle fallback. The
