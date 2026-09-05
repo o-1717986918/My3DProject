@@ -21,10 +21,13 @@ def test_soccer_command_suite_covers_stationary_and_bidirectional_axes():
     assert commands["stand"] == (0.0, 0.0, 0.0)
     assert commands["fast_forward"][0] >= 1.5
     assert commands["reverse"][0] < 0.0
-    assert commands["left_strafe"][1] > 0.0
-    assert commands["right_strafe"][1] < 0.0
-    assert commands["left_turn"][2] > 0.0
-    assert commands["right_turn"][2] < 0.0
+    assert commands["pure_left_strafe"] == (0.0, 0.30, 0.0)
+    assert commands["pure_right_strafe"] == (0.0, -0.30, 0.0)
+    assert commands["pure_left_turn"] == (0.0, 0.0, 0.75)
+    assert commands["pure_right_turn"] == (0.0, 0.0, -0.75)
+    assert commands["curve_left"][0] > 0.0
+    assert commands["curve_left"][2] > 0.0
+    assert commands["curve_right"][2] < 0.0
 
 
 def test_suite_summary_preserves_worst_case_and_failed_names():

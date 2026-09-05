@@ -138,6 +138,31 @@ def test_axis_aligned_command_sampler_zeroes_two_command_axes():
     assert np.any(np.abs(commands[:, 2]) > 1.0e-7)
 
 
+def test_pure_yaw_advances_phase_and_reports_planted_foot_slip():
+    env = DirectionalRun(
+        config_overrides={
+            "use_fixed_command": True,
+            "fixed_command": [0.0, 0.0, 0.75],
+            "gait_frequency": [1.5, 1.5],
+            "reset_joint_noise": 0.0,
+            "reset_root_velocity_noise": 0.0,
+            "reset_yaw_range": 0.0,
+            "reward.foot_slip": -0.03,
+        },
+        contract=load_policy_contract(PHASE_CONTRACT),
+    )
+    state = jax.jit(env.reset)(jax.random.PRNGKey(92))
+
+    assert np.isclose(np.asarray(state.info["gait_frequency"]), 1.5)
+    assert state.info["last_foot_positions"].shape == (2, 3)
+    initial_phase = float(np.asarray(state.info["gait_phase"]))
+    next_state = jax.jit(env.step)(state, jax.numpy.zeros(23))
+    assert not np.isclose(
+        float(np.asarray(next_state.info["gait_phase"])), initial_phase
+    )
+    assert np.isfinite(np.asarray(next_state.metrics["cost/foot_slip"]))
+
+
 def test_phase_policy_contract_extends_actor_without_changing_actions():
     contract = load_policy_contract(PHASE_CONTRACT)
     env = DirectionalRun(contract=contract)

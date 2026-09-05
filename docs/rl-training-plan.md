@@ -68,7 +68,7 @@
 
 | 能力 | 启用方式 | 证据 | 限制与结论 |
 | --- | --- | --- | --- |
-| `FastWalkV2` 高速行走 | 源码树 WSL 启动脚本默认传入 `--enable-fast-walk --fast-walk-model <path>` | 指定候选 CPU 32/32 直立、中位速度 1.499 m/s；7v7 调用链可运行 | 10 秒横向漂移中位 5.452 m，服务器起身次数偏高；已默认启用但仍有运行时门控和稳定步态回退，不能称为跑步 |
+| `FastWalkV2` 高速行走 | 显式设置 `APOLLO_ENABLE_FAST_WALK=1` 后传入 `--enable-fast-walk --fast-walk-model <path>` | 指定候选 CPU 32/32 直立、中位速度 1.499 m/s；7v7 调用链可运行 | 10 秒横向漂移中位 5.452 m，服务器跌倒率过高；已从默认比赛配置撤下，仅保留更严格前向域和稳定步态回退，不能称为跑步 |
 | 残差表目标传球 | 源码树 WSL 启动脚本默认传入 `--enable-parameterized-kick` | 152/153 条件表的精确评估三种子约 94.7%–96.3% | 服务器保存结果的实际出球仍弱；作为 learned kick 不匹配/失败时的实验回退 |
 | 程序化 `DribbleTouch` | 同一参数化踢球开关；AP 无传球提交时可发出短触 | 精确 MuJoCo 球位扰动 20/20；真实 7v7 为 14/14、63 个执行样本、1 次接触，执行者无起身；该事件约前进 0.831 m、横向 0.016 m、方向误差约 1.08° | 资产、能力包线、决策和 C++ runner 均已挂载；仍只有右脚、近零角度和一个 0.55 m 锚点，不等同于连续学习带球 |
 | 程序化 `Shot` | 同一参数化踢球开关；AP 距球门 3.5–4.5 m 且进入释放槽位后选择 | 4 m 教师在预声明球位区间独立留出 100/100；真实 1200-cycle 7v7 有 12 个射门决策样本和 1 次物理接触 | 右脚、近零角度、2.50 m/s 的窄包线；已作为有界实验动作挂载和 ONNX 训练教师，不外推成通用射门 |
@@ -78,7 +78,8 @@
 
 本阶段交付验证：
 
-- Apollo C++ 构建成功，15/15 CTest 通过；训练目录 231/231 Python 测试通过；
+- Apollo C++ 构建成功，16/16 CTest 通过；训练目录 233/233 Python 测试通过，
+  包含本轮新增课程、纯转向相位和着地脚滑移覆盖；
 - `KickTeacherEvaluator` 已支持显式鲁棒球位范围和逐代进度回调，新增回归测试通过；
 - 4 m 程序化射门的冻结教师 manifest SHA-256 为
   `2b6b40b78c3acb4b62c87b2a1145ea6ade0169043d1245707f5611aca063c978`；
@@ -98,9 +99,10 @@
   一次完整 98→23 推理；
 - 7v7 shadow 启动样本 14/14 客户端完成连接、入场和退出，但旧定点场景未产生
   `KickCommand`，因此只能证明进程级加载，不能写成比赛内 shadow 已触发；
-- 本阶段全能力默认启动的 900-cycle 7v7 为 14/14 干净退出、212 个
-  FastWalkV2 采样、97 个起身采样、零服务器错误和零非法防守；自然比赛仍未进入
-  learned kick 窄包线；
+- 历史全能力默认启动的 900-cycle 7v7 为 14/14 干净退出、212 个
+  FastWalkV2 采样和 97 个起身采样；该跌倒证据已触发默认配置回退；
+- 本轮稳定默认、转向—前进组合的 900-cycle 7v7 为 14/14 干净退出、0 个
+  FastWalkV2 样本、0 个起身样本、157 个传球规划、13 个 Ready 和 1 次真实触球；
 - 程序化短触资产仍是 `server_status: contact_observed`，不是正式晋级状态。
 
 ### 3.3 只有接口、没有实际动作
@@ -121,7 +123,7 @@
 | PAiD K1-D 动作跟踪 actor | `/home/win98/rl_runs/paid-k1/k1d-crossfit-bc-s20260982-v2/checkpoints/000000001000` | 依赖外部有限动作参考；只通过动作跟踪选择/确认，未通过 Apollo 服务器动作链 | 作为教师、初始化和轨迹结构参考，不直接替换运行时 |
 | K2-A 固定强触球窗口 | motion 12、帧 113–118；精确 MuJoCo 360/360 正确脚触球、稳定、零跌倒，中位前进约 4.1 m | 只证明固定窗口；未证明目标距离/方向、接近入口、移动球和服务器执行；参考资产受本地非再分发约束 | 用于验证接触/恢复设计、教师搜索和训练诊断，不冒充参数化射门 |
 | K2-B 球/目标条件 checkpoint | `/home/win98/rl_runs/paid-k2/k2b-fixed2m-smoke-s20260990-v1/checkpoints/000000001024` | `target_success=0.0`，跌倒与恢复均不合格；无 ONNX runtime | 保留为失败基线和环境回归，不从该 checkpoint 继续长训 |
-| 高速行走候选 | `/home/win98/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx` | 已在长距离低转向请求中有界挂载；横向漂移和服务器跌倒/起身问题阻止其晋级为稳定默认步态 | 作为域适配初始化，训练方向、制动、转弯和扰动，不再优化纯直线速度 |
+| 高速行走候选 | `/home/win98/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx` | 仅在显式开关下有界挂载；横向漂移和服务器跌倒/起身问题已使其退出默认步态 | 作为离线对照和训练初始化；稳定比赛默认继续使用 78→23 walk |
 | 程序化短触轨迹 | `/home/win98/rl_runs/procedural-kick/` 与仓库 YAML | 已挂载为窄 `DribbleTouch` fallback；只有一个右脚锚点和一次服务器接触 | 保留为 fallback，并生成监督学习教师数据 |
 | 残差表目标传球 | `kick_residual_table.yaml` | 已挂载为目标传球实验回退；精确评估与真实服务器出球仍有差距，表还缺一个条件 | 用作球位敏感性数据、teacher/ablation 和短期实验回退 |
 
@@ -334,7 +336,8 @@ Walk/fast-walk -> precision approach -> neutral settle
 
 ### L：高速、多方向行走
 
-不重新追求更高直线标称速度。以 `FastWalkV2` 为初始化，优先解决：
+不重新追求更高直线标称速度。按“快速转身、稳定前进、横向/全向、比赛域适配”
+分阶段训练，优先解决：
 
 1. 服务器横向漂移；
 2. 横移、倒退、转向、制动和 command switch；
@@ -343,7 +346,7 @@ Walk/fast-walk -> precision approach -> neutral settle
 5. 方向相关到达时间与跌倒概率标定。
 
 训练数据应加入真实服务器中触发 fallback/get-up 的入口状态。默认 walk 继续负责
-近球、门将、横移、急转和任何失败回退。
+所有正式比赛移动；大偏角目标先转身再前进，直到新模型逐方向通过验证。
 
 2026-09-05 已开始 L1 正式批次：新增 `soccer_omni` 课程，保持现有
 `run_policy_v2` 的 80→23 ONNX/运行时边界，从已挂载 phase-v2 checkpoint 继续
@@ -364,6 +367,12 @@ Walk/fast-walk -> precision approach -> neutral settle
 下一批使用 `soccer_omni_axis`（50% 轴对齐命令）和
 `legacy_phase_soccer_v3`（`5e-7..5e-6` 学习率、较小 KL）从冻结运行时 checkpoint
 重新开始，而不是在拒绝模型上继续。
+
+2026-09-05 的复盘进一步表明仍不应直接打开宽三轴课程。训练环境已加入真正的
+纯 yaw 步态相位、着地脚滑移代价，以及 `rapid_turn -> stable_forward ->
+soccer_lateral` 三阶段课程；冻结命令集也新增纯横移和纯原地转身。第一次快速转身
+探索的左转已明显改善，但右转 16 次仅 11 次直立，故拒绝挂载。完整证据、服务器
+对比和强触球路线见 `docs/stable-motion-strong-kick-development.md`。
 
 ### R：接球与 first touch
 

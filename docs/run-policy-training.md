@@ -1,8 +1,8 @@
 # RCSSServerMJ running-policy development plan
 
-Status: v1/v2 plus motion-prior pipeline complete; open-strategy refresh has
-selected periodic reference-centred residual tracking; no running policy has
-passed release gates as of 2026-08-31
+Status: stable v1 remains the competition default; FastWalkV2 has been removed
+from launcher defaults after 7v7 fall evidence; staged rapid-turn,
+stable-forward and lateral training is active as of 2026-09-05
 
 Owner environment: WSL2 Ubuntu 22.04, Conda `my3d-rl`
 
@@ -196,9 +196,15 @@ is labelled `candidate`, never `release`.
   at least two consecutive 5 ms physics frames. A candidate missing this gate
   is `fast locomotion`, not running.
 
-The command suite also includes `vx=0.0, 0.5, 1.0, 1.5`, lateral commands, yaw
-commands, and abrupt command changes. A policy that only sprints straight is
-not competition-ready.
+The command suite separately includes stand, precision/fast forward, reverse,
+pure left/right lateral, pure left/right in-place yaw, and left/right curves.
+Abrupt switches are trained in the environment. A policy that only sprints
+straight, or that succeeds in only one turn direction, is not competition-ready.
+
+The current implementation and first rejected rapid-turn result are recorded
+in `docs/stable-motion-strong-kick-development.md`. Pure yaw now advances the
+phase-aware gait clock, and training reports contact-gated planted-foot slip;
+both were missing from the earlier broad omnidirectional attempts.
 
 ### Gate R3: deployment parity
 

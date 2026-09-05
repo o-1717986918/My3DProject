@@ -148,20 +148,20 @@ export MATCH_REQUIRE_FAST_WALK=1
 scripts/run_web_match.sh 30000
 ```
 
-This remains an experimental, non-packaged capability, although the configured
-source-tree WSL launchers now explicitly enable it by default. A
-900-cycle combined 7v7 gate produced 1,374 `FastWalkV2` status samples, 25
+This remains an experimental, non-packaged capability and is now opt-in in
+the source-tree WSL launchers. A historical 900-cycle combined 7v7 gate produced
+1,374 `FastWalkV2` status samples, 25
 parameterized-kick samples, 210 pass-plan samples and one physical pass contact
 with 14/14 clean exits, but also 499 get-up samples at a two-cycle status
 interval. The deployment is complete enough for visual/domain-gap collection;
 its fall rate is not yet competition-release quality.
 
-### Default all-capabilities development profile
+### Default competition development profile
 
-The WSL team, acceptance and browser-match launchers enable every currently
-executable capability by default: parameterized residual/procedural contact,
-the bounded learned-kick actor, and FastWalkV2. Stable walk/get-up remain the
-automatic fallback. The current transition actor is only 27/92 on its frozen
+The WSL team, acceptance and browser-match launchers enable parameterized
+residual/procedural contact and the bounded learned-kick actor by default.
+FastWalkV2 is no longer enabled by default after repeated 7v7 falls; stable
+walk/get-up own the competition movement path. The current transition actor is only 27/92 on its frozen
 exact-CPU set with one fall, so it receives joint ownership only in its narrow
 measured 2 m envelope; all other target contacts retain the stronger fallback.
 
@@ -170,7 +170,7 @@ scripts/run_web_match.sh 30000
 ```
 
 Set `APOLLO_LEARNED_KICK_MODE=shadow` to evaluate the actor without granting
-joint ownership. To recover the conservative baseline explicitly:
+joint ownership. To disable all experimental contact as well:
 
 ```bash
 APOLLO_ENABLE_PARAMETERIZED_KICK=0 APOLLO_ENABLE_FAST_WALK=0 \

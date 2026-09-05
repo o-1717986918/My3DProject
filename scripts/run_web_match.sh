@@ -29,7 +29,9 @@ if [[ -z "$learned_kick_mode" ]]; then
         [[ "$parameterized_kick_mode" == 1 ]] && echo active || echo off
     )
 fi
-fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-1}
+# Visualization follows the stable competition baseline. Opt in to the current
+# FastWalkV2 candidate only for motion experiments.
+fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-0}
 
 cleanup() {
     for pid in "${player_pids[@]:-}"; do

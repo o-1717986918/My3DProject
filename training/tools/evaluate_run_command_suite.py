@@ -22,10 +22,12 @@ def soccer_command_suite() -> tuple[tuple[str, tuple[float, float, float]], ...]
         ("precision_forward", (0.4, 0.0, 0.0)),
         ("fast_forward", (1.5, 0.0, 0.0)),
         ("reverse", (-0.2, 0.0, 0.0)),
-        ("left_strafe", (0.45, 0.30, 0.0)),
-        ("right_strafe", (0.45, -0.30, 0.0)),
-        ("left_turn", (0.60, 0.0, 0.50)),
-        ("right_turn", (0.60, 0.0, -0.50)),
+        ("pure_left_strafe", (0.0, 0.30, 0.0)),
+        ("pure_right_strafe", (0.0, -0.30, 0.0)),
+        ("pure_left_turn", (0.0, 0.0, 0.75)),
+        ("pure_right_turn", (0.0, 0.0, -0.75)),
+        ("curve_left", (0.60, 0.0, 0.50)),
+        ("curve_right", (0.60, 0.0, -0.50)),
     )
 
 
@@ -125,7 +127,7 @@ def main() -> int:
         )
 
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "purpose": "football_locomotion_command_suite_cpu_acceptance",
         "model": str(args.model.resolve()),
         "contract": str(args.contract.resolve()),

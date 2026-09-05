@@ -65,6 +65,7 @@ private:
     double fast_gait_phase_{0.0};
     bool fast_walk_disabled_{false};
     bool fast_walk_active_{false};
+    double fast_walk_cooldown_until_s_{0.0};
     mutable int last_fast_walk_gate_{-1};
 
     std::array<float, 3> compute_velocity_command(

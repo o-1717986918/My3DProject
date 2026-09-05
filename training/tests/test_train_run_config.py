@@ -31,3 +31,21 @@ def test_axis_aligned_soccer_stage_matches_frozen_command_suite():
     assert stage["reward.tracking_yaw"] > STAGES["soccer_omni"][
         "reward.tracking_yaw"
     ]
+
+
+def test_stable_motion_curriculum_decomposes_turn_forward_then_lateral():
+    turn = STAGES["rapid_turn"]
+    forward = STAGES["stable_forward"]
+    lateral = STAGES["soccer_lateral"]
+
+    assert turn["lin_vel_x"] == [0.0, 0.0]
+    assert turn["lin_vel_y"] == [0.0, 0.0]
+    assert turn["ang_vel_yaw"][0] < -0.5 < 0.5 < turn["ang_vel_yaw"][1]
+    assert forward["lin_vel_x"][1] >= 1.5
+    assert forward["lin_vel_y"] == [0.0, 0.0]
+    assert forward["ang_vel_yaw"] == [0.0, 0.0]
+    assert lateral["axis_aligned_command_probability"] >= 0.5
+    assert lateral["lin_vel_y"][0] < 0.0 < lateral["lin_vel_y"][1]
+    assert turn["reward.foot_slip"] < 0.0
+    assert forward["reward.foot_slip"] < 0.0
+    assert lateral["reward.foot_slip"] < 0.0

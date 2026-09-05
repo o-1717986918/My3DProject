@@ -156,26 +156,48 @@ bool WalkRunner::fast_walk_supported(
     const double distance_m = command.target_absolute
         ? math::norm2(local_target)
         : std::numeric_limits<double>::infinity();
+    constexpr double kFastWalkEntryTiltDeg = 6.0;
+    constexpr double kFastWalkActiveTiltDeg = 11.0;
+    constexpr double kFastWalkEntryGyroDegS = 55.0;
+    constexpr double kFastWalkActiveGyroDegS = 110.0;
+    constexpr double kFastWalkMinimumHeightM = 0.55;
+    constexpr double kFastWalkRecoveryCooldownS = 4.0;
+    const bool was_fast_walk_active = fast_walk_active_;
     int gate = 0;
     const char* reason = "active";
-    if (command.target_absolute && distance_m < 2.0) {
-        gate = 1;
-        reason = "target-near";
-    } else if (stable_velocity_command[0] < 0.75F) {
-        gate = 2;
-        reason = "target-not-forward";
-    } else if (std::abs(stable_velocity_command[2]) > 0.20F) {
-        gate = 3;
-        reason = "turn-rate";
-    } else if (tilt_deg > (fast_walk_active_ ? 30.0 : 8.0)) {
+    if (snapshot.server_time < fast_walk_cooldown_until_s_) {
+        gate = 8;
+        reason = "recovery-cooldown";
+    } else if (snapshot.self.position_m[2] < kFastWalkMinimumHeightM) {
+        gate = 6;
+        reason = "height";
+    } else if (tilt_deg > (was_fast_walk_active
+                               ? kFastWalkActiveTiltDeg
+                               : kFastWalkEntryTiltDeg)) {
         gate = 4;
         reason = "tilt";
-    } else if (max_gyro > (fast_walk_active_ ? 300.0 : 80.0)) {
+    } else if (max_gyro > (was_fast_walk_active
+                               ? kFastWalkActiveGyroDegS
+                               : kFastWalkEntryGyroDegS)) {
         gate = 5;
         reason = "gyro";
-    } else if (snapshot.self.position_m[2] < world::kFallenHeightThresholdM) {
-        gate = 6;
-        reason = "fallen";
+    } else if (command.target_absolute && distance_m < 2.0) {
+        gate = 1;
+        reason = "target-near";
+    } else if (stable_velocity_command[0] < 0.95F) {
+        gate = 2;
+        reason = "target-not-forward";
+    } else if (std::abs(stable_velocity_command[1]) > 0.04F) {
+        gate = 7;
+        reason = "lateral-command";
+    } else if (std::abs(stable_velocity_command[2]) > 0.12F) {
+        gate = 3;
+        reason = "turn-rate";
+    }
+    if (was_fast_walk_active && gate >= 4 && gate <= 6) {
+        fast_walk_cooldown_until_s_ = std::max(
+            fast_walk_cooldown_until_s_,
+            snapshot.server_time + kFastWalkRecoveryCooldownS);
     }
     if (gate != last_fast_walk_gate_) {
         std::cerr
@@ -183,10 +205,17 @@ bool WalkRunner::fast_walk_supported(
             << " state=" << reason
             << " distance=" << distance_m
             << " local_x=" << local_target[0]
+            << " local_y=" << local_target[1]
+            << " vx=" << stable_velocity_command[0]
+            << " vy=" << stable_velocity_command[1]
             << " yaw_rate=" << stable_velocity_command[2]
             << " tilt_deg=" << tilt_deg
             << " gyro_deg_s=" << max_gyro
             << " z=" << snapshot.self.position_m[2]
+            << " cooldown_remaining="
+            << std::max(
+                   0.0,
+                   fast_walk_cooldown_until_s_ - snapshot.server_time)
             << '\n';
         last_fast_walk_gate_ = gate;
     }

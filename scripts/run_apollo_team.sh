@@ -32,7 +32,9 @@ if [[ -z "$learned_kick_mode" ]]; then
         [[ "$parameterized_kick_mode" == 1 ]] && echo active || echo off
     )
 fi
-fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-1}
+# The phase-v2 speed actor remains available as an explicit experiment, but
+# its 7v7 fall rate is not acceptable as the team default.
+fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-0}
 if [[ -n "$max_cycles" ]]; then
     cycle_args=(--max-cycles "$max_cycles")
 fi

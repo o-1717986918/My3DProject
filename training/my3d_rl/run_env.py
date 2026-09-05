@@ -137,6 +137,7 @@ def default_config() -> config_dict.ConfigDict:
             action_rate=-0.015,
             action_acceleration=-0.005,
             joint_velocity=-0.00005,
+            foot_slip=0.0,
             pose=-0.02,
             joint_limit=-0.5,
             fall=-20.0,
@@ -430,7 +431,10 @@ class DirectionalRun(mjx_env.MjxEnv):
         frequency = jp.where(
             self._reference_centered, reference_frequency, sampled_frequency
         )
-        return jp.where(jp.linalg.norm(command[:2]) > 1.0e-4, frequency, 0.0)
+        # Pure yaw is a real locomotion primitive, not a standing command. The
+        # previous linear-only gate froze gait phase for every in-place turn
+        # sample and made rapid-turn training internally inconsistent.
+        return jp.where(jp.linalg.norm(command) > 1.0e-4, frequency, 0.0)
 
     def _reference_velocity_scale(self, gait_frequency: jax.Array) -> jax.Array:
         if not self._reference_centered:
@@ -594,6 +598,12 @@ class DirectionalRun(mjx_env.MjxEnv):
             "last_last_action": jp.zeros(self.action_size),
             "delay_steps": delay_steps,
             "reference_init": reference_init,
+            "last_foot_positions": jp.stack(
+                [
+                    data.site_xpos[self._left_foot_site],
+                    data.site_xpos[self._right_foot_site],
+                ]
+            ),
         }
         metrics = {
             "reward/tracking_linear": jp.array(0.0),
@@ -613,6 +623,7 @@ class DirectionalRun(mjx_env.MjxEnv):
             "cost/action_rate": jp.array(0.0),
             "cost/action_acceleration": jp.array(0.0),
             "cost/joint_velocity": jp.array(0.0),
+            "cost/foot_slip": jp.array(0.0),
             "cost/pose": jp.array(0.0),
             "cost/joint_limit": jp.array(0.0),
             "cost/fall": jp.array(0.0),
@@ -701,6 +712,19 @@ class DirectionalRun(mjx_env.MjxEnv):
             -0.01 * jp.mean(jp.square(joint_velocity_training - reference_velocity))
         )
         actual_contact = jp.array([left_contact, right_contact])
+        foot_positions = jp.stack(
+            [
+                data.site_xpos[self._left_foot_site],
+                data.site_xpos[self._right_foot_site],
+            ]
+        )
+        foot_velocity_xy = (
+            foot_positions[:, :2] - state.info["last_foot_positions"][:, :2]
+        ) / self.dt
+        contact_weight = actual_contact.astype(jp.float32)
+        foot_slip = jp.sum(
+            jp.sum(jp.square(foot_velocity_xy), axis=1) * contact_weight
+        ) / jp.maximum(jp.sum(contact_weight), 1.0)
         motion_contact = jp.mean(
             (actual_contact == reference_contact).astype(jp.float32)
         )
@@ -777,6 +801,7 @@ class DirectionalRun(mjx_env.MjxEnv):
             "action_acceleration": self._config.reward.action_acceleration
             * action_acceleration,
             "joint_velocity": self._config.reward.joint_velocity * joint_velocity,
+            "foot_slip": self._config.reward.foot_slip * foot_slip,
             "pose": self._config.reward.pose * pose,
             "joint_limit": self._config.reward.joint_limit * joint_limit,
             "fall": self._config.reward.fall * fall.astype(jp.float32),
@@ -789,6 +814,7 @@ class DirectionalRun(mjx_env.MjxEnv):
         )
         state.info["last_last_action"] = state.info["last_action"]
         state.info["last_action"] = action
+        state.info["last_foot_positions"] = foot_positions
         resample = (state.info["step"] % self._config.command_resample_steps == 0) & (
             not self._config.use_fixed_command
         )
@@ -823,6 +849,7 @@ class DirectionalRun(mjx_env.MjxEnv):
                 "cost/action_rate": action_rate,
                 "cost/action_acceleration": action_acceleration,
                 "cost/joint_velocity": joint_velocity,
+                "cost/foot_slip": foot_slip,
                 "cost/pose": pose,
                 "cost/joint_limit": joint_limit,
                 "cost/fall": fall.astype(jp.float32),

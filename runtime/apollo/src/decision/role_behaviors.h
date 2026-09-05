@@ -37,6 +37,7 @@ struct APState {
     double kick_setup_stable_since_s{0.0};
     double pass_commit_until_s{0.0};
     double pass_retry_after_s{0.0};
+    int last_kick_setup_gate{-1};
     std::uint8_t next_pass_sequence_id{0U};
     std::optional<strategy::CooperativeAction> committed_pass;
     std::optional<KickCommand> active_kick_command;

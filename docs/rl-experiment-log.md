@@ -1278,3 +1278,52 @@ exact ball to the K2-A contact/recovery composition, holds 2 m fixed until
 contact and upright recovery pass, and only then opens 3.5 m, 5 m and direction
 conditions. Full predeclared gates are in
 `training/locks/paid_k2b_2026_09_02.yaml`.
+
+## Stable-motion rebaseline and rapid-turn exploration — 2026-09-05
+
+The full-capability 7v7 traces show that the phase-v2 FastWalk candidate is not
+safe enough for frequent play: one 900-cycle run contains 438 FastWalkV2 status
+samples and 220 get-up status samples. Runtime navigation now composes an
+in-place turn with forward travel above a 55-degree heading error, and all
+source launchers return to the stable walk by default. A new 900-cycle server
+run completes 14/14 clients with zero FastWalkV2 and zero get-up samples while
+retaining 157 pass plans, 13 Ready observations and one physical pass contact.
+The retained log set is
+`/home/win98/rl_runs/stable-motion/server-stable-turn-first-s20261100-v1`.
+
+The locomotion environment previously froze gait phase for a pure-yaw command
+because phase was gated only by the planar command norm. It now uses the full
+`vx/vy/yaw` command norm and reports a contact-gated planted-foot slip cost.
+The command suite now distinguishes pure strafe, pure yaw and curved travel.
+
+The first 196,608-step rapid-turn exploration imports the official-format
+legacy actor into the 80-input phase contract with maximum initial parity error
+`1.049e-5`, then exports with JAX/ONNX maximum error `9.060e-6`. At fixed
+`+0.75 rad/s`, all 8 episodes remain upright and median yaw reaches
+`0.714 rad/s`, compared with `0.258 rad/s` for the previous phase-v2 candidate.
+At fixed `-0.75 rad/s`, however, only 11/16 episodes finish upright, and random
+curriculum evaluation fall rate rises from 12.5% to 25%. The ONNX
+`c086b819...` is rejected and not mounted. The next run must repair bilateral
+symmetry and command-switch stability before adding forward or lateral demand.
+
+The first stable-forward specialization uses the same 196,608-step budget and
+finishes its random curriculum evaluation at the full 500-frame horizon with
+zero falls. Foot-slip cost falls from 245.493 at initialization to 211.552 and
+the absolute accumulated lateral-velocity diagnostic falls from 6.037 to
+1.229, while ONNX parity passes at `1.144e-5`. The predeclared 10-command CPU
+suite still rejects it: reverse completes 7/8 episodes and pure right turn only
+4/8, so the candidate remains unmounted. It passes 8/10 commands, the same
+count as the imported teacher; it improves teacher reverse completion from 4/8
+but worsens right-turn completion from 5/8. The next M2 run must mix universal
+teacher replay with the forward curriculum instead of specializing away
+untrained commands. The candidate is stored at
+`/home/win98/rl_runs/stable-motion/stable-forward-s20261120-v1` with ONNX
+SHA-256 `85c40c218d8eefd33b665fe2f93b508b3ec3f45fd7dd9591039b0d1b443de832`.
+
+An independent K1 search also establishes the physical feasibility, but not
+runtime readiness, of a nominal 8 m shot. The candidate contacts the ball
+without falling, travels 7.440 m and reaches 4.810 m/s directional speed, but
+its 1.281 m lateral error and 1.206 m/s arrival-speed error fail promotion. It
+is retained only as a strong-contact teacher at
+`/home/win98/rl_runs/strong-kick/shot-8m-s20261110-v1`; manifest SHA-256 is
+`44dcf0cb01fe115d5f3dfec7d6c12c01e230ea7161f45e0ead127a35ceed9f9a`.

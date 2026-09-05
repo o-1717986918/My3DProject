@@ -1,7 +1,7 @@
 schema_version: 1
 recorded_at: 2026-09-05
 stage: player_action_foundation
-status: runtime_mounted_with_bounded_experimental_kicks
+status: stable_runtime_rebaseline_with_training_active
 
 runtime_stack:
   precise_walk:
@@ -13,10 +13,16 @@ runtime_stack:
     asset: runtime/apollo/assets/networks/getup/policy.onnx
     sha256: ae6ade761e50fccb432e118cebd456d9e96e87de0fa3a3adc2d5f92ef496a83d
   high_speed_walk:
-    state: bounded_runtime_route_with_stable_walk_fallback
+    state: experimental_opt_in_with_stable_walk_fallback
     asset: /home/win98/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx
     sha256: c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b
     claimed_as_running: false
+    source_launcher_default: disabled
+    active_command_envelope:
+      minimum_forward_mps: 0.95
+      maximum_absolute_lateral_mps: 0.04
+      maximum_absolute_yaw_rad_s: 0.12
+    unsafe_exit_cooldown_s: 4.0
   learned_target_kick:
     state: bounded_active_in_source_launchers_with_same_cycle_fallback
     asset: /home/win98/rl_runs/kick-transition-dagger-r2-bc-s10002/policy.onnx
@@ -107,11 +113,49 @@ rejected_training_candidates:
     path: /home/win98/rl_runs/paid-k2/k2b-fixed2m-smoke-s20260990-v1/checkpoints/000000001024
     target_success: 0.0
     runtime_mounted: false
+  rapid_turn_s20261101:
+    path: /home/win98/rl_runs/stable-motion/rapid-turn-s20261101-v1
+    effective_timesteps: 196608
+    onnx_sha256: c086b819d3ffa3dbb971dbcc2bb2e40c949864a4a702546f678d89414c510cca
+    jax_onnx_max_abs_error: 9.059906005859375e-06
+    left_turn_075_upright: 8_of_8
+    left_turn_075_median_yaw_rad_s: 0.714223531408275
+    right_turn_075_upright: 11_of_16
+    random_command_eval_fall_rate_before: 0.125
+    random_command_eval_fall_rate_after: 0.25
+    rejection: right_turn_asymmetry_and_worse_random_transition_stability
+    runtime_mounted: false
+  stable_forward_s20261120:
+    path: /home/win98/rl_runs/stable-motion/stable-forward-s20261120-v1
+    effective_timesteps: 196608
+    onnx_sha256: 85c40c218d8eefd33b665fe2f93b508b3ec3f45fd7dd9591039b0d1b443de832
+    jax_onnx_max_abs_error: 1.1444091796875e-05
+    random_command_eval_fall_rate: 0.0
+    frozen_command_suite: 8_of_10
+    reverse_upright: 7_of_8
+    right_turn_upright: 4_of_8
+    teacher_reverse_upright: 4_of_8
+    teacher_right_turn_upright: 5_of_8
+    rejection: command_specialization_regressed_right_turn_and_failed_reverse
+    runtime_mounted: false
+  shot_8m_teacher_s20261110:
+    path: /home/win98/rl_runs/strong-kick/shot-8m-s20261110-v1
+    manifest_sha256: 44dcf0cb01fe115d5f3dfec7d6c12c01e230ea7161f45e0ead127a35ceed9f9a
+    trajectory_sha256: 262238082e9d3741ae56d9a0873308a020ec8bbad9aa022efbe21f247d8e1a1b
+    contact: true
+    fell: false
+    progress_m: 7.4396
+    final_lateral_error_m: 1.2805
+    maximum_directional_speed_mps: 4.8098
+    arrival_speed_error_mps: 1.206
+    rejection: lateral_and_arrival_speed_error
+    use: training_teacher_only
+    runtime_mounted: false
 
 verification:
-  cpp_ctest: 15_of_15_passed
+  cpp_ctest: 16_of_16_passed
   python_targeted_tests: 16_of_16_passed
-  python_full_training_suite: 231_of_231_passed
+  python_full_training_suite: 233_of_233_passed
   clear_gate_unit_tests: passed
   shell_syntax: passed
   default_all_capabilities_7v7:
@@ -123,11 +167,32 @@ verification:
     server_errors: 0
     illegal_defense: 0
     sha256_of_sorted_log_checksums: 81916247eaf08993c925acca889f7c2ed37534d0d0d06f97de23328257ca0054
+    historical_default_superseded: true
+  stable_turn_first_7v7:
+    run: /home/win98/rl_runs/stable-motion/server-stable-turn-first-s20261100-v1
+    cycles: 900
+    clean_clients: 14
+    fast_walk_samples: 0
+    get_up_samples: 0
+    pass_plan_samples: 157
+    pass_ready_samples: 13
+    physical_pass_contacts: 1
+    kick_setup_phase_transitions:
+      side_relocate: 8
+      precision_position: 11
+      wait_receiver: 2
+      settle: 3
+      release: 1
+    sha256_of_sorted_log_checksums: 0daf294577c1b22a9e888735aa83e4088e1fc4d17c8333ad9f65dbc34d7e7e21
   source_outputs_directory: /home/win98/rl_runs
   c_drive_large_outputs_written: false
 
 remaining_learning_route:
+  - fix rapid_turn left_right symmetry and transition stability
+  - train stable_forward before reopening lateral commands
+  - train soccer_lateral with explicit pure-axis evaluation
   - build multi-condition pass teachers and a self-contained BC/DAgger actor
+  - extend pass_teacher anchors to 3.5m_and_5m and shot anchors to 6m_and_8m
   - collect server shadow traces and perform constrained PPO only after BC success
   - expand left-foot and angle coverage without widening current runtime envelopes
   - train receive_first_touch from the measured outgoing-ball distribution

@@ -151,6 +151,69 @@ int main() {
         return 1;
     }
 
+    // A failed Ready handshake must yield the ball to a local action for a
+    // bounded interval instead of immediately proposing the same pass again.
+    decision::APBehavior expired_pass_behavior;
+    decision::Blackboard expired_pass_blackboard;
+    world::WorldSnapshot expired_pass_snapshot = make_open_pass_snapshot();
+    static_cast<void>(expired_pass_behavior.make_command(
+        expired_pass_snapshot, expired_pass_blackboard, role_manager,
+        true, true));
+    expired_pass_snapshot.server_time = 7.1;
+    expired_pass_snapshot.teammates[5].last_seen_time =
+        expired_pass_snapshot.server_time;
+    const auto terminal_wait = expired_pass_behavior.make_command(
+        expired_pass_snapshot, expired_pass_blackboard, role_manager,
+        true, true);
+    if (!std::holds_alternative<decision::NeutralCommand>(terminal_wait)) {
+        std::cerr << "expired pass did not broadcast a terminal hold\n";
+        return 1;
+    }
+    expired_pass_snapshot.server_time = 8.0;
+    expired_pass_snapshot.teammates[5].last_seen_time =
+        expired_pass_snapshot.server_time;
+    static_cast<void>(expired_pass_behavior.make_command(
+        expired_pass_snapshot, expired_pass_blackboard, role_manager,
+        true, true));
+    const auto& recovery_plan = expired_pass_blackboard.get<
+        strategy::PlanningResult>(decision::Blackboard::kKeyStrategyPlan);
+    if (!recovery_plan.selected.has_value() ||
+        recovery_plan.selected->category == strategy::ActionCategory::Pass) {
+        std::cerr << "expired pass immediately monopolized the ball again\n";
+        return 1;
+    }
+
+    // Generic lateral travel is intentionally composed from an in-place turn
+    // and a later forward walk until a stable omnidirectional actor exists.
+    world::WorldSnapshot turn_snapshot = make_open_pass_snapshot();
+    turn_snapshot.player_number = 6;
+    turn_snapshot.self.position_m = {0.0, 0.0, 0.8};
+    turn_snapshot.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
+    turn_snapshot.teammates.clear();
+    turn_snapshot.opponents.clear();
+    decision::SimpleRoleBehavior turn_behavior(
+        decision::RoleManager::ROLE_ST, false);
+    decision::Blackboard turn_blackboard;
+    turn_blackboard.set(
+        decision::Blackboard::kKeyTacticalTarget,
+        decision::TacticalTarget{
+            decision::TacticalDuty::Formation,
+            {0.0, 5.0},
+            std::array<double, 2>{0.0, 0.0},
+            0,
+            0.5});
+    const auto turn_first = turn_behavior.make_command(
+        turn_snapshot, turn_blackboard);
+    const auto* turn_walk = std::get_if<decision::WalkCommand>(&turn_first);
+    if (turn_walk == nullptr || turn_walk->target_absolute ||
+        std::hypot(
+            turn_walk->target_2d_m[0], turn_walk->target_2d_m[1]) > 1.0e-9 ||
+        !turn_walk->orientation_deg.has_value() ||
+        std::abs(*turn_walk->orientation_deg - 90.0) > 1.0e-6) {
+        std::cerr << "large lateral request was not converted to turn-first\n";
+        return 1;
+    }
+
     world::WorldSnapshot procedural_snapshot = make_open_pass_snapshot();
     procedural_snapshot.self.position_m = {-0.32, -0.04, 0.8};
     decision::APBehavior procedural_behavior;

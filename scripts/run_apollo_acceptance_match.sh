@@ -53,7 +53,9 @@ if [[ -z "$learned_kick_mode" ]]; then
         [[ "$parameterized_kick_mode" == 1 ]] && echo active || echo off
     )
 fi
-fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-1}
+# Keep the stable walk as the competition baseline until the fast actor passes
+# stability and drift evaluation. FastWalkV2 remains available by opt-in.
+fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-0}
 
 case "${APOLLO_ENABLE_PASS_STRATEGY:-1}" in
     1) ;;

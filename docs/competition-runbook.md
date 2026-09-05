@@ -148,9 +148,9 @@ call the capability `FastWalkV2`, not running. The launcher rejects a missing
 model and any model whose SHA-256 differs from
 `c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b`.
 
-The source-tree WSL launchers now mount all currently useful motion paths by
-default. A normal launch therefore enables parameterized contact, bounded
-active learned kick and FastWalkV2:
+The source-tree WSL launchers mount parameterized contact and the bounded
+active learned kick by default. FastWalkV2 is now opt-in because its measured
+7v7 fall rate is unsuitable for frequent competition use:
 
 ```bash
 scripts/run_web_match.sh 30000
@@ -160,9 +160,9 @@ The learned actor controls joints only inside its measured fixed-2 m envelope;
 residual-table or procedural contact remains the same-cycle fallback. The
 launcher checks the selected r2 actor SHA-256
 `b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1`.
-Use `APOLLO_LEARNED_KICK_MODE=shadow` for inference-only evidence. To request
-the conservative profile, set both `APOLLO_ENABLE_PARAMETERIZED_KICK=0` and
-`APOLLO_ENABLE_FAST_WALK=0`; learned kick then defaults to off.
+Use `APOLLO_LEARNED_KICK_MODE=shadow` for inference-only evidence. Stable walk
+is already the default; set `APOLLO_ENABLE_PARAMETERIZED_KICK=0` to disable
+experimental contact as well, in which case learned kick defaults to off.
 
 ## 6. Package and inspect
 
@@ -194,8 +194,8 @@ training reward is higher. Promotion requires:
 4. multiple seeds with uprightness, fall-rate, speed, and energy criteria;
 5. strict 7v7, then visual 7v7, with same-cycle fallback retained.
 
-The source-tree-default `FastWalkV2` integration is deliberately below release
-promotion. It uses
+The opt-in `FastWalkV2` integration is deliberately below release promotion.
+It uses
 the exact 80-to-23 observation/decoder contract and full 21-body-joint policy
 targets, preserves Apollo head tracking, and has a latched control handoff so
 normal gait oscillation cannot switch policies every frame. It has passed a

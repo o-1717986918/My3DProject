@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iostream>
 #include <optional>
 
 namespace decision {
@@ -26,11 +27,11 @@ constexpr double kWalkMaxSpeedM = 3.0;
 constexpr double kWalkBrakeDecelMps2 = 1.0;
 constexpr double kWalkStopRadiusM = 0.15;
 constexpr double kWalkHeadingSlowStartDeg = 35.0;
-constexpr double kWalkHeadingStopDeg = 95.0;
-// At or below this distance to the target a ball-facing player strafes (holds
-// ball-facing, no heading-error speed penalty) to fine-tune its slot; beyond it
-// the player turns to face its travel direction and runs forward at full speed.
-constexpr double kStrafeMaxDistM = 2.5;
+// The currently deployed walk is substantially more reliable in its forward
+// domain than while translating sideways. Above this heading error, compose a
+// pure turn with a later forward walk instead of asking the policy to strafe or
+// backpedal. This is a runtime fallback, not a learned omnidirectional claim.
+constexpr double kWalkHeadingStopDeg = 55.0;
 // The exact-physics kick table was validated with the ball 0.31--0.40 m in
 // front and at most 0.08 m to either side.  Keep the decision release gate in
 // the same domain instead of starting the one-second macro from the former
@@ -103,7 +104,7 @@ constexpr double kKickSetupLateralToleranceM = 0.03;
 // while admitting a continuous debounce window for the stable fallback.
 constexpr double kKickMaxOrientationErrorDeg = 3.0;
 constexpr double kKickSetupOrientationGain = 3.0;
-constexpr double kRejectedPassRetryDelayS = 0.5;
+constexpr double kRejectedPassRetryDelayS = 2.0;
 
 bool is_our_set_play(const world::WorldSnapshot& snapshot) {
     return snapshot.play_mode_group == world::PlayModeGroup::OurKick;
@@ -168,7 +169,7 @@ double walk_speed_command(double distance_m, double heading_error_abs_deg) {
         const double t = std::clamp(
             (kWalkHeadingStopDeg - heading_error_abs_deg) /
                 (kWalkHeadingStopDeg - kWalkHeadingSlowStartDeg),
-            0.1,
+            0.0,
             1.0);
         speed *= t;
     }
@@ -229,21 +230,11 @@ WalkCommand make_walk_command_avoiding(
     const double rel_heading = heading_rad - math::deg_to_rad(self_yaw_deg);
     const double heading_error_abs_deg = std::abs(math::normalize_deg(plan.heading_deg - self_yaw_deg));
 
-    // Orientation vs. travel policy. Facing the ball keeps a player ready to
-    // react, but holding ball-facing while travelling elsewhere means it can only
-    // strafe/backpedal — and the heading-error speed penalty throttles that to
-    // ~10% (~0.3 m/s). So split by travel distance:
-    //   - strafe mode (close to the target, or a forced sideways mover such as
-    //     the keeper): face the ball and drop the heading penalty, so short
-    //     lateral adjustments run at the walk's natural lateral cap;
-    //   - fast-travel mode (far from the target): face the travel direction and keep
-    //     the penalty, so the player turns and walks forward at full speed, then
-    //     re-faces the ball as it arrives (dist falls into strafe range).
-    // A player travelling toward the ball (the AP) has travel ~= ball direction,
-    // so the two modes coincide and its behavior is unchanged. The walk runner
-    // still clamps |vy| in every mode, so strafing stays within its safe cap.
-    const bool strafe = suppress_heading_slowdown ||
-                        (orient_to_ball && dist <= kStrafeMaxDistM);
+    // Generic navigation now composes turn-in-place and forward movement. Only
+    // an explicitly requested precision mover may bypass the heading slowdown;
+    // ordinary close-range tactics no longer silently demand the weak lateral
+    // domain from the deployed walk actor.
+    const bool strafe = suppress_heading_slowdown;
     const double speed =
         walk_speed_command(dist, strafe ? 0.0 : heading_error_abs_deg);
 
@@ -342,6 +333,15 @@ HighLevelCommand make_dribble_command(
         use_procedural_shot || use_procedural_clear;
     const bool use_procedural_kick =
         use_procedural_dribble || use_procedural_strong_kick;
+    const char* kick_mode = cooperative_action == nullptr
+        ? (restart_plan == nullptr ? "forward" : "restart")
+        : cooperative_action->category == strategy::ActionCategory::Pass
+            ? "pass"
+            : cooperative_action->category == strategy::ActionCategory::Shoot
+                ? "shot"
+                : cooperative_action->category == strategy::ActionCategory::Clear
+                    ? "clear"
+                    : "dribble";
 
     double contact_behind_m = kKickContactBehindM;
     double command_behind_m = kDribbleCommandBehindM;
@@ -407,15 +407,33 @@ HighLevelCommand make_dribble_command(
         signed_lateral_offset + release_ball_local_y_m;
     const double command_lateral_error =
         signed_lateral_offset + command_ball_local_y_m;
-    const bool setup_ready =
+    const bool position_ready =
         std::abs(behind_distance - contact_behind_m) <=
             longitudinal_tolerance_m &&
-        std::abs(release_lateral_error) <= lateral_tolerance_m &&
-        (!use_procedural_kick ||
-         orientation_error_deg <=
-             procedural_max_orientation_error_deg);
+        std::abs(release_lateral_error) <= lateral_tolerance_m;
+    const double required_orientation_error_deg = use_procedural_kick
+        ? procedural_max_orientation_error_deg
+        : kKickMaxOrientationErrorDeg;
+    const double planar_speed_mps = math::norm2({
+        context.snapshot.self.lin_vel_b[0],
+        context.snapshot.self.lin_vel_b[1],
+    });
+    const auto trace_setup_gate = [&](int gate, const char* phase) {
+        if (context.state.last_kick_setup_gate == gate) return;
+        context.state.last_kick_setup_gate = gate;
+        std::cerr
+            << "MY3D_KICK_SETUP player=" << context.snapshot.player_number
+            << " mode=" << kick_mode
+            << " phase=" << phase
+            << " ball_distance=" << context.ball_distance
+            << " behind_error=" << behind_distance - contact_behind_m
+            << " lateral_error=" << release_lateral_error
+            << " yaw_error_deg=" << orientation_error_deg
+            << " speed=" << planar_speed_mps
+            << '\n';
+    };
 
-    if (!context.state.dribble_ready && setup_ready) {
+    if (!context.state.dribble_ready && position_ready) {
         context.state.dribble_ready = true;
     }
 
@@ -424,12 +442,22 @@ HighLevelCommand make_dribble_command(
         lateral_offset <= kDribbleMaxLateralOffsetM &&
         context.ball_distance <= field_geometry::kPushBallEngageDistanceM;
     if (context.state.dribble_ready &&
-        (!push_position_valid || !setup_ready)) {
+        (!push_position_valid || !position_ready)) {
         context.state.dribble_ready = false;
         context.state.kick_setup_stable_since_s = 0.0;
     }
 
     if (!context.state.dribble_ready) {
+        if (needs_side_step) {
+            // Exit the ball's front/side hazard region by turning toward an
+            // offset waypoint and walking forward. Do not override the travel
+            // heading with the final kick heading: that used to turn this
+            // branch into a slow and unstable lateral strafe.
+            trace_setup_gate(1, "side-relocate");
+            return make_walk_command_avoiding(
+                approach_target, context.snapshot, std::nullopt, true, false,
+                motion_role_id, false, false);
+        }
         // The generic walk-to-point controller brakes on a circular stop
         // radius. On a diagonal approach it can therefore stop too close to
         // the ball while still outside the kick table's lateral envelope. In
@@ -439,6 +467,7 @@ HighLevelCommand make_dribble_command(
         // controller can finish lining up after direct vision disappears.
         if (!needs_side_step && context.snapshot.ball.position_valid &&
             context.ball_distance <= kDribblePrecisionEntryDistanceM) {
+            trace_setup_gate(2, "precision-position");
             const double forward_speed = std::clamp(
                 kDribbleLongitudinalGain *
                     (behind_distance - command_behind_m),
@@ -464,23 +493,18 @@ HighLevelCommand make_dribble_command(
             precision_command.role_id = motion_role_id;
             return precision_command;
         }
+        trace_setup_gate(3, "approach");
         WalkCommand approach_command = make_walk_command_avoiding(
-            approach_target, context.snapshot, std::nullopt, true, true,
-            motion_role_id, true, false);
+            approach_target, context.snapshot, std::nullopt, true, false,
+            motion_role_id, false, false);
         approach_command.orientation_deg = absolute_direction_deg;
         approach_command.orientation_absolute = true;
         return approach_command;
     }
 
-    const double planar_speed_mps = math::norm2({
-        context.snapshot.self.lin_vel_b[0],
-        context.snapshot.self.lin_vel_b[1],
-    });
     const bool contact_state_stable =
-        context.snapshot.ball.position_valid && setup_ready &&
-        orientation_error_deg <= (use_procedural_kick
-            ? procedural_max_orientation_error_deg
-            : kKickMaxOrientationErrorDeg) &&
+        context.snapshot.ball.position_valid && position_ready &&
+        orientation_error_deg <= required_orientation_error_deg &&
         planar_speed_mps <= kKickSetupMaximumPlanarSpeedMps;
     if (contact_state_stable) {
         if (context.state.kick_setup_stable_since_s <= 0.0) {
@@ -502,30 +526,26 @@ HighLevelCommand make_dribble_command(
         now >= context.state.next_kick_allowed_s &&
         context.ball_distance >= kKickMinBallDistanceM &&
         context.ball_distance <= kKickMaxBallDistanceM &&
-        orientation_error_deg <= (use_procedural_kick
-            ? procedural_max_orientation_error_deg
-            : kKickMaxOrientationErrorDeg) &&
+        orientation_error_deg <= required_orientation_error_deg &&
         contact_state_confirmed;
     // Readiness is a hard release gate. Once dribble_ready is latched the
     // robot can drift slightly inside the valid contact envelope; gating only
     // on setup_ready here would otherwise permit a later unacknowledged kick.
     if (!allow_kick) {
         // A passer that is waiting for Ready must not keep driving through the
-        // ball. Hold a small, explicit behind-ball standoff so gait residuals
-        // cannot create an unannounced dribble and invalidate the proposal.
-        const std::array<double, 2> hold_target{
-            context.ball[0] - direction[0] * (kKickContactBehindM + 0.03),
-            context.ball[1] - direction[1] * (kKickContactBehindM + 0.03),
-        };
-        WalkCommand hold_command = make_walk_command_avoiding(
-            hold_target, context.snapshot, std::nullopt, true, true,
-            motion_role_id, true, false);
+        // ball. The position gate above returns to precision alignment after
+        // any drift; while it remains valid, command zero translation and only
+        // close the heading error so no unannounced dribble invalidates it.
+        trace_setup_gate(4, "wait-receiver");
+        WalkCommand hold_command = make_walk_command(context.self);
         hold_command.orientation_deg = absolute_direction_deg;
         hold_command.orientation_absolute = true;
+        hold_command.orientation_gain = kKickSetupOrientationGain;
         hold_command.role_id = motion_role_id;
         return hold_command;
     }
     if (legal_kick) {
+        trace_setup_gate(5, "release");
         context.state.kick_active_until_s = now + kKickDurationS;
         context.state.next_kick_allowed_s =
             context.state.kick_active_until_s + kKickCooldownS;
@@ -583,6 +603,16 @@ HighLevelCommand make_dribble_command(
         // stance. Holding it here also removes zero-command gait sway, making
         // the 0.25 s release debounce physically achievable without relaxing
         // the validated ball-slot or body-speed contracts.
+        if (orientation_error_deg > required_orientation_error_deg) {
+            trace_setup_gate(6, "turn-in-place");
+            WalkCommand align_command = make_walk_command(context.self);
+            align_command.orientation_deg = absolute_direction_deg;
+            align_command.orientation_absolute = true;
+            align_command.orientation_gain = kKickSetupOrientationGain;
+            align_command.role_id = motion_role_id;
+            return align_command;
+        }
+        trace_setup_gate(7, "settle");
         if (use_procedural_kick) {
             return NeutralCommand{};
         }
@@ -594,6 +624,7 @@ HighLevelCommand make_dribble_command(
         return align_command;
     }
 
+    trace_setup_gate(8, "push-fallback");
     return make_walk_command_avoiding(
         push_target, context.snapshot, std::nullopt, true, true,
         motion_role_id, false, false);
@@ -812,6 +843,15 @@ HighLevelCommand APBehavior::make_command(
         state_.pass_lifecycle.cancel(snapshot.server_time);
     }
     state_.pass_lifecycle.update(snapshot);
+    if (state_.pass_lifecycle.terminal() &&
+        state_.pass_lifecycle.state() != comm::PassIntentState::Received &&
+        state_.pass_retry_after_s <= snapshot.server_time) {
+        // A proposal that received no Ready response must not immediately
+        // monopolize the ball again. Keep broadcasting the terminal outcome,
+        // then give the local dribble/shot/clear alternatives a bounded turn.
+        state_.pass_retry_after_s =
+            snapshot.server_time + kRejectedPassRetryDelayS;
+    }
     if (state_.pass_lifecycle.ready_to_clear(snapshot.server_time)) {
         state_.pass_lifecycle.reset();
         state_.committed_pass.reset();
@@ -860,6 +900,33 @@ HighLevelCommand APBehavior::make_command(
             : strategy::build_tactical_state(snapshot);
         strategy::PlanningResult plan = action_planner_.plan(
             snapshot, capabilities, enable_pass_strategy, tactical_state);
+        if (plan.selected.has_value() &&
+            plan.selected->category == strategy::ActionCategory::Pass &&
+            snapshot.server_time < state_.pass_retry_after_s) {
+            const auto fallback = std::find_if(
+                plan.candidates.begin(), plan.candidates.end(),
+                [](const strategy::CooperativeAction& candidate) {
+                    return candidate.category !=
+                               strategy::ActionCategory::Pass &&
+                           candidate.category !=
+                               strategy::ActionCategory::Hold;
+                });
+            if (fallback != plan.candidates.end()) {
+                plan.selected = *fallback;
+            } else {
+                const auto hold = std::find_if(
+                    plan.candidates.begin(), plan.candidates.end(),
+                    [](const strategy::CooperativeAction& candidate) {
+                        return candidate.category ==
+                            strategy::ActionCategory::Hold;
+                    });
+                if (hold == plan.candidates.end()) {
+                    plan.selected.reset();
+                } else {
+                    plan.selected = *hold;
+                }
+            }
+        }
         blackboard.set(Blackboard::kKeyStrategyPlan, plan);
 
         const auto lifecycle_state = state_.pass_lifecycle.state();
@@ -1069,7 +1136,7 @@ HighLevelCommand SimpleRoleBehavior::make_command(
                     0.9});
             return make_walk_command_avoiding(
                 receive_target, snapshot, std::nullopt,
-                true, true, role_id_, true);
+                true, true, role_id_, false);
         }
         if (snapshot.server_time > receive_intent_until_s_) {
             receive_intent_.reset();
@@ -1123,7 +1190,8 @@ HighLevelCommand SimpleRoleBehavior::make_command(
     const std::array<double, 2> self{
         snapshot.self.position_m[0], snapshot.self.position_m[1]};
     if (tactical_target.face_point_m.has_value() &&
-        math::planar_dist(self, tactical_target.position_m) <= kStrafeMaxDistM) {
+        math::planar_dist(self, tactical_target.position_m) <=
+            kWalkStopRadiusM) {
         command.orientation_deg = orientation_to_point_from_self(
             snapshot, *tactical_target.face_point_m);
         command.orientation_absolute = true;
@@ -1180,7 +1248,7 @@ HighLevelCommand GKBehavior::make_command(
                 restart->phase == RestartPhase::Complete) {
                 return make_walk_command_avoiding(
                     role_position_from_blackboard(blackboard), snapshot,
-                    std::nullopt, true, true, RoleManager::ROLE_GK, true);
+                    std::nullopt, true, true, RoleManager::ROLE_GK, false);
             }
             return make_dribble_command(
                 clearance_context,
@@ -1259,10 +1327,10 @@ HighLevelCommand GKBehavior::make_command(
 
     WalkCommand command = make_walk_command_avoiding(
         tactical_target.position_m, snapshot, std::nullopt,
-        true, true, RoleManager::ROLE_GK, true);
+        true, true, RoleManager::ROLE_GK, false);
     if (tactical_target.face_point_m.has_value() &&
         math::planar_dist(context.self, tactical_target.position_m) <=
-            kStrafeMaxDistM) {
+            kWalkStopRadiusM) {
         command.orientation_deg = orientation_to_point_from_self(
             snapshot, *tactical_target.face_point_m);
         command.orientation_absolute = true;
