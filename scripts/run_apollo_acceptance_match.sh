@@ -53,9 +53,10 @@ if [[ -z "$learned_kick_mode" ]]; then
         [[ "$parameterized_kick_mode" == 1 ]] && echo active || echo off
     )
 fi
-# Keep the stable walk as the competition baseline until the fast actor passes
-# stability and drift evaluation. FastWalkV2 remains available by opt-in.
-fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-0}
+# Exercise the best available specialist composition by default. The stable
+# walk remains the fallback for unsupported commands and recovery cooldowns.
+fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-1}
+rapid_turn_mode=${APOLLO_ENABLE_RAPID_TURN:-1}
 
 case "${APOLLO_ENABLE_PASS_STRATEGY:-1}" in
     1) ;;
@@ -267,8 +268,8 @@ fi
 
 case "$fast_walk_mode" in
     1)
-        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx}
-        fast_walk_sha256=c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b
+        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-$HOME/rl_runs/stable-motion/fast-walk-recovery-s20261130-v1/policy.onnx}
+        fast_walk_sha256=${APOLLO_FAST_WALK_SHA256:-778614c0af7995e2b50d5f677ecbf27b1026c98942e07a22e85ddf2595b21337}
         if [[ -z "$fast_walk_model" || ! -f "$fast_walk_model" ]]; then
             echo "APOLLO_FAST_WALK_MODEL must name the phase-v2 ONNX file" >&2
             exit 2
@@ -282,6 +283,27 @@ case "$fast_walk_mode" in
     0) ;;
     *)
         echo "APOLLO_ENABLE_FAST_WALK must be 0 or 1" >&2
+        exit 2
+        ;;
+esac
+
+case "$rapid_turn_mode" in
+    1)
+        rapid_turn_model=${APOLLO_RAPID_TURN_MODEL:-$HOME/rl_runs/stable-motion/rapid-turn-s20261101-v1/policy.onnx}
+        rapid_turn_sha256=${APOLLO_RAPID_TURN_SHA256:-c086b819d3ffa3dbb971dbcc2bb2e40c949864a4a702546f678d89414c510cca}
+        if [[ -z "$rapid_turn_model" || ! -f "$rapid_turn_model" ]]; then
+            echo "APOLLO_RAPID_TURN_MODEL must name the validated run-policy ONNX file" >&2
+            exit 2
+        fi
+        if [[ "$(sha256sum "$rapid_turn_model" | cut -d " " -f 1)" != "$rapid_turn_sha256" ]]; then
+            echo "APOLLO_RAPID_TURN_MODEL failed the locked SHA-256 check" >&2
+            exit 2
+        fi
+        client_strategy_args+=(--enable-rapid-turn --rapid-turn-model "$rapid_turn_model")
+        ;;
+    0) ;;
+    *)
+        echo "APOLLO_ENABLE_RAPID_TURN must be 0 or 1" >&2
         exit 2
         ;;
 esac
@@ -580,6 +602,18 @@ fast_walk_samples=$(
     { grep -Eh "MY3D_STATUS.*motion=FastWalkV2" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
+rapid_turn_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=RapidTurnV1" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+rapid_turn_left_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=RapidTurnV1Left" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
+rapid_turn_right_samples=$(
+    { grep -Eh "MY3D_STATUS.*motion=RapidTurnV1RightMirror" \
+        "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
+)
 pass_plan_samples=$(
     { grep -Eh "MY3D_STATUS.*strategy=Pass" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
@@ -643,6 +677,10 @@ fast_walk_requirement_failed=0
 if [[ "${MATCH_REQUIRE_FAST_WALK:-0}" == 1 && $fast_walk_samples -eq 0 ]]; then
     fast_walk_requirement_failed=1
 fi
+rapid_turn_requirement_failed=0
+if [[ "${MATCH_REQUIRE_RAPID_TURN:-0}" == 1 && $rapid_turn_samples -eq 0 ]]; then
+    rapid_turn_requirement_failed=1
+fi
 
 if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
     || $play_on -ne 14 || $failures -ne 0 || $server_errors -ne 0 \
@@ -651,7 +689,8 @@ if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
     || $procedural_kick_requirement_failed -ne 0 \
     || $procedural_shot_requirement_failed -ne 0 \
     || $procedural_clear_requirement_failed -ne 0 \
-    || $pass_requirement_failed -ne 0 || $fast_walk_requirement_failed -ne 0 ]]; then
+    || $pass_requirement_failed -ne 0 || $fast_walk_requirement_failed -ne 0 \
+    || $rapid_turn_requirement_failed -ne 0 ]]; then
     echo "Apollo 7v7 acceptance failed: cycles=$max_cycles clean_exits=$clean_exits " \
         "connections=$connections joins=$joins play_on=$play_on failures=$failures " \
         "server_errors=$server_errors illegal_defense=$illegal_defense " \
@@ -666,6 +705,9 @@ if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
         "procedural_clear_contact_events=$procedural_clear_contact_events " \
         "getup_samples=$getup_samples " \
         "fast_walk_samples=$fast_walk_samples " \
+        "rapid_turn_samples=$rapid_turn_samples " \
+        "rapid_turn_left_samples=$rapid_turn_left_samples " \
+        "rapid_turn_right_samples=$rapid_turn_right_samples " \
         "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
         "targeted_pass_kick_samples=$targeted_pass_kick_samples " \
         "pass_contact_events=$pass_contact_events " \
@@ -691,6 +733,9 @@ echo "Apollo 7v7 acceptance passed: cycles=$max_cycles clean_exits=$clean_exits 
     "procedural_clear_contact_events=$procedural_clear_contact_events " \
     "getup_samples=$getup_samples " \
     "fast_walk_samples=$fast_walk_samples " \
+    "rapid_turn_samples=$rapid_turn_samples " \
+    "rapid_turn_left_samples=$rapid_turn_left_samples " \
+    "rapid_turn_right_samples=$rapid_turn_right_samples " \
     "pass_plan_samples=$pass_plan_samples pass_ready_samples=$pass_ready_samples " \
     "targeted_pass_kick_samples=$targeted_pass_kick_samples " \
     "pass_contact_events=$pass_contact_events " \

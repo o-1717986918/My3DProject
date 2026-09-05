@@ -111,6 +111,8 @@ def default_config() -> config_dict.ConfigDict:
         fixed_command=[0.0, 0.0, 0.0],
         use_fixed_command=False,
         reset_joint_noise=0.03,
+        reset_joint_velocity_noise=0.0,
+        reset_policy_action_noise=0.0,
         reset_root_velocity_noise=0.10,
         reset_yaw_range=0.20,
         reference_init_probability=0.0,
@@ -215,6 +217,10 @@ class DirectionalRun(mjx_env.MjxEnv):
             )
         if self._config.command_resample_steps < 1:
             raise ValueError("command_resample_steps must be positive")
+        for name in ("reset_joint_velocity_noise", "reset_policy_action_noise"):
+            value = float(self._config[name])
+            if not np.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
         if self.contract.action_scale is None:
             raise ValueError("run policy contract must declare action_scale")
         if not np.isclose(self._config.action_scale, self.contract.action_scale):
@@ -486,7 +492,9 @@ class DirectionalRun(mjx_env.MjxEnv):
             phase_rng,
             gait_rng,
             reference_rng,
-        ) = jax.random.split(rng, 8)
+            entry_action_rng,
+            joint_velocity_rng,
+        ) = jax.random.split(rng, 10)
         qpos = jp.asarray(self._mj_model.qpos0)
         qvel = jp.zeros(self._mj_model.nv)
 
@@ -531,8 +539,23 @@ class DirectionalRun(mjx_env.MjxEnv):
         reference_init = self._motion_tracking & jax.random.bernoulli(
             reference_rng, self._config.reference_init_probability
         )
+        sampled_entry_action = jax.random.uniform(
+            entry_action_rng,
+            (self.action_size,),
+            minval=-self._config.reset_policy_action_noise,
+            maxval=self._config.reset_policy_action_noise,
+        )
+        entry_action = jp.clip(
+            jp.where(
+                reference_init, jp.zeros(self.action_size), sampled_entry_action
+            ),
+            -self._config.action_clip,
+            self._config.action_clip,
+        )
         initial_training = jp.where(
-            reference_init, reference_position, self._nominal_training
+            reference_init,
+            reference_position,
+            self._nominal_training + self._config.action_scale * entry_action,
         )
         initial_joints = jp.clip(
             initial_training * self._sign + joint_noise,
@@ -594,17 +617,21 @@ class DirectionalRun(mjx_env.MjxEnv):
             jp.zeros(6),
         )
         qvel = qvel.at[self._root_dof : self._root_dof + 6].set(root_velocity)
-        qvel = qvel.at[self._joint_dof].set(
-            jp.where(
-                reference_init,
-                reference_velocity * self._sign,
-                jp.zeros(self.action_size),
-            )
+        sampled_joint_velocity = jax.random.uniform(
+            joint_velocity_rng,
+            (self.action_size,),
+            minval=-self._config.reset_joint_velocity_noise,
+            maxval=self._config.reset_joint_velocity_noise,
         )
+        qvel = qvel.at[self._joint_dof].set(jp.where(
+            reference_init,
+            reference_velocity * self._sign,
+            sampled_joint_velocity,
+        ))
 
         ctrl = jp.zeros(self._mj_model.nu)
         ctrl = ctrl.at[self._pos_actuator].set(
-            self.decode_action_targets(jp.zeros(self.action_size), gait_phase)
+            self.decode_action_targets(entry_action, gait_phase)
         )
         data = mjx_env.make_data(
             self._mj_model,
@@ -629,8 +656,8 @@ class DirectionalRun(mjx_env.MjxEnv):
             "command": command,
             "gait_phase": gait_phase,
             "gait_frequency": gait_frequency,
-            "last_action": jp.zeros(self.action_size),
-            "last_last_action": jp.zeros(self.action_size),
+            "last_action": entry_action,
+            "last_last_action": entry_action,
             "delay_steps": delay_steps,
             "reference_init": reference_init,
             "last_foot_positions": jp.stack(

@@ -307,6 +307,43 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.pose": -0.04,
         "reward.fall": -150.0,
     },
+    # Handoff-focused continuation for the recovered forward specialist.
+    # Unlike nominal reset curricula, this begins in decoded policy poses with
+    # non-zero joint velocity and repeatedly changes speed or stops. It targets
+    # the long-server failures observed after specialist transitions.
+    "fast_walk_transition_recovery": {
+        "lin_vel_x": [0.15, 1.55],
+        "lin_vel_y": [0.0, 0.0],
+        "ang_vel_yaw": [0.0, 0.0],
+        "gait_frequency": [1.4, 1.9],
+        "stand_probability": 0.25,
+        "axis_aligned_command_probability": 1.0,
+        "axis_command_weights": [1.0, 0.0, 0.0],
+        "command_resample_steps": 75,
+        "reset_joint_noise": 0.02,
+        "reset_joint_velocity_noise": 1.0,
+        "reset_policy_action_noise": 1.25,
+        "reset_root_velocity_noise": 0.12,
+        "reset_yaw_range": 0.12,
+        "push_enable": True,
+        "push_interval_steps": 200,
+        "push_magnitude": [0.01, 0.08],
+        "action_delay_max_steps": 1,
+        "reward.tracking_linear": 8.0,
+        "reward.tracking_yaw": 6.0,
+        "reward.upright": 3.0,
+        "reward.height": 2.0,
+        "reward.alive": 0.75,
+        "reward.lateral_tracking": -10.0,
+        "reward.yaw_rate_error": -6.0,
+        "reward.vertical_velocity": -0.50,
+        "reward.angular_xy": -0.45,
+        "reward.action_rate": -0.05,
+        "reward.action_acceleration": -0.02,
+        "reward.foot_slip": -0.035,
+        "reward.pose": -0.04,
+        "reward.fall": -180.0,
+    },
     # Directional expert used to repair the inherited policy's weakest action.
     # It is a distillation teacher, not a standalone competition replacement.
     "right_turn_expert": {

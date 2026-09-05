@@ -37,6 +37,12 @@ struct RuntimeConfig {
     /// Explicit external-local ONNX path. The restricted research model is
     /// never bundled into the competition asset tree.
     std::string fast_walk_model;
+    /// Enables the direction-routed rapid-turn actor for pure-yaw commands.
+    /// Negative yaw is served by exact observation/action reflection rather
+    /// than an unvalidated weak-direction policy branch.
+    bool enable_rapid_turn{false};
+    /// Explicit external-local phase-v2 run-policy ONNX path.
+    std::string rapid_turn_model;
     /// Runs an external kick_policy_v3 actor as the active target-pass
     /// controller. This remains explicit opt-in until a candidate is promoted.
     bool enable_learned_kick{false};

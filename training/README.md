@@ -550,10 +550,14 @@ RCSSServerMJ acceptance result are present. Runtime inference must retain the
 existing kick as a safe fallback.
 
 As of 2026-09-05 the runtime keeps the original stable `walk.onnx` for precise
-movement and fallback, and conditionally uses the retained FastWalkV2 candidate
-for long, low-turn forward demands. Two new football-locomotion curricula both
-remained at 5/8 on the frozen eight-command CPU suite and were rejected. The
-0.55 m procedural dribble touch, narrow 4 m procedural shot, and safety-focused
+movement and fallback. Source-tree matches use the recovered FastWalkV2 actor
+for long, low-turn forward demands and the rapid-turn actor for pure yaw; the
+negative-yaw branch is an exact observation/action reflection of the stronger
+positive-yaw policy. Their external ONNX hashes, CPU evidence and server traces
+are locked in `training/locks/competition_motion_stack_2026_09_05.yaml`. The
+composition remains training-active because a 1,800-cycle match produced four
+fall events, but a non-zero fall count alone does not remove a useful ability.
+The 0.55 m procedural dribble touch, narrow 4 m procedural shot, and safety-focused
 6 m procedural clear are mounted as model-independent fallbacks. The source-tree
 WSL launchers also enable the transition-kick ONNX by default, but its frozen
 exact-CPU score is only 27/92, so active ownership is restricted to its measured

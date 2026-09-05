@@ -29,9 +29,10 @@ if [[ -z "$learned_kick_mode" ]]; then
         [[ "$parameterized_kick_mode" == 1 ]] && echo active || echo off
     )
 fi
-# Visualization follows the stable competition baseline. Opt in to the current
-# FastWalkV2 candidate only for motion experiments.
-fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-0}
+# Visualization follows the same specialist composition as source-tree team
+# runs; explicit zero values provide a stable-walk-only ablation.
+fast_walk_mode=${APOLLO_ENABLE_FAST_WALK:-1}
+rapid_turn_mode=${APOLLO_ENABLE_RAPID_TURN:-1}
 
 cleanup() {
     for pid in "${player_pids[@]:-}"; do
@@ -115,8 +116,8 @@ case "$learned_kick_mode" in
 esac
 case "$fast_walk_mode" in
     1)
-        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx}
-        expected_sha=c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b
+        fast_walk_model=${APOLLO_FAST_WALK_MODEL:-$HOME/rl_runs/stable-motion/fast-walk-recovery-s20261130-v1/policy.onnx}
+        expected_sha=${APOLLO_FAST_WALK_SHA256:-778614c0af7995e2b50d5f677ecbf27b1026c98942e07a22e85ddf2595b21337}
         if [[ -z "$fast_walk_model" || ! -f "$fast_walk_model" ]]; then
             echo "APOLLO_FAST_WALK_MODEL must name the phase-v2 ONNX file" >&2
             exit 2
@@ -129,6 +130,23 @@ case "$fast_walk_mode" in
         ;;
     0) ;;
     *) echo "APOLLO_ENABLE_FAST_WALK must be 0 or 1" >&2; exit 2 ;;
+esac
+case "$rapid_turn_mode" in
+    1)
+        rapid_turn_model=${APOLLO_RAPID_TURN_MODEL:-$HOME/rl_runs/stable-motion/rapid-turn-s20261101-v1/policy.onnx}
+        expected_sha=${APOLLO_RAPID_TURN_SHA256:-c086b819d3ffa3dbb971dbcc2bb2e40c949864a4a702546f678d89414c510cca}
+        if [[ -z "$rapid_turn_model" || ! -f "$rapid_turn_model" ]]; then
+            echo "APOLLO_RAPID_TURN_MODEL must name the validated run-policy ONNX file" >&2
+            exit 2
+        fi
+        if [[ "$(sha256sum "$rapid_turn_model" | cut -d " " -f 1)" != "$expected_sha" ]]; then
+            echo "APOLLO_RAPID_TURN_MODEL failed the locked SHA-256 check" >&2
+            exit 2
+        fi
+        client_strategy_args+=(--enable-rapid-turn --rapid-turn-model "$rapid_turn_model")
+        ;;
+    0) ;;
+    *) echo "APOLLO_ENABLE_RAPID_TURN must be 0 or 1" >&2; exit 2 ;;
 esac
 
 if [[ -z "${APOLLO_BINARY:-}" ]]; then

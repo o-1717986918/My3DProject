@@ -1327,3 +1327,45 @@ its 1.281 m lateral error and 1.206 m/s arrival-speed error fail promotion. It
 is retained only as a strong-contact teacher at
 `/home/win98/rl_runs/strong-kick/shot-8m-s20261110-v1`; manifest SHA-256 is
 `44dcf0cb01fe115d5f3dfec7d6c12c01e230ea7161f45e0ead127a35ceed9f9a`.
+
+## FastWalk recovery and direction-routed rapid turn — 2026-09-05
+
+The 1,179,648-step `fast_walk_recovery` run reduces its sampled curriculum fall
+rate to zero and exports with JAX/ONNX maximum error `1.144e-5`. Its frozen
+ten-command CPU surface passes seven commands: stand, both forward speeds,
+left strafe, left turn and both curves. Reverse, right strafe and direct right
+turn fail, so this is not accepted as a universal or omnidirectional actor.
+The narrower long-forward runtime envelope is evaluated independently. After
+matching the C++ decoder to the training environment's exact T1 joint-limit
+clamp, the recovered actor completes a 600-cycle 7v7 run with 57 FastWalkV2
+status samples and zero GetUp samples. The old phase-v2 actor under the same
+decoder and duration produces 39 FastWalk samples and 10 GetUp samples.
+
+A dedicated negative-yaw PPO expert is not retained: at `-0.75 rad/s` it
+finishes only 54/64 episodes. The earlier rapid-turn actor has a strong
+positive-yaw branch, and a pure reflection route—mirror observation, run that
+branch, mirror action back—finishes 64/64 fixed right-turn episodes. This is
+materially different from the rejected symmetry ensemble, which averaged two
+actions. The direct left branch also finishes 64/64. Median actual yaw is
+approximately `+0.715/-0.716 rad/s`, with `0.080/0.075 m` median lateral drift.
+At the runtime's clamped `±0.5 rad/s`, both sides finish 32/32. C++ now contains
+the same reflection map, an involution test and shared physical target clamp.
+
+The direction-routed actor is mounted as `RapidTurnV1Left` and
+`RapidTurnV1RightMirror`. A 600-cycle 7v7 trace records 42 left and 34 mirrored
+right samples with zero GetUp samples. A longer 1,800-cycle composition records
+47 recovered-FastWalk, 82 left-turn and 81 mirrored-right samples, plus four
+distinct falls represented by 32 GetUp status samples. The same-length
+stable-walk control records zero falls. This difference remains a real training
+defect, especially around skill transitions; it does not imply that every
+non-zero-fall action must be removed. Source launchers therefore enable the
+specialists with posture gates, cooldown, stable-walk fallback and automatic
+get-up, while portable runtime defaults remain disabled for external assets.
+Future comparison uses net time-to-position versus recovery loss and reports
+fall events per robot-minute, not a zero-fall veto.
+
+All five server traces contain exactly 14 MuJoCo actuator warnings near
+1.8 seconds, including stable-only control. They correspond to the fourteen
+initial beam activations and are not attributed to learned motion ownership.
+The complete asset and report hashes are recorded in
+`training/locks/competition_motion_stack_2026_09_05.yaml`.

@@ -77,3 +77,16 @@ def test_right_turn_expert_is_scoped_to_negative_yaw_teacher_data():
     assert stage["command_resample_steps"] <= 100
     assert stage["push_enable"] is True
     assert stage["reward.fall"] < STAGES["rapid_turn"]["reward.fall"]
+
+
+def test_fast_walk_transition_recovery_trains_non_nominal_handoffs():
+    stage = STAGES["fast_walk_transition_recovery"]
+
+    assert stage["lin_vel_y"] == [0.0, 0.0]
+    assert stage["ang_vel_yaw"] == [0.0, 0.0]
+    assert stage["stand_probability"] > 0.0
+    assert stage["command_resample_steps"] < 100
+    assert stage["reset_policy_action_noise"] > 0.0
+    assert stage["reset_joint_velocity_noise"] > 0.0
+    assert stage["action_delay_max_steps"] == 1
+    assert stage["reward.fall"] <= -150.0

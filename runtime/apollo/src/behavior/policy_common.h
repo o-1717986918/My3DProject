@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <stdexcept>
 #include <vector>
 
 namespace behavior {
@@ -23,6 +24,102 @@ inline constexpr std::array<float, 23> kDefaultPosRad{
     0.0F,  0.4F,  0.0F,  -0.2F, 0.0F,   0.0F, 0.4F, -0.2F,
     0.0F, -0.2F,  0.0F,   0.0F, 0.4F,  -0.2F, 0.0F,
 };
+
+// Phase-v2 run-policy frame. These values deliberately live next to the
+// reflection operators so training evaluation and runtime deployment cannot
+// silently use different joint conventions.
+inline constexpr std::array<float, 23> kRunNominalTrainingPoseRad{
+    0.0F, 0.0F, 0.0F, 1.4F, 0.0F, -0.4F, 0.0F, -1.4F,
+    0.0F, 0.4F, 0.0F, -0.4F, 0.0F, 0.0F, 0.8F, -0.4F,
+    0.0F, 0.4F, 0.0F, 0.0F, -0.8F, 0.4F, 0.0F,
+};
+inline constexpr std::array<float, 23> kRunTrainingToServerSign{
+    1.0F, -1.0F, 1.0F, -1.0F, -1.0F, 1.0F, -1.0F, -1.0F,
+    1.0F, 1.0F, 1.0F, 1.0F, -1.0F, -1.0F, 1.0F, 1.0F,
+    -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F,
+};
+// Exact RCSSServerMJ T1 joint ranges, in physical/server radians. The run
+// training environment and CPU evaluator apply these after action decoding;
+// runtime must do the same before emitting motor targets.
+inline constexpr std::array<float, 23> kRunJointLowerRad{
+    -1.57F, -0.35F, -3.31F, -1.74F, -2.27F, -2.44F, -3.31F,
+    -1.57F, -2.27F, 0.0F, -1.57F, -1.80F, -0.20F, -1.0F,
+    0.0F, -0.87F, -0.44F, -1.80F, -1.57F, -1.0F, 0.0F,
+    -0.87F, -0.44F,
+};
+inline constexpr std::array<float, 23> kRunJointUpperRad{
+    1.57F, 1.22F, 1.22F, 1.57F, 2.27F, 0.0F, 1.22F,
+    1.74F, 2.27F, 2.44F, 1.57F, 1.57F, 1.57F, 1.0F,
+    2.34F, 0.35F, 0.44F, 1.57F, 0.20F, 1.0F, 2.34F,
+    0.35F, 0.44F,
+};
+
+inline float decode_run_policy_target_rad(
+    std::size_t joint_index,
+    float action,
+    float action_scale = 0.5F) {
+    if (joint_index >= kRunNominalTrainingPoseRad.size()) {
+        throw std::out_of_range("run joint index is out of range");
+    }
+    const float target_server =
+        (kRunNominalTrainingPoseRad[joint_index] + action_scale * action) *
+        kRunTrainingToServerSign[joint_index];
+    return std::clamp(
+        target_server,
+        kRunJointLowerRad[joint_index],
+        kRunJointUpperRad[joint_index]);
+}
+inline constexpr std::array<std::size_t, 23> kRunMirrorSource{
+    0U, 1U, 6U, 7U, 8U, 9U, 2U, 3U, 4U, 5U, 10U, 17U,
+    18U, 19U, 20U, 21U, 22U, 11U, 12U, 13U, 14U, 15U, 16U,
+};
+inline constexpr std::array<float, 23> kRunMirrorTrainingFactor{
+    -1.0F, 1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F,
+    -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F,
+    -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, -1.0F,
+};
+
+/// Reflects one phase-v2 run-policy action in the policy's training frame.
+inline std::vector<float> mirror_run_policy_action(
+    const std::vector<float>& action) {
+    if (action.size() != kRunMirrorSource.size()) {
+        throw std::invalid_argument("run action must contain 23 values");
+    }
+    std::vector<float> mirrored(action.size());
+    for (std::size_t i = 0; i < mirrored.size(); ++i) {
+        mirrored[i] = action[kRunMirrorSource[i]] * kRunMirrorTrainingFactor[i];
+    }
+    return mirrored;
+}
+
+/// Reflects one 78/80-value run observation and exchanges gait phase sides.
+inline std::vector<float> mirror_run_policy_observation(
+    const std::vector<float>& observation) {
+    if (observation.size() != 78U && observation.size() != 80U) {
+        throw std::invalid_argument("run observation must contain 78 or 80 values");
+    }
+    std::vector<float> mirrored(observation);
+    for (std::size_t joint = 0; joint < kRunMirrorSource.size(); ++joint) {
+        for (std::size_t feature = 0; feature < 3U; ++feature) {
+            mirrored[3U * joint + feature] =
+                observation[3U * kRunMirrorSource[joint] + feature] *
+                kRunMirrorTrainingFactor[joint];
+        }
+    }
+    constexpr std::array<float, 3> gyro_factor{-1.0F, 1.0F, -1.0F};
+    constexpr std::array<float, 3> command_factor{1.0F, -1.0F, -1.0F};
+    constexpr std::array<float, 3> gravity_factor{1.0F, -1.0F, 1.0F};
+    for (std::size_t axis = 0; axis < 3U; ++axis) {
+        mirrored[69U + axis] = observation[69U + axis] * gyro_factor[axis];
+        mirrored[72U + axis] = observation[72U + axis] * command_factor[axis];
+        mirrored[75U + axis] = observation[75U + axis] * gravity_factor[axis];
+    }
+    if (observation.size() == 80U) {
+        mirrored[78] = -observation[78];
+        mirrored[79] = -observation[79];
+    }
+    return mirrored;
+}
 
 /// Builds angular-velocity and projected-gravity observations in body frame.
 inline std::array<float, 6> build_imu_obs(const world::WorldSnapshot& snapshot) {

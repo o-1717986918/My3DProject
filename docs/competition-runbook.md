@@ -133,13 +133,14 @@ If the taskbar entry exists but no window is visible and the title contains
 `[WARN:COPY MODE]`, use the browser path. That symptom is below the project at
 the WSLg RDP/RAIL shared-memory layer; restarting the match does not repair it.
 
-To require telemetry proving that the default source-tree launch reached the
-complete phase-v2 high-speed walking backend:
+To require telemetry proving that the source-tree launch reached both active
+locomotion specialists:
 
 ```bash
 APOLLO_ENABLE_FAST_WALK=1 \
-APOLLO_FAST_WALK_MODEL="$HOME/rl_runs/run-phase-v2-formal-s71-20260831-01/policy-best.onnx" \
-MATCH_REQUIRE_FAST_WALK=1 scripts/run_web_match.sh 30000
+APOLLO_ENABLE_RAPID_TURN=1 \
+MATCH_REQUIRE_FAST_WALK=1 \
+MATCH_REQUIRE_RAPID_TURN=1 scripts/run_web_match.sh 30000
 ```
 
 `run_policy_v2` is a historical artifact/contract identifier. Its locked
@@ -148,15 +149,16 @@ call the capability `FastWalkV2`, not running. The launcher rejects a missing
 model and any model whose SHA-256 differs from
 `c8a2f80b08a82a41cebaadc53c09467722a821edfc521e4a0d6921e1d481415b`.
 
-The source-tree WSL launchers mount parameterized contact and the bounded
-active learned kick by default. FastWalkV2 is now opt-in because its measured
-7v7 fall rate is unsuitable for frequent competition use:
+The source-tree WSL launchers mount parameterized contact, the bounded active
+learned kick, recovered FastWalkV2 forward specialist and RapidTurnV1 by
+default:
 
 ```bash
 scripts/run_web_match.sh 30000
 ```
 
-The learned actor controls joints only inside its measured fixed-2 m envelope;
+Set `APOLLO_ENABLE_FAST_WALK=0` or `APOLLO_ENABLE_RAPID_TURN=0` for independent
+stable-walk ablations. The learned kick actor controls joints only inside its measured fixed-2 m envelope;
 residual-table or procedural contact remains the same-cycle fallback. The
 launcher checks the selected r2 actor SHA-256
 `b89b67ad78766615cebdb3e340ebf40305fbf01b5ffa6cf927a8737b18d4aea1`.
@@ -194,15 +196,15 @@ training reward is higher. Promotion requires:
 4. multiple seeds with uprightness, fall-rate, speed, and energy criteria;
 5. strict 7v7, then visual 7v7, with same-cycle fallback retained.
 
-The opt-in `FastWalkV2` integration is deliberately below release promotion.
-It uses
+The source-tree FastWalkV2/RapidTurnV1 composition is usable but still under
+training. It uses
 the exact 80-to-23 observation/decoder contract and full 21-body-joint policy
-targets, preserves Apollo head tracking, and has a latched control handoff so
-normal gait oscillation cannot switch policies every frame. It has passed a
-combined 7v7 wiring gate but still falls materially more often than the stable
-Apollo walk. Use it for visual and simulator-domain data collection; do not
-enable it in a portable release package until multi-seed fall-rate evidence is
-acceptable.
+targets, exact T1 joint-limit clamping, and Apollo head tracking. A 1,800-cycle
+combined run produced 47 FastWalk, 163 rapid-turn samples and four independent
+falls; stable-walk control produced none. The composition remains enabled
+because zero falls are not a prerequisite for useful play and recovery is
+automatic, but this difference is the next training target. Portable binary
+defaults remain off because the ONNX files are external-local assets.
 
 The current v4/GMR result stays in the training workbench because it needs an
 external restricted reference and its 80-value input is incompatible with the
@@ -221,6 +223,7 @@ Apollo 78-value runtime observation. See `apollo-policy-migration.md`.
   10 before treating it as a regression.
 - High-speed-walk model rejected at launch: verify the exact phase-v2 path and
   SHA-256; do not bypass the hash gate.
-- Excess get-up activity with `FastWalkV2`: this is a known simulator-domain
-  gap. Preserve the stable fallback and collect the per-player gate/status logs;
-  do not relabel the result as release-ready locomotion.
+- Excess get-up activity with `FastWalkV2`: preserve the stable fallback and
+  collect per-player gate/status timelines for transition-replay training;
+  compare time-to-target benefit with recovery loss rather than applying a
+  zero-fall rule.

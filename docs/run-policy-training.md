@@ -1,10 +1,11 @@
 # RCSSServerMJ running-policy development plan
 
-Status: stable v1 remains the competition default; FastWalkV2 has been removed
-from launcher defaults after 7v7 fall evidence; staged rapid-turn,
-stable-forward and lateral training is active as of 2026-09-05. This fallback
-does not close the task: the trained fast controller must become stable enough
-to regain frequent-use ownership.
+Status: source-tree matches use a recovered FastWalkV2 forward specialist and
+a bilateral RapidTurnV1 specialist by default, with stable v1 as the bounded
+fallback. Long 7v7 traces still contain falls, so transition replay,
+stable-forward and lateral training remains active as of 2026-09-05. Non-zero
+falls do not automatically disable an ability; promotion is based on net match
+value with automatic recovery retained.
 
 Owner environment: WSL2 Ubuntu 22.04, Conda `my3d-rl`
 

@@ -16,6 +16,9 @@ MotionManager::MotionManager(const app::RuntimeConfig& config)
           config.resolve_asset_path("networks/walk/policy.onnx"),
           config.enable_fast_walk
               ? std::optional<std::filesystem::path>{config.fast_walk_model}
+              : std::nullopt,
+          config.enable_rapid_turn
+              ? std::optional<std::filesystem::path>{config.rapid_turn_model}
               : std::nullopt),
       neutral_runner_(config.resolve_asset_path("keyframes/neutral.yaml")),
       getup_runner_(config.resolve_asset_path("networks/getup/policy.onnx")),
@@ -71,7 +74,11 @@ MotionStepResult MotionManager::step(
         const auto result = walk_runner_.step(snapshot, *walk, reset, walk->role_id);
         return {
             true,
-            result.fast_walk_active ? "FastWalkV2" : "Walk",
+            result.rapid_turn_active
+                ? result.rapid_turn_mirrored
+                    ? "RapidTurnV1RightMirror"
+                    : "RapidTurnV1Left"
+                : result.fast_walk_active ? "FastWalkV2" : "Walk",
             result.joint_targets,
             SkillExecutionStatus::Running,
             decision::MotionRequestKind::Walk};

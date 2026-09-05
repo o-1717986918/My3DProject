@@ -38,6 +38,7 @@ int main() {
         "--status-interval", "20",
         "--disable-pass-strategy", "--enable-parameterized-kick",
         "--enable-fast-walk", "--fast-walk-model", "/tmp/fast-walk.onnx",
+        "--enable-rapid-turn", "--rapid-turn-model", "/tmp/rapid-turn.onnx",
         "--shadow-learned-kick", "--learned-kick-model",
         "/tmp/learned-kick.onnx",
     });
@@ -48,6 +49,8 @@ int main() {
         config.enable_pass_strategy || !config.enable_parameterized_kick ||
         !config.enable_fast_walk ||
         config.fast_walk_model != "/tmp/fast-walk.onnx" ||
+        !config.enable_rapid_turn ||
+        config.rapid_turn_model != "/tmp/rapid-turn.onnx" ||
         config.enable_learned_kick || !config.shadow_learned_kick ||
         config.learned_kick_model != "/tmp/learned-kick.onnx") {
         std::cerr << "valid runtime arguments were not parsed correctly\n";
@@ -67,6 +70,8 @@ int main() {
         return 1;
     }
     if (safe_default.enable_fast_walk || !safe_default.fast_walk_model.empty() ||
+        safe_default.enable_rapid_turn ||
+        !safe_default.rapid_turn_model.empty() ||
         safe_default.enable_learned_kick ||
         safe_default.shadow_learned_kick ||
         !safe_default.learned_kick_model.empty()) {
@@ -108,6 +113,9 @@ int main() {
         !throws_invalid_argument([] { parse({"ApolloCodeBase", "--team"}); }) ||
         !throws_invalid_argument([] {
             parse({"ApolloCodeBase", "--enable-fast-walk"});
+        }) ||
+        !throws_invalid_argument([] {
+            parse({"ApolloCodeBase", "--enable-rapid-turn"});
         }) ||
         !throws_invalid_argument([] {
             parse({"ApolloCodeBase", "--enable-learned-kick"});

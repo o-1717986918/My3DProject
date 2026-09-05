@@ -1,0 +1,92 @@
+schema_version: 1
+recorded_at: 2026-09-05
+stage: competition_motion_stack
+status: active_specialist_composition_with_training_open
+
+deployment_contract:
+  portable_binary_defaults_enabled: false
+  source_launcher_defaults_enabled: true
+  fallback: bundled_stable_walk
+  automatic_get_up: enabled
+  decoded_joint_targets_clamped_to_rcssservermj_t1_limits: true
+
+fast_forward:
+  runtime_name: FastWalkV2
+  path: /home/win98/rl_runs/stable-motion/fast-walk-recovery-s20261130-v1/policy.onnx
+  sha256: 778614c0af7995e2b50d5f677ecbf27b1026c98942e07a22e85ddf2595b21337
+  manifest_sha256: 24825f59e6295467b0f3ab90feaea1427d640a76d0eab97eaac571110c93a22f
+  onnx_parity_sha256: 47f71d3158f5211aac59d4ad555bb701707983f25f1e2f18fd2f14569a5c058a
+  requested_timesteps: 1048576
+  effective_timesteps: 1179648
+  active_envelope:
+    minimum_forward_command_mps: 0.95
+    maximum_absolute_lateral_command_mps: 0.04
+    maximum_absolute_yaw_command_rad_s: 0.12
+    minimum_absolute_target_distance_m: 2.0
+  unsupported_commands: stable_walk
+
+rapid_turn:
+  runtime_names: [RapidTurnV1Left, RapidTurnV1RightMirror]
+  path: /home/win98/rl_runs/stable-motion/rapid-turn-s20261101-v1/policy.onnx
+  sha256: c086b819d3ffa3dbb971dbcc2bb2e40c949864a4a702546f678d89414c510cca
+  manifest_sha256: 72cd41619b1750dca237e513c3d17e6c25aaf090d04b5d8ea6ebc9bd4c1738a5
+  onnx_parity_sha256: 93bef3f5ff6bc9ea596a0bc7ced2a6e67c7cd19b708d95b5f704788eca75a9ac
+  right_turn_implementation: mirror_observation_then_policy_then_mirror_action
+  action_ensemble_used: false
+  active_envelope:
+    maximum_translation_command_norm_mps: 0.08
+    minimum_absolute_yaw_command_rad_s: 0.30
+  cpu_fixed_075_rad_s:
+    left:
+      episodes: 64
+      upright: 64
+      median_actual_yaw_rad_s: 0.7145423709868638
+      median_lateral_drift_m: 0.08028513931891466
+      report_sha256: 72a6cc9ceadd9f1a5df81e11c1e15a7cda8653eeed56d61d788649f92f831635
+    right_mirrored:
+      episodes: 64
+      upright: 64
+      median_actual_yaw_rad_s: -0.7159793
+      median_lateral_drift_m: 0.0747145
+      report_sha256: 14721b7d8134729545a45c68dcb81b2c188efd45403e0c9c49d585d64b4a71ab
+
+server_evidence:
+  rapid_turn_only_600:
+    path: /home/win98/rl_runs/stable-motion/server-rapid-turn-clamped-s20261148
+    left_samples: 42
+    right_mirrored_samples: 34
+    get_up_samples: 0
+    ordered_file_set_sha256: 19e7eef8f5b8380e1f74759e70be53259c16bec6621ad36f279958e2e85bd701
+  recovered_fast_walk_only_600:
+    path: /home/win98/rl_runs/stable-motion/server-fastwalk-recovery-s20261150
+    fast_walk_samples: 57
+    get_up_samples: 0
+    ordered_file_set_sha256: 0f0251f15caf4dbc746ba710f7afd145c9a1311a549cfe003f9cf08a2b6f1518
+  composed_1800:
+    path: /home/win98/rl_runs/stable-motion/server-composite-motion-s20261151
+    fast_walk_samples: 47
+    rapid_turn_left_samples: 82
+    rapid_turn_right_mirrored_samples: 81
+    distinct_fall_events: 4
+    get_up_status_samples: 32
+    ordered_file_set_sha256: d46cc3d8859451a60cc87b7c10e06193be2ef77ca11baf96a5702e3d0753c71d
+  stable_walk_control_1800:
+    path: /home/win98/rl_runs/stable-motion/server-stable-1800-s20261152
+    distinct_fall_events: 0
+    get_up_status_samples: 0
+    ordered_file_set_sha256: f1cb610b64895d274142b0fefc4ff4759b22744265badb2c333f32da4b6efae1
+  activation_warnings:
+    count_each_run: 14
+    attribution: one_per_player_during_initial_beam
+    also_present_in_stable_control: true
+
+interpretation:
+  usable: true
+  complete_omnidirectional_motion: false
+  zero_fall_required_for_use: false
+  selection_rule: net_match_value_with_fallback_and_recovery
+  remaining_training_targets:
+    - lower fall frequency across long specialist_transition_sequences
+    - retain fast_forward while adding braking_and_speed_switches
+    - train pure_lateral_motion_after_forward_and_turn_reliability
+    - distill_specialists_into_a_single_bilateral_policy_without_forgetting

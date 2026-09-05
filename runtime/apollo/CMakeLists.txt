@@ -259,6 +259,14 @@ if(BUILD_TESTING)
     target_compile_options(runtime_config_test PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME runtime_config_test COMMAND runtime_config_test)
 
+    add_executable(run_policy_reflection_test
+        tests/run_policy_reflection_test.cc
+    )
+    target_link_libraries(run_policy_reflection_test PRIVATE world_core)
+    target_include_directories(run_policy_reflection_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(run_policy_reflection_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME run_policy_reflection_test COMMAND run_policy_reflection_test)
+
     add_executable(field_geometry_test tests/field_geometry_test.cc)
     target_include_directories(field_geometry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(field_geometry_test PRIVATE -Wall -Wextra -Wpedantic)

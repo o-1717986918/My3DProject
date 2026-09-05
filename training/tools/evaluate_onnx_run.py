@@ -126,7 +126,13 @@ def main() -> None:
         default=0.01,
         help="training contact-proxy tolerance used only for parity diagnostics",
     )
-    parser.add_argument("--symmetry-ensemble", action="store_true")
+    symmetry_group = parser.add_mutually_exclusive_group()
+    symmetry_group.add_argument("--symmetry-ensemble", action="store_true")
+    symmetry_group.add_argument(
+        "--mirror-policy",
+        action="store_true",
+        help="run only the reflected observation/action branch",
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
@@ -412,16 +418,20 @@ def main() -> None:
             observation = np.nan_to_num(observation, nan=0.0, posinf=10.0, neginf=-10.0)
             observation = np.clip(observation, -10.0, 10.0)
             action = session.run(None, {input_meta.name: observation[None]})[0][0]
-            if args.symmetry_ensemble:
+            if args.symmetry_ensemble or args.mirror_policy:
                 mirrored_observation = mirror_run_observation(
                     observation, mirror_source, mirror_factor
                 )
                 mirrored_action = session.run(
                     None, {input_meta.name: mirrored_observation[None]}
                 )[0][0]
-                action = 0.5 * (
-                    action
-                    + mirror_run_action(mirrored_action, mirror_source, mirror_factor)
+                reflected_action = mirror_run_action(
+                    mirrored_action, mirror_source, mirror_factor
+                )
+                action = (
+                    0.5 * (action + reflected_action)
+                    if args.symmetry_ensemble
+                    else reflected_action
                 )
             action = np.clip(
                 np.nan_to_num(action, nan=0.0, posinf=10.0, neginf=-10.0),
@@ -565,6 +575,7 @@ def main() -> None:
             reference_velocity_scale if reference_centered else None
         ),
         "symmetry_ensemble": args.symmetry_ensemble,
+        "mirror_policy": args.mirror_policy,
         "duration_seconds": 10.0,
         "warmup_seconds": 2.0,
         "upright_completion_rate": completion_rate,

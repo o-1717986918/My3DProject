@@ -189,6 +189,44 @@ def test_pure_yaw_advances_phase_and_reports_planted_foot_slip():
     assert np.isfinite(np.asarray(next_state.metrics["cost/foot_slip"]))
 
 
+def test_transition_reset_initializes_coherent_policy_state():
+    env = DirectionalRun(
+        config_overrides={
+            "use_fixed_command": True,
+            "fixed_command": [1.5, 0.0, 0.0],
+            "reset_joint_noise": 0.0,
+            "reset_joint_velocity_noise": 0.8,
+            "reset_policy_action_noise": 1.25,
+            "reset_root_velocity_noise": 0.0,
+            "reset_yaw_range": 0.0,
+        },
+        contract=load_policy_contract(PHASE_CONTRACT),
+    )
+    state = jax.jit(env.reset)(jax.random.PRNGKey(94))
+    action = np.asarray(state.info["last_action"])
+    positions = np.asarray(state.data.qpos)[env._joint_qpos]
+    velocities = np.asarray(state.data.qvel)[env._joint_dof]
+    expected = np.asarray(
+        env.decode_action_targets(state.info["last_action"], state.info["gait_phase"])
+    )
+
+    assert np.any(np.abs(action) > 1.0e-5)
+    np.testing.assert_allclose(positions, expected, atol=1.0e-6)
+    np.testing.assert_allclose(
+        np.asarray(state.data.ctrl)[env._pos_actuator], expected, atol=1.0e-6
+    )
+    np.testing.assert_allclose(
+        state.info["last_last_action"], state.info["last_action"], atol=1.0e-6
+    )
+    assert np.any(np.abs(velocities) > 1.0e-5)
+    assert np.all(np.abs(velocities) <= 0.8 + 1.0e-6)
+
+
+def test_transition_reset_rejects_invalid_noise():
+    with np.testing.assert_raises_regex(ValueError, "reset_policy_action_noise"):
+        DirectionalRun(config_overrides={"reset_policy_action_noise": -0.1})
+
+
 def test_phase_policy_contract_extends_actor_without_changing_actions():
     contract = load_policy_contract(PHASE_CONTRACT)
     env = DirectionalRun(contract=contract)
