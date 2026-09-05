@@ -81,17 +81,20 @@ The release speed is now `0.50 m/s`, the procedural debounce is two 50 Hz
 cycles, and a wider pre-settle corridor commands neutral before the body crosses
 the release slot.  These changes relax an unrealistic transition boundary; they
 do not remove the ball-distance, lateral, heading, posture, or joint guards.
-The short-dribble dispatch angle is also `3 degrees` instead of `1 degree`:
-at its 0.55 m target this is under 3 cm of lateral geometry error, and a retained
-natural release was previously rejected after a 1.79-degree localization-yaw
-change between decision alignment and motion dispatch. Shot and clear retain
-their narrower one-degree contracts.
+The short-dribble dispatch angle is now `6 degrees` instead of `1 degree`:
+at its 0.55 m target this is about 5.8 cm of lateral geometry error, a bounded
+trade-off reserved for ball-carry touches. A retained natural release was
+previously rejected after only a 1.79-degree localization-yaw change between
+decision alignment and motion dispatch. Shot and clear retain their narrower
+one-degree contracts.
 
-After 1.20 seconds of continuous near-ball setup, a request inside a separate
-broad contact corridor may explicitly use pristine Apollo's forward-contact
-macro.  Telemetry names this `FallbackKick*`; an ordinary unsupported targeted
-request still returns `RejectedTargetedKickHold`.  The fallback is therefore a
-declared fail-soft action, not a silent claim that a fixed contact is precise.
+After 0.45 seconds of continuous near-ball setup for dribble/shot/clear, or
+1.20 seconds for a coordinated pass, a request inside a separate broad contact
+corridor may explicitly use pristine Apollo's forward-contact macro. An exact
+procedural release slot always wins over this timeout. Telemetry names the
+fallback explicitly; an ordinary unsupported targeted request still returns
+`RejectedTargetedKickHold`. The fallback is therefore a declared fail-soft
+action, not a silent claim that a fixed contact is precise.
 
 ### 4.2 Terminal pass freeze and permanent retry delay
 
@@ -106,6 +109,68 @@ the terminal outcome remains communicable while a different local action runs.
 The default late threshold was 300 seconds in a five-minute match, so every
 sample remained `Balanced` until `GameOver`.  The default is now 240 seconds,
 leaving a real final-minute window while remaining configurable.
+
+### 4.4 Retained comparison sweep
+
+The next seven full developed-versus-pristine runs scored `0:1`, `0:0`,
+`0:1`, `0:1`, `0:2`, `0:1`, and `0:1`. They are retained under
+`/home/win98/rl_runs/apollo-vs-base-*`, including the no-pass,
+parameterized-off, secondary-pressure and goalkeeper ablations. The draw after
+adding stale-ball goalkeeper hold is the best recent result; no run proves that
+the developed team is stronger yet.
+
+The ablations do reject several tempting explanations. Disabling pass did not
+restore attack, adding a second presser worsened falls without producing a
+goal, and disabling parameterized actions moved the ball farther upfield but
+conceded twice. Across parameterized runs the ball usually failed to cross
+midfield. The dominant bottleneck is therefore continuous chase/contact tempo
+plus locomotion stability, followed by goalkeeper intervention timing; it is
+not justified to tune more pass utility weights before those low-level effects
+improve.
+
+### 4.5 Goalkeeper intervention timing
+
+The retained run with suffix `s20261224-v1` reached the intended last-line
+body-block branch at
+cycle 11400, with the goalkeeper about 0.40 m from the ball, but conceded in the
+next 20 cycles. Earlier samples show the actual regression: the ball stayed
+near `x=-25.8 m, y=2.2 m` while the goalkeeper held the correct angular cover
+point, and `GoalkeeperSmother` did not arm until cycle 11380. The emergency
+logic now permits an earlier ETA-gated near-post challenge within the final
+three metres, while the central opponent-first race rule and legal goalkeeper
+area clamp remain unchanged. A regression test uses the observed match
+geometry.
+
+### 4.6 Latest comparison and release-pipeline finding
+
+`apollo-vs-base-gk-bodyblock-s20261224-v1` still lost `0:1`. The last-line
+body block did execute at about 0.40 m from the ball, but only one sampled
+interval before the goal; this is why the near-post challenge now arms earlier
+instead of widening every goalkeeper chase. The run also exposed a telemetry
+attribution error: explicit fallback contacts were labelled `KickForward` even
+though setup logs recorded 24 fallback releases. Motion provenance is now
+preserved as `FallbackKick*`.
+
+A separate 2 m release audit found that the training evaluator silently forced
+a perfect `1.0` activation threshold while the declared stage trained at
+`0.8`. After removing that hidden override and adding translation braking with
+continued yaw alignment, the deterministic prior reaches trigger/contact in
+125/128 held-out rollouts. Task success is still only 24/128 with two falls,
+and the learned residual regresses to 21/128. This narrows the failure from
+“cannot release” to “contact outcome is inaccurate”: it justifies retaining
+the deterministic action as fallback, but not declaring either version a
+reliable pass.
+
+The first post-fix comparison,
+`apollo-vs-base-nearpost-telemetry-s20261229-v1`, finished `0:0`. Current had
+zero illegal-defense penalties versus one for pristine Apollo. Corrected
+telemetry recorded 90 sampled fallback states (`49 Forward`, `16 Hold`,
+`25 Stabilize`) and 32 setup transitions into explicit fallback, but still no
+exact procedural kick sample. The goalkeeper remained in `GoalkeeperHold`
+throughout because the match never entered the near-post test geometry, so the
+new challenge branch is covered by regression test but not yet by this server
+run. This draw validates attribution and legality, not superiority or exact
+kick readiness.
 
 ## 5. What is actually better, and what is not yet proven
 
@@ -152,6 +217,11 @@ APOLLO_ENABLE_PARAMETERIZED_KICK=0 APOLLO_LEARNED_KICK_MODE=off \
   scripts/run_web_match_vs_apollo_base.sh 120000
 ```
 
+The comparison launcher keeps the unpromoted learned kick loaded in `shadow`
+by default. This is deliberate: its fixed evaluation is weaker than the 2 m
+residual path, so allowing it to own actuators would hide the stronger fallback.
+Use `APOLLO_LEARNED_KICK_MODE=active` only for the explicit model ablation.
+
 For each retained run, report score, legal penalties, independent falls,
 time-to-ball/role target, physical contacts, ball progress, pass terminal
 outcomes, shots, and possession chains.  The final judgment should use matched
@@ -160,12 +230,13 @@ is sufficient by itself.
 
 ## 7. Immediate development order
 
-1. Keep the restored forward contact available as an explicit fallback while
-   improving the exact action rather than replacing it.
-2. Train the yaw-locked lateral specialist, then continue FastWalk transition
-   recovery and only afterward merge full three-axis locomotion.
-3. Train long-distance ball chase before direction-conditioned contact, then
-   DAgger under observation noise and constrained PPO refinement.
-4. Calibrate reach time and action utility from the same deployed motion logs.
-5. Use the controlled tactics/action switches above for the user's final
-   multi-match assessment.
+1. Validate the earlier near-post goalkeeper challenge in one retained match,
+   with corrected `FallbackKick*` attribution rather than inferred contacts.
+2. Build a phase-conditioned BC/DAgger striker student from successful complete
+   approach-release trajectories; do not repeat unsupervised residual PPO.
+3. Keep the 2/3.5/5 m deterministic bank and original forward contact as
+   explicit fallbacks while collecting server outcome traces.
+4. Calibrate reach time and action utility from deployed FastWalk/turn logs,
+   then repeat tactics-on/tactics-off and side-swapped comparisons.
+5. Decide superiority only from repeated full matches; retain every loss and
+   draw instead of selecting favourable scores.

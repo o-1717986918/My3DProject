@@ -106,9 +106,15 @@ int main() {
         return 1;
     }
 
-    profile.target_distance_m = 3.0;
+    profile.target_distance_m = 2.76;
     if (runner.begin(snapshot, profile)) {
         std::cerr << "out-of-envelope distance selected a node\n";
+        return 1;
+    }
+    profile = make_profile();
+    profile.target_distance_m = 2.75;
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "residual distance boundary was rejected\n";
         return 1;
     }
     profile = make_profile();

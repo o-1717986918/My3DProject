@@ -60,7 +60,9 @@ def default_config() -> config_dict.ConfigDict:
     config.kick_trigger_threshold = 0.80
     config.kick_settled_distance = 0.14
     config.kick_settled_heading = 0.15
+    config.kick_settled_planar_speed = 0.35
     config.kick_settled_confirmation_steps = 5
+    config.kick_trigger_requires_settle = False
     config.kick_rearm_steps = 25
     config.kick_prior_enabled = True
     # Zero preserves the deployed kick-residual contract.  The staged T1
@@ -153,6 +155,34 @@ def closed_loop_approach_control(
     return command, activation, contact_error, heading_error
 
 
+def settled_release_command(
+    command: jax.Array,
+    contact_distance: jax.Array,
+    heading_error: jax.Array,
+    activation: jax.Array,
+    *,
+    settled_distance: float,
+    settled_heading: float,
+    trigger_threshold: float,
+    requires_settle: bool,
+) -> tuple[jax.Array, jax.Array]:
+    """Brake translation while preserving yaw alignment before release."""
+    inside_release_geometry = (
+        (contact_distance <= settled_distance)
+        & (jp.abs(heading_error) <= settled_heading)
+    )
+    return (
+        jp.where(
+            requires_settle
+            & inside_release_geometry
+            & (activation >= trigger_threshold),
+            command.at[:2].set(0.0),
+            command,
+        ),
+        inside_release_geometry,
+    )
+
+
 class LongHorizonStriker(DirectionalKick):
     """Twenty-second privileged-teacher task with a deployable actor boundary."""
 
@@ -203,6 +233,7 @@ class LongHorizonStriker(DirectionalKick):
             or self._config.kick_settled_heading
             > self._config.kick_heading_radius
             or self._config.kick_settled_confirmation_steps < 1
+            or self._config.kick_settled_planar_speed <= 0.0
         ):
             raise ValueError("settled kick gate must stay inside activation bounds")
         if self._config.kick_rearm_steps < 0:
@@ -487,11 +518,21 @@ class LongHorizonStriker(DirectionalKick):
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
         action = jp.clip(action, -1.0, 1.0)
         features = self._task_features(state.data, state.info["goal_world"])
+        pre_release_command, inside_release_geometry = settled_release_command(
+            features["command"],
+            features["contact_distance"],
+            features["heading_error"],
+            features["activation"],
+            settled_distance=self._config.kick_settled_distance,
+            settled_heading=self._config.kick_settled_heading,
+            trigger_threshold=self._config.kick_trigger_threshold,
+            requires_settle=bool(self._config.kick_trigger_requires_settle),
+        )
         inside_settled_envelope = (
-            (features["contact_distance"] <= self._config.kick_settled_distance)
+            inside_release_geometry
             & (
-                jp.abs(features["heading_error"])
-                <= self._config.kick_settled_heading
+                jp.linalg.norm(features["torso_world_vel"][:2])
+                <= self._config.kick_settled_planar_speed
             )
         )
         kick_settled_steps = jp.where(
@@ -505,15 +546,20 @@ class LongHorizonStriker(DirectionalKick):
         settled_trigger = (
             kick_settled_steps >= self._config.kick_settled_confirmation_steps
         )
+        activation_trigger = (
+            features["activation"] >= self._config.kick_trigger_threshold
+        )
+        trigger_gate = jp.where(
+            bool(self._config.kick_trigger_requires_settle),
+            activation_trigger & settled_trigger,
+            activation_trigger | settled_trigger,
+        )
         kick_trigger = (
             self._uses_kick_prior
             & bool(self._config.kick_prior_enabled)
             & (state.info["kick_step"] < 0)
             & (state.info["kick_cooldown"] <= 0)
-            & (
-                (features["activation"] >= self._config.kick_trigger_threshold)
-                | settled_trigger
-            )
+            & trigger_gate
         )
         selected_prior_index = jp.argmin(
             jp.abs(
@@ -548,7 +594,7 @@ class LongHorizonStriker(DirectionalKick):
                 jp.asarray(self._config.kick_walk_command),
                 jp.zeros(3),
             ),
-            features["command"],
+            pre_release_command,
         )
         torso_xmat = state.data.site_xmat[self._torso_site]
         gravity = torso_xmat.T @ jp.array([0.0, 0.0, -1.0])

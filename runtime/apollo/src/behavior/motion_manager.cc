@@ -133,9 +133,14 @@ MotionStepResult MotionManager::step_kick(
     const bool specialized_executor_active =
         kick_residual_active_ || procedural_kick_active_ ||
         (learned_kick_enabled_ && learned_kick_active_);
+    // A decision-layer timeout may deliberately issue the original
+    // ForwardContact mode while setting the fallback bit. Preserve that
+    // provenance in the motion name even though no target-aware executor is
+    // involved; otherwise match telemetry reports ordinary KickForward and
+    // silently loses the reason this contact was selected.
     const bool use_forward_contact_fallback =
-        target_aware && command.allow_forward_contact_fallback &&
-        !specialized_executor_active;
+        command.allow_forward_contact_fallback &&
+        (!target_aware || !specialized_executor_active);
     if (target_aware &&
         (!parameterized_kick_enabled_ ||
          !specialized_executor_active) &&

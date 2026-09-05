@@ -30,11 +30,13 @@ public:
 /// Persistent attacker state carried between decision cycles.
 struct APState {
     bool dribble_ready{false};
+    bool kick_pre_settling{false};
     bool set_play_released{false};
     double previous_ball_distance{0.0};
     double kick_active_until_s{0.0};
     double next_kick_allowed_s{0.0};
     double kick_setup_stable_since_s{0.0};
+    double kick_pre_settle_stable_since_s{0.0};
     double kick_setup_started_s{0.0};
     double kick_setup_last_update_s{0.0};
     double kick_setup_direction_deg{0.0};

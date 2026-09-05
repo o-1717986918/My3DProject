@@ -51,8 +51,8 @@ int main() {
         !enabled.executable(make_dribble(0.55, 0.90), 0.0) ||
         enabled.state(strategy::SkillCapability::DribbleTouch) !=
             strategy::CapabilityState::Experimental ||
-        !enabled.executable(make_dribble(0.55, 0.90), 2.50) ||
-        enabled.executable(make_dribble(0.55, 0.90), 3.01) ||
+        !enabled.executable(make_dribble(0.55, 0.90), 5.99) ||
+        enabled.executable(make_dribble(0.55, 0.90), 6.01) ||
         enabled.executable(make_dribble(0.70, 0.90), 0.0) ||
         enabled.executable(make_dribble(0.55, 0.95), 0.0)) {
         std::cerr << "procedural dribble capability envelope is incorrect\n";
@@ -88,12 +88,16 @@ int main() {
 
     if (!enabled.executable(
             make_pass(kParameterizedPassMinimumTargetDistanceM,
-                      kParameterizedPassRequestedSpeedMps),
+                      parameterized_pass_requested_speed_mps(
+                          kParameterizedPassMinimumTargetDistanceM)),
             -kParameterizedPassMaximumTargetAngleDeg) ||
         !enabled.executable(
             make_pass(kParameterizedPassMaximumTargetDistanceM,
-                      kParameterizedPassRequestedSpeedMps),
-            kParameterizedPassMaximumTargetAngleDeg)) {
+                      parameterized_pass_requested_speed_mps(
+                          kParameterizedPassMaximumTargetDistanceM)),
+            kParameterizedPassMaximumTargetAngleDeg) ||
+        !enabled.executable(make_pass(3.5, 2.20), 0.0) ||
+        !enabled.executable(make_pass(5.0, 3.00), 0.0)) {
         std::cerr << "valid targeted pass envelope boundary was rejected\n";
         return 1;
     }
@@ -103,6 +107,8 @@ int main() {
             kParameterizedPassMaximumTargetDistanceM + 0.01, 1.43), 0.0) ||
         enabled.executable(make_pass(2.0, 0.79), 0.0) ||
         enabled.executable(make_pass(2.0, 3.01), 0.0) ||
+        enabled.executable(make_pass(3.5, 1.43), 0.0) ||
+        enabled.executable(make_pass(5.0, 2.20), 0.0) ||
         enabled.executable(nominal, kParameterizedPassMaximumTargetAngleDeg + 0.01)) {
         std::cerr << "out-of-envelope targeted pass was accepted\n";
         return 1;

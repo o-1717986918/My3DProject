@@ -74,6 +74,22 @@ int main() {
         return 1;
     }
 
+    world::WorldSnapshot long_pass_snapshot = open;
+    long_pass_snapshot.teammates[5].position_m = {5.0, 0.0, 0.8};
+    const strategy::PassCandidateGenerator range_generator;
+    const auto long_passes = range_generator.generate(long_pass_snapshot);
+    bool found_distance_conditioned_long_pass = false;
+    for (const auto& candidate : long_passes.candidates) {
+        if (candidate.pass_type == strategy::PassType::Direct &&
+            std::abs(candidate.requested_ball_speed_mps - 3.00) < 1.0e-9) {
+            found_distance_conditioned_long_pass = true;
+        }
+    }
+    if (!found_distance_conditioned_long_pass) {
+        std::cerr << "long pass did not select its physical speed anchor\n";
+        return 1;
+    }
+
     const strategy::ActionCapabilityRegistry enabled_capabilities(true);
     world::WorldSnapshot no_pass = open;
     no_pass.teammates.clear();

@@ -151,7 +151,11 @@ bool ProceduralKickRunner::begin(
     const world::WorldSnapshot& snapshot,
     const KickExecutionProfile& profile) {
     selected_ = nullptr;
-    if (profile.kind != KickProfileKind::ProceduralContact ||
+    const bool supported_profile_kind =
+        profile.kind == KickProfileKind::ProceduralContact ||
+        (profile.kind == KickProfileKind::ParameterizedContact &&
+         profile.mode == decision::KickMode::TargetedPass);
+    if (!supported_profile_kind ||
         !snapshot.ball.position_valid || !ball_track_usable(snapshot) ||
         snapshot.self.position_m[2] <= world::kFallenHeightThresholdM ||
         !std::isfinite(profile.target_distance_m) ||

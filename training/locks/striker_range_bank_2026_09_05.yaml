@@ -1,0 +1,91 @@
+schema_version: 1
+recorded_at: 2026-09-05
+stage: long_horizon_striker_and_range_kick_bank
+status: deterministic_bank_selected_learned_residual_rejected
+
+ball_chase:
+  run: /home/win98/rl_runs/striker/ball-chase-s20261204-v1
+  requested_timesteps: 2097152
+  effective_timesteps: 2097152
+  manifest_sha256: adf18f2b75382207c0b830dee047d9551c658fc6768854adf4633c68b0648bb1
+  independent_seed: 20261205
+  rollouts: 128
+  falls: 0
+  analytic_median_final_contact_distance_m: 0.06950485333800316
+  learned_median_final_contact_distance_m: 0.0692569762468338
+  runtime_mounted: false
+  retained_use: stable_training_initializer
+
+range_bank:
+  selection: nearest_target_distance_first_tie
+  anchors:
+    - target_distance_m: 2.0
+      requested_speed_mps: 1.43
+      implementation: dense_residual_table
+      source_manifest_sha256: 4605fc6b18f360c4079a9f8cf8c5bf463523c5d35f834f4bec351f4d44136108
+    - target_distance_m: 3.5
+      requested_speed_mps: 2.20
+      implementation: procedural_trajectory
+      source_manifest_sha256: bc91b2fd16d9c99d19e53517381a18a24d68965c50b35332195feb76ac6102b3
+      nominal_progress_m: 3.5517633934026462
+      nominal_lateral_error_m: 0.02566001760262913
+      heldout_status: not_run
+      server_status: not_run
+    - target_distance_m: 5.0
+      requested_speed_mps: 3.00
+      implementation: procedural_trajectory
+      source_manifest_sha256: 3ccee26b2e00510d4f06e433f2cc7a64742ebdc78de0c976ade5b176d1fb758a
+      nominal_progress_m: 4.970255398362303
+      nominal_lateral_error_m: 0.0420384513799531
+      heldout_status: not_run
+      server_status: not_run
+  seed_20261207:
+    zero_residual_successes: 49
+    trials: 128
+    falls: 0
+    report_sha256: 4143808d9bbd01ab2d30006018b189aa0d3bb1f32a45b0348a9a2fa8a65ccb80
+
+single_prior_directional_training:
+  run: /home/win98/rl_runs/striker/directional-kick-s20261206-v1
+  effective_timesteps: 4194304
+  manifest_sha256: eb00263a58dd67098cd88a88b6db9850aed9881c6b15d9a708b4d572070d4e38
+  seed_20261207:
+    zero_residual_successes: 15
+    midpoint_successes: 17
+    final_successes: 14
+    trials: 128
+    learned_falls: 1
+  decision: rejected_task_prior_mismatch
+
+bank_residual_training:
+  run: /home/win98/rl_runs/striker/directional-kick-bank-s20261208-v1
+  effective_timesteps: 4194304
+  manifest_sha256: 4ae36563f36b887db61c744fb535303c4aaa89d0c569521450b8be97ecd93f4f
+  evaluated_checkpoint: checkpoints/000001572864
+  checkpoint_fingerprint_sha256: 95f0c98aef5c7804e0e584c5f62823d6a313d2c641a5e33f958dbc07f5317b98
+  independent_seeds: [20261207, 20261209, 20261210]
+  zero_residual_successes: [49, 36, 33]
+  learned_residual_successes: [52, 39, 31]
+  aggregate_trials: 384
+  zero_residual_total_successes: 118
+  learned_residual_total_successes: 122
+  zero_residual_success_rate: 0.3072916666666667
+  learned_residual_success_rate: 0.3177083333333333
+  learned_gain_percentage_points: 1.0416666666666665
+  falls: 0
+  decision: rejected_not_robust_across_seeds
+  runtime_mounted: false
+
+runtime_decision:
+  deterministic_range_bank: bounded_experimental
+  learned_kick_default_in_base_comparison: shadow
+  onnx_route_retained: true
+  long_anchor_promotion_blockers: [independent_ball_pose_holdout, server_execution]
+  fallback_order: [distance_conditioned_action, explicit_forward_contact, safe_reject]
+
+verification:
+  cpp_ctest: 17_of_17_passed
+  evaluator_tests: passed
+  long_pass_decision_to_motion_contract_test: passed
+  source_outputs_directory: /home/win98/rl_runs
+  c_drive_large_outputs_written: false

@@ -58,6 +58,31 @@ STAGES: dict[str, dict[str, Any]] = {
         "kick_prior_enabled": True,
         "learned_approach_residual_floor": 0.25,
     },
+    # Do not ask one residual policy to repair approach, direction and three
+    # physically different kick ranges at once.  This first contact stage
+    # keeps the proven 2 m prior, resumes the stable chase checkpoint and
+    # learns only the final approach-to-release transition.  It follows the
+    # public ICRA 2026 striker decomposition while preserving our deployable
+    # 102 -> 23 contract and deterministic prior fallback.
+    "contact_release_2m": {
+        "robot_distance_range": [0.42, 0.90],
+        "robot_lateral_range": [-0.10, 0.10],
+        "robot_yaw_noise_range": [-0.15, 0.15],
+        "target_angle_range": [-0.15, 0.15],
+        "target_distance_range": [2.0, 2.0],
+        "reset_joint_noise": 0.01,
+        "reset_root_velocity_noise": 0.02,
+        "kick_prior_enabled": True,
+        "learned_approach_residual_floor": 0.50,
+        "kick_trigger_requires_settle": True,
+        # Match the measured runtime release envelope.  Stable-walk torso sway
+        # routinely reaches 0.35 m/s even after translation is commanded to
+        # zero, while the bounded procedural runner is validated at 0.50 m/s.
+        "kick_settled_planar_speed": 0.50,
+        # Runtime confirms the procedural release for 0.04 s at 50 Hz.  A
+        # five-cycle training dwell silently imposed a stricter 0.10 s gate.
+        "kick_settled_confirmation_steps": 2,
+    },
     "near_ball": {
         "robot_distance_range": [0.42, 0.70],
         "robot_lateral_range": [-0.06, 0.06],

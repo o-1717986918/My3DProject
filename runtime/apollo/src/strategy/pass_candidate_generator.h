@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "src/decision/kick_contract.h"
 #include "src/strategy/ball_trajectory_model.h"
 #include "src/strategy/cooperative_action.h"
 #include "src/strategy/reach_time_model.h"
@@ -20,9 +21,9 @@ class PassCandidateGenerator {
 public:
     struct Parameters {
         double minimum_pass_distance_m{1.5};
-        double maximum_pass_distance_m{8.0};
+        double maximum_pass_distance_m{
+            decision::kick_contract::kParameterizedPassMaximumTargetDistanceM};
         double field_margin_m{1.0};
-        double requested_ball_speed_mps{1.43};
         double minimum_receiver_lead_s{0.10};
         double minimum_interception_margin_s{0.35};
         double leading_offset_m{1.0};

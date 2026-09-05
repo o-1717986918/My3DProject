@@ -423,6 +423,16 @@ TacticalTarget plan_goalkeeper(
     std::optional<double> goalkeeper_yaw_deg = std::nullopt) {
     constexpr double hold_x =
         -field_geometry::kActualHalfLengthM + field_geometry::kGkHoldDepthM;
+    constexpr double emergency_smother_depth_m = 1.5;
+    constexpr double emergency_smother_max_eta_s = 1.5;
+    // Start a near-post challenge earlier than a central challenge. In the
+    // 2026-12-24 comparison the keeper was already on the correct angular
+    // cover point while the ball sat at x=-25.8 m, y=2.2 m, but the old common
+    // depth gate kept it on the line until only one second remained. Three
+    // metres is still wholly inside the 4 m goalkeeper area; requiring a
+    // near-post y coordinate preserves the opponent-first race rule centrally.
+    constexpr double early_near_post_depth_m = 3.0;
+    constexpr double early_near_post_max_eta_s = 2.75;
     if (snapshot.ball.velocity_valid && snapshot.ball.velocity_mps[0] < -0.20) {
         const double time_to_line =
             (hold_x - ball[0]) / snapshot.ball.velocity_mps[0];
@@ -479,8 +489,25 @@ TacticalTarget plan_goalkeeper(
                 opponent_eta_s,
                 opponent_reach.estimate_s(opponent.position_m, target));
         }
+        const bool immediate_goal_mouth_challenge =
+            ball[0] <= -field_geometry::kActualHalfLengthM +
+                    emergency_smother_depth_m &&
+            // Challenge a carry that is still just outside the post. In the
+            // 2026-12-17 comparison the ball stayed at y=2.19 m (36 cm past
+            // the post), then cut inside before the old +0.25 m corridor
+            // armed.  This remains depth- and ETA-gated, so it does not turn
+            // the keeper into a general field chaser.
+            std::abs(ball[1]) <= field_geometry::kGoalHalfWidthM + 1.00 &&
+            keeper_eta_s <= emergency_smother_max_eta_s;
+        const bool early_near_post_challenge =
+            ball[0] <= -field_geometry::kActualHalfLengthM +
+                    early_near_post_depth_m &&
+            std::abs(ball[1]) >= field_geometry::kGoalHalfWidthM - 0.25 &&
+            std::abs(ball[1]) <= field_geometry::kGoalHalfWidthM + 1.00 &&
+            keeper_eta_s <= early_near_post_max_eta_s;
         if (ball_speed_mps <= 1.8 && keeper_eta_s <= 3.0 &&
-            keeper_eta_s + 0.25 < opponent_eta_s) {
+            (keeper_eta_s + 0.25 < opponent_eta_s ||
+             immediate_goal_mouth_challenge || early_near_post_challenge)) {
             return {
                 TacticalDuty::GoalkeeperSmother,
                 target,
@@ -489,13 +516,22 @@ TacticalTarget plan_goalkeeper(
                 std::clamp(1.0 - keeper_eta_s / 4.0, 0.5, 0.95)};
         }
     }
-    const double angle_cover_y = std::clamp(
-        ball[1] * 0.10,
-        -field_geometry::kGoalHalfWidthM + 0.35,
-        field_geometry::kGoalHalfWidthM - 0.35);
+    // Stand on a short goal-centred arc. A fixed 10% y scaling left the
+    // keeper near the centre while an attacker carried the ball across the
+    // near post; angular coverage keeps the keeper on the actual shot line.
+    // A 1.25 m arc covers the near-post line early enough for the standard
+    // walk controller while remaining within the legal goalkeeper area. The
+    // previous 0.85 m radius left 1.36 m of lateral separation in the same
+    // observed near-post carry.
+    constexpr double cover_arc_radius_m = 1.25;
+    const Position2 own_goal{-field_geometry::kActualHalfLengthM, 0.0};
+    const Position2 goal_to_ball = math::vec2_unit_or(
+        math::vec2_sub(ball, own_goal), {1.0, 0.0});
+    const Position2 angle_cover = math::vec2_add(
+        own_goal, math::vec2_scale(goal_to_ball, cover_arc_radius_m));
     return {
         TacticalDuty::GoalkeeperHold,
-        clamp_goalkeeper({hold_x, angle_cover_y}),
+        clamp_goalkeeper(angle_cover),
         ball,
         0,
         snapshot.ball.position_valid ? 0.7 : 0.3};
@@ -589,9 +625,30 @@ TeamPlan TeamTactics::plan_all(
     const auto clear_support_latches = [this]() {
         for (auto& latch : support_latches_) latch = {};
     };
-    if (snapshot.play_mode != world::PlayMode::PlayOn ||
-        !snapshot.ball.position_valid ||
-        (!snapshot.ball.visible && snapshot.ball.position_age_s > 0.75)) {
+    const bool fresh_ball = snapshot.ball.position_valid &&
+        (snapshot.ball.visible || snapshot.ball.position_age_s <= 0.75);
+    if (snapshot.play_mode != world::PlayMode::PlayOn || !fresh_ball) {
+        // A field player can safely fall back to its shape without a fresh
+        // ball. A goalkeeper cannot: the 2026-12-18 comparison left it at the
+        // formation x=-23.9 for about 18 seconds of visual loss, 3.5 m off the
+        // goal line, immediately before conceding. In open play, make the
+        // information-loss fallback an explicit central goal-line hold.
+        if (snapshot.play_mode == world::PlayMode::PlayOn) {
+            const Position2 safe_keeper_hold{
+                -field_geometry::kActualHalfLengthM +
+                    field_geometry::kGkHoldDepthM,
+                0.0};
+            for (auto& assignment : result.assignments) {
+                if (assignment.role_id != RoleManager::ROLE_GK) continue;
+                assignment.target = {
+                    TacticalDuty::GoalkeeperHold,
+                    safe_keeper_hold,
+                    Position2{0.0, 0.0},
+                    0,
+                    0.9};
+                break;
+            }
+        }
         clear_support_latches();
         finalize_team_plan(result, snapshot);
         return result;

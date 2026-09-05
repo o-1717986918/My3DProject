@@ -19,7 +19,7 @@ namespace behavior {
 namespace {
 
 constexpr double kNominalBallLocalXM = 0.32;
-constexpr double kDistanceToleranceM = 0.55;
+constexpr double kDistanceToleranceM = 0.75;
 constexpr double kAngleToleranceDeg = 2.0;
 constexpr double kSpeedToleranceMps = 0.20;
 constexpr double kBallXMinimumM = -0.02;

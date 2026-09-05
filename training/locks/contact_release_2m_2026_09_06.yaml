@@ -1,0 +1,71 @@
+schema_version: 1
+recorded_at: 2026-09-06
+stage: contact_release_2m
+status: release_pipeline_repaired_residual_rejected
+
+objective:
+  distance_m: 2.0
+  target_angle_rad: [-0.15, 0.15]
+  robot_distance_m: [0.42, 0.90]
+  robot_lateral_m: [-0.10, 0.10]
+  robot_yaw_error_rad: [-0.15, 0.15]
+
+first_narrow_residual:
+  run: /home/win98/rl_runs/striker/contact-release-2m-s20261226-v1
+  requested_timesteps: 2097152
+  effective_timesteps: 2097152
+  manifest_sha256: 406a0e6ee0ae75d32207bcb5cf76fb6f2d1f621d76e27c45aefbe3e3419c5cc9
+  independent_seed: 20261225
+  zero_residual_successes: 19
+  learned_midpoint_successes: 18
+  trials: 128
+  zero_residual_falls: 6
+  learned_midpoint_falls: 4
+  decision: rejected_no_success_gain
+
+settled_residual:
+  run: /home/win98/rl_runs/striker/contact-release-2m-settled-s20261227-v1
+  requested_timesteps: 2097152
+  effective_timesteps: 2097152
+  manifest_sha256: d4f39b571dd57d0df0b57ec41b895234c03ee4af9aa3160da2a793b873fbb8cd
+  evaluated_checkpoint: checkpoints/000001048576
+  checkpoint_fingerprint_sha256: 7821e4a70746454b1f3a70d7e72756ebd9e0a32ec716dd524ea7f1c5b718a1b5
+  decision: rejected_after_corrected_evaluation
+
+evaluation_repair:
+  issue: cli_default_silently_overrode_stage_trigger_threshold
+  invalid_override: 1.0
+  stage_threshold: 0.8
+  release_translation_brake: true
+  yaw_alignment_preserved: true
+  settled_planar_speed_mps: 0.50
+  settled_confirmation_steps: 2
+  note: pre_repair_trigger_counts_are_diagnostic_only
+
+corrected_paired_evaluation:
+  seed: 20261228
+  trials: 128
+  zero_residual_report: /home/win98/rl_runs/striker/contact-release-2m-release-brake-baseline-s20261228.json
+  zero_residual_report_sha256: 8689f033116b899398e8c4f262348d80f0eb4dfcaeac2119971c6b9c47af41c1
+  zero_residual_triggered: 125
+  zero_residual_contacted: 125
+  zero_residual_successes: 24
+  zero_residual_falls: 2
+  learned_report: /home/win98/rl_runs/striker/contact-release-2m-release-brake-ckpt1048576-s20261228.json
+  learned_report_sha256: 29e8abd9c671381a2248b99d15d3faa95201a4efebb716ecef9cd8c960bcafc0
+  learned_triggered: 125
+  learned_contacted: 125
+  learned_successes: 21
+  learned_falls: 2
+  learned_gain_percentage_points: -2.34375
+
+runtime_decision:
+  runtime_mounted: false
+  deterministic_prior_retained: true
+  onnx_route_retained: true
+  next_method: successful_trajectory_bc_then_dagger_transition_student
+  ppo_without_supervised_initialization: stopped
+
+storage:
+  artifacts_root: /home/win98/rl_runs
+  large_outputs_written_to_c_drive: false

@@ -113,16 +113,10 @@ KickExecutionProfile make_kick_execution_profile(
     }
 
     if (command.mode != decision::KickMode::TargetedPass ||
-        target_distance_m <
-            decision::kick_contract::kParameterizedPassMinimumTargetDistanceM ||
-        target_distance_m >
-            decision::kick_contract::kParameterizedPassMaximumTargetDistanceM ||
+        !decision::kick_contract::parameterized_pass_request_supported(
+            target_distance_m, command.requested_ball_speed_mps) ||
         std::abs(relative_angle_deg) >
-            decision::kick_contract::kParameterizedPassMaximumTargetAngleDeg ||
-        std::abs(
-            command.requested_ball_speed_mps -
-            decision::kick_contract::kParameterizedPassRequestedSpeedMps) >
-            1.0e-9) {
+            decision::kick_contract::kParameterizedPassMaximumTargetAngleDeg) {
         return profile;
     }
 

@@ -4,6 +4,7 @@
 
 #include "src/strategy/pass_candidate_generator.h"
 
+#include "src/decision/kick_contract.h"
 #include "src/math/math_utils.h"
 #include "src/server/server_constants.h"
 
@@ -53,8 +54,6 @@ PassCandidateGenerator::PassCandidateGenerator()
 
 PassCandidateGenerator::PassCandidateGenerator(Parameters parameters)
     : parameters_(parameters),
-      ball_model_(BallTrajectoryModel::Parameters{
-          parameters.requested_ball_speed_mps, 0.08, 0.20}),
       opponent_model_(ReachTimeModel::Parameters{
           1.35, 180.0, 0.05, 0.75, 0.05}) {}
 
@@ -164,8 +163,11 @@ RejectionReason PassCandidateGenerator::evaluate_candidate(
         return RejectionReason::UnsafeBackPass;
     }
 
+    const double requested_ball_speed_mps =
+        decision::kick_contract::parameterized_pass_requested_speed_mps(
+            distance);
     const double ball_time = ball_model_.travel_time_s(
-        distance, parameters_.requested_ball_speed_mps);
+        distance, requested_ball_speed_mps);
     if (!std::isfinite(ball_time)) {
         return RejectionReason::BallCannotReach;
     }
@@ -178,7 +180,7 @@ RejectionReason PassCandidateGenerator::evaluate_candidate(
 
     double minimum_margin = std::numeric_limits<double>::infinity();
     const double opponent_time = earliest_opponent_time_s(
-        snapshot, ball, target_point_m, parameters_.requested_ball_speed_mps,
+        snapshot, ball, target_point_m, requested_ball_speed_mps,
         &minimum_margin);
     if (minimum_margin < parameters_.minimum_interception_margin_s) {
         return RejectionReason::OpponentFirst;
@@ -192,7 +194,7 @@ RejectionReason PassCandidateGenerator::evaluate_candidate(
     output->target_player_number = receiver_player_number;
     output->start_ball_point_m = ball;
     output->target_point_m = target_point_m;
-    output->requested_ball_speed_mps = parameters_.requested_ball_speed_mps;
+    output->requested_ball_speed_mps = requested_ball_speed_mps;
     output->predicted_ball_time_s = ball_time;
     output->predicted_receiver_time_s = receiver_time;
     output->predicted_opponent_time_s = opponent_time;

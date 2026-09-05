@@ -68,8 +68,8 @@ ActionCapabilityRegistry::ActionCapabilityRegistry(bool enable_parameterized_kic
         decision::kick_contract::kParameterizedPassMinimumTargetDistanceM,
         decision::kick_contract::kParameterizedPassMaximumTargetDistanceM,
         decision::kick_contract::kParameterizedPassMaximumTargetAngleDeg,
-        decision::kick_contract::kParameterizedPassRequestedSpeedMps,
-        decision::kick_contract::kParameterizedPassRequestedSpeedMps,
+        decision::kick_contract::kParameterizedPassMinimumRequestedSpeedMps,
+        decision::kick_contract::kParameterizedPassMaximumRequestedSpeedMps,
         true, SkillCapability::ForwardContact};
     envelopes_[index_of(SkillCapability::Shot)] = {
         SkillCapability::Shot,
@@ -111,12 +111,18 @@ bool ActionCapabilityRegistry::supported(
     const double distance = std::hypot(
         action.target_point_m[0] - action.start_ball_point_m[0],
         action.target_point_m[1] - action.start_ball_point_m[1]);
-    return std::isfinite(distance) &&
+    const bool envelope_supported = std::isfinite(distance) &&
         distance >= limits.minimum_distance_m &&
         distance <= limits.maximum_distance_m &&
         std::isfinite(action.requested_ball_speed_mps) &&
         action.requested_ball_speed_mps >= limits.minimum_requested_speed_mps &&
         action.requested_ball_speed_mps <= limits.maximum_requested_speed_mps;
+    if (!envelope_supported) return false;
+    if (action.category == ActionCategory::Pass) {
+        return decision::kick_contract::parameterized_pass_request_supported(
+            distance, action.requested_ball_speed_mps);
+    }
+    return true;
 }
 
 bool ActionCapabilityRegistry::executable(

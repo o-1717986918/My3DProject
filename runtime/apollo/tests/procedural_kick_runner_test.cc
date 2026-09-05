@@ -50,7 +50,7 @@ int main() {
         APOLLO_CODE_BASE_PROJECT_SOURCE_DIR) /
         "assets/keyframes/procedural_kick.yaml";
     behavior::ProceduralKickRunner runner(asset);
-    if (runner.anchor_count() != 3U) {
+    if (runner.anchor_count() != 5U) {
         std::cerr << "unexpected procedural anchor count\n";
         return 1;
     }
@@ -61,6 +61,38 @@ int main() {
         runner.active_anchor_name() != "right_dribble_055m_v1" ||
         std::abs(runner.duration_s() - 1.20) > 1.0e-9) {
         std::cerr << "validated short-touch anchor was not selected\n";
+        return 1;
+    }
+
+    profile.relative_target_angle_deg = 5.99;
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "relaxed short-touch angle was not accepted\n";
+        return 1;
+    }
+    profile.relative_target_angle_deg = 6.01;
+    if (runner.begin(snapshot, profile)) {
+        std::cerr << "out-of-envelope short-touch angle was accepted\n";
+        return 1;
+    }
+    profile = make_profile();
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "nominal short-touch could not restart\n";
+        return 1;
+    }
+
+    snapshot.ball.position_m[1] = 0.0649;
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "validated dispatch-margin short-touch was rejected\n";
+        return 1;
+    }
+    snapshot.ball.position_m[1] = 0.0651;
+    if (runner.begin(snapshot, profile)) {
+        std::cerr << "short-touch outside the dispatch margin was accepted\n";
+        return 1;
+    }
+    snapshot = make_snapshot();
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "nominal short-touch could not restart after margin test\n";
         return 1;
     }
 
@@ -103,6 +135,26 @@ int main() {
     if (!runner.begin(snapshot, profile) ||
         runner.active_anchor_name() != "right_clear_6m_v1") {
         std::cerr << "validated 6 m clear anchor was not selected\n";
+        return 1;
+    }
+
+    snapshot = make_snapshot();
+    snapshot.ball.position_m = {0.31, -0.04, 0.11};
+    profile.kind = behavior::KickProfileKind::ParameterizedContact;
+    profile.target_distance_m = 3.5;
+    profile.requested_speed_mps = 2.20;
+    profile.relative_target_angle_deg = 0.0;
+    profile.mode = decision::KickMode::TargetedPass;
+    if (!runner.begin(snapshot, profile) ||
+        runner.active_anchor_name() != "right_pass_3p5m_experimental_v1") {
+        std::cerr << "experimental 3.5 m pass anchor was not selected\n";
+        return 1;
+    }
+    profile.target_distance_m = 5.0;
+    profile.requested_speed_mps = 3.00;
+    if (!runner.begin(snapshot, profile) ||
+        runner.active_anchor_name() != "right_pass_5m_experimental_v1") {
+        std::cerr << "experimental 5 m pass anchor was not selected\n";
         return 1;
     }
 

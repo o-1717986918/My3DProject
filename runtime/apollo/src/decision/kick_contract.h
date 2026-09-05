@@ -2,6 +2,9 @@
 
 #pragma once
 
+#include <array>
+#include <cmath>
+
 namespace decision::kick_contract {
 
 inline constexpr double kMinimumTargetDistanceM = 0.25;
@@ -10,25 +13,74 @@ inline constexpr double kMaximumTargetAngleDeg = 15.0;
 inline constexpr double kMinimumRequestedSpeedMps = 0.8;
 inline constexpr double kMaximumRequestedSpeedMps = 3.5;
 
-// The currently shipped residual table is calibrated at 1.43 m/s, 0 deg and
-// a 2.0 m target. Its selection tolerances are part of the physical contract
-// until a wider table is promoted; keeping these limits here prevents the
-// planner from committing targets that MotionManager must reject later.
+struct ParameterizedPassAnchorContract {
+    double target_distance_m;
+    double maximum_distance_error_m;
+    double requested_speed_mps;
+    double maximum_speed_error_mps;
+};
+
+// The 2 m anchor is backed by the dense residual table. The 3.5 m and 5 m
+// anchors are narrow deterministic trajectories and remain experimental; all
+// three are selected discretely instead of pretending that one trajectory can
+// continuously scale across the complete range.
+inline constexpr std::array<ParameterizedPassAnchorContract, 3>
+kParameterizedPassAnchors{{
+    {2.0, 0.75, 1.43, 0.20},
+    {3.5, 0.75, 2.20, 0.20},
+    {5.0, 0.75, 3.00, 0.20},
+}};
 inline constexpr double kParameterizedPassMinimumTargetDistanceM = 1.45;
-inline constexpr double kParameterizedPassMaximumTargetDistanceM = 2.55;
+inline constexpr double kParameterizedPassMaximumTargetDistanceM = 5.75;
 inline constexpr double kParameterizedPassMaximumTargetAngleDeg = 2.0;
 inline constexpr double kParameterizedPassRequestedSpeedMps = 1.43;
+inline constexpr double kParameterizedPassMinimumRequestedSpeedMps = 1.43;
+inline constexpr double kParameterizedPassMaximumRequestedSpeedMps = 3.00;
+
+inline double parameterized_pass_requested_speed_mps(double distance_m) {
+    const ParameterizedPassAnchorContract* nearest =
+        &kParameterizedPassAnchors.front();
+    double nearest_error = std::abs(distance_m - nearest->target_distance_m);
+    for (const auto& anchor : kParameterizedPassAnchors) {
+        const double error = std::abs(distance_m - anchor.target_distance_m);
+        if (error < nearest_error) {
+            nearest = &anchor;
+            nearest_error = error;
+        }
+    }
+    return nearest->requested_speed_mps;
+}
+
+inline bool parameterized_pass_request_supported(
+    double distance_m,
+    double requested_speed_mps) {
+    if (!std::isfinite(distance_m) ||
+        !std::isfinite(requested_speed_mps) ||
+        distance_m < kParameterizedPassMinimumTargetDistanceM ||
+        distance_m > kParameterizedPassMaximumTargetDistanceM) {
+        return false;
+    }
+    for (const auto& anchor : kParameterizedPassAnchors) {
+        if (std::abs(distance_m - anchor.target_distance_m) <=
+                anchor.maximum_distance_error_m &&
+            std::abs(requested_speed_mps - anchor.requested_speed_mps) <=
+                anchor.maximum_speed_error_mps) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // First model-independent anchor. This is intentionally a narrow short-touch
 // contract: widening it to pass or shot distances requires new physical
 // anchors and the same held-out/server promotion gates.
 inline constexpr double kProceduralDribbleMinimumTargetDistanceM = 0.45;
 inline constexpr double kProceduralDribbleMaximumTargetDistanceM = 0.65;
-// At 0.55 m, a three-degree body/target mismatch is under 3 cm laterally and
-// remains inside the short-touch control corridor. The former one-degree
-// boundary rejected a natural release after decision-time alignment because
-// localization yaw moved by 1.79 degrees before motion dispatch.
-inline constexpr double kProceduralDribbleMaximumTargetAngleDeg = 3.0;
+// At 0.55 m, a six-degree body/target mismatch is about 5.8 cm laterally: it
+// is acceptable for a recovery dribble touch, but not for a pass or shot.
+// Keeping this a dribble-only contract avoids starving contact while the
+// stricter directional actions retain their measured release envelopes.
+inline constexpr double kProceduralDribbleMaximumTargetAngleDeg = 6.0;
 inline constexpr double kProceduralDribbleRequestedSpeedMps = 0.90;
 inline constexpr double kProceduralDribbleMinimumBallLocalYM = 0.02;
 inline constexpr double kProceduralDribbleMaximumBallLocalYM = 0.06;

@@ -6,12 +6,14 @@ from my3d_rl.contract import load_policy_contract
 from my3d_rl.striker_cpu import (
     StrikerCpuEvaluator,
     closed_loop_approach_control_numpy,
+    settled_release_command_numpy,
 )
 from my3d_rl.striker_env import (
     DEFAULT_CONTRACT,
     LongHorizonStriker,
     closed_loop_approach_control,
     default_config,
+    settled_release_command,
 )
 
 
@@ -59,6 +61,8 @@ def test_striker_default_release_gate_is_bounded_but_not_perfect_pose_only():
     assert config.kick_settled_confirmation_steps <= 5
     assert config.kick_full_radius < config.kick_settled_distance
     assert config.kick_full_heading < config.kick_settled_heading
+    assert config.kick_settled_planar_speed == 0.35
+    assert config.kick_trigger_requires_settle is False
     assert config.learned_approach_residual_floor == 0.0
 
 
@@ -88,6 +92,38 @@ def test_numpy_and_jax_approach_controllers_match():
 
     for actual, expected in zip(jax_result, numpy_result, strict=True):
         np.testing.assert_allclose(actual, expected, atol=2.0e-7)
+
+
+def test_settled_release_gate_brakes_only_inside_the_release_geometry():
+    command = np.array([0.24, -0.08, 0.12])
+    kwargs = {
+        "settled_distance": 0.14,
+        "settled_heading": 0.15,
+        "trigger_threshold": 0.80,
+        "requires_settle": True,
+    }
+
+    jax_braked, jax_inside = settled_release_command(
+        jp.asarray(command), jp.asarray(0.10), jp.asarray(0.08), jp.asarray(0.90),
+        **kwargs,
+    )
+    cpu_braked, cpu_inside = settled_release_command_numpy(
+        command, 0.10, 0.08, 0.90, **kwargs
+    )
+    np.testing.assert_allclose(jax_braked, [0.0, 0.0, 0.12], atol=1.0e-7)
+    np.testing.assert_allclose(cpu_braked, [0.0, 0.0, 0.12], atol=1.0e-7)
+    assert bool(jax_inside) and cpu_inside
+
+    jax_moving, jax_inside = settled_release_command(
+        jp.asarray(command), jp.asarray(0.20), jp.asarray(0.08), jp.asarray(0.60),
+        **kwargs,
+    )
+    cpu_moving, cpu_inside = settled_release_command_numpy(
+        command, 0.20, 0.08, 0.60, **kwargs
+    )
+    np.testing.assert_allclose(jax_moving, command, atol=1.0e-7)
+    np.testing.assert_allclose(cpu_moving, command, atol=1.0e-7)
+    assert not bool(jax_inside) and not cpu_inside
 
 
 def test_striker_environment_preserves_student_and_teacher_boundaries():

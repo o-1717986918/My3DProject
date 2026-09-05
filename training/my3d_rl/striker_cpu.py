@@ -81,6 +81,32 @@ def closed_loop_approach_control_numpy(
     )
 
 
+def settled_release_command_numpy(
+    command: np.ndarray,
+    contact_distance: float,
+    heading_error: float,
+    activation: float,
+    *,
+    settled_distance: float,
+    settled_heading: float,
+    trigger_threshold: float,
+    requires_settle: bool,
+) -> tuple[np.ndarray, bool]:
+    """NumPy reference for translation braking with yaw alignment."""
+    inside_release_geometry = bool(
+        contact_distance <= settled_distance
+        and abs(heading_error) <= settled_heading
+    )
+    result = np.asarray(command).copy()
+    if (
+        requires_settle
+        and inside_release_geometry
+        and activation >= trigger_threshold
+    ):
+        result[:2] = 0.0
+    return result, inside_release_geometry
+
+
 @dataclass(frozen=True)
 class StrikerCpuResult:
     seed: int
@@ -379,24 +405,43 @@ class StrikerCpuEvaluator:
 
         for control_step in range(int(cfg["episode_length"])):
             features = self._features(data, goal_world)
+            pre_release_command, inside_release_geometry = (
+                settled_release_command_numpy(
+                    np.asarray(features["command"], dtype=np.float64),
+                    float(features["contact_distance"]),
+                    float(features["heading_error"]),
+                    float(features["activation"]),
+                    settled_distance=float(cfg["kick_settled_distance"]),
+                    settled_heading=float(cfg["kick_settled_heading"]),
+                    trigger_threshold=float(cfg["kick_trigger_threshold"]),
+                    requires_settle=bool(cfg["kick_trigger_requires_settle"]),
+                )
+            )
             inside_settled = (
-                float(features["contact_distance"])
-                <= float(cfg["kick_settled_distance"])
-                and abs(float(features["heading_error"]))
-                <= float(cfg["kick_settled_heading"])
+                inside_release_geometry
+                and np.linalg.norm(features["torso_world_vel"][:2])
+                <= float(cfg["kick_settled_planar_speed"])
             )
             settled_steps = min(
                 settled_steps + 1 if inside_settled else 0,
                 int(cfg["kick_settled_confirmation_steps"]),
             )
+            activation_trigger = (
+                float(features["activation"])
+                >= float(cfg["kick_trigger_threshold"])
+            )
+            settled_trigger = (
+                settled_steps >= int(cfg["kick_settled_confirmation_steps"])
+            )
+            trigger_gate = (
+                activation_trigger and settled_trigger
+                if bool(cfg["kick_trigger_requires_settle"])
+                else activation_trigger or settled_trigger
+            )
             trigger = (
                 kick_step < 0
                 and kick_cooldown <= 0
-                and (
-                    float(features["activation"])
-                    >= float(cfg["kick_trigger_threshold"])
-                    or settled_steps >= int(cfg["kick_settled_confirmation_steps"])
-                )
+                and trigger_gate
             )
             current_actor_observation = None
             if capture_trigger_history and kick_step < 0:
@@ -482,7 +527,7 @@ class StrikerCpuEvaluator:
                     else np.zeros(3)
                 )
             else:
-                command = np.asarray(features["command"], dtype=np.float64)
+                command = pre_release_command
             walk_target, walk_action = teacher._stable_walk_target(
                 data, walk_last_action, command
             )

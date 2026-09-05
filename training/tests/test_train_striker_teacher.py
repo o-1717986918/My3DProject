@@ -29,6 +29,7 @@ def test_striker_curriculum_expands_without_changing_stage_order():
 
 def test_t1_striker_curriculum_separates_chase_from_directional_contact():
     chase = STAGES["ball_chase"]
+    release = STAGES["contact_release_2m"]
     kick = STAGES["directional_kick"]
 
     assert chase["robot_distance_range"] == [1.0, 4.0]
@@ -37,6 +38,13 @@ def test_t1_striker_curriculum_separates_chase_from_directional_contact():
     assert kick["kick_prior_enabled"] is True
     assert 0.0 < kick["learned_approach_residual_floor"] < 1.0
     assert kick["robot_distance_range"][1] < chase["robot_distance_range"][1]
+    assert release["target_distance_range"] == [2.0, 2.0]
+    assert release["kick_prior_enabled"] is True
+    assert release["kick_trigger_requires_settle"] is True
+    assert release["kick_settled_planar_speed"] == 0.50
+    assert release["kick_settled_confirmation_steps"] == 2
+    assert release["robot_distance_range"][1] < kick["robot_distance_range"][1]
+    assert release["robot_lateral_range"][1] < kick["robot_lateral_range"][1]
 
 
 def test_striker_parity_gate_requires_matching_verified_backend(tmp_path: Path):

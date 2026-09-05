@@ -54,6 +54,16 @@ def _first_event(event: np.ndarray, horizon: int) -> np.ndarray:
     return np.where(happened, event.argmax(axis=0), horizon)
 
 
+def _apply_optional_trigger_threshold(
+    overrides: dict[str, Any], threshold: float | None
+) -> dict[str, Any]:
+    """Keep the stage contract unless the caller explicitly overrides it."""
+    result = dict(overrides)
+    if threshold is not None:
+        result["kick_trigger_threshold"] = threshold
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("kick_prior_manifest", type=Path)
@@ -73,7 +83,7 @@ def main() -> None:
     parser.add_argument("--num-rollouts", type=int, default=64)
     parser.add_argument("--seed", type=int, default=11_203)
     parser.add_argument("--episode-length", type=int, default=1000)
-    parser.add_argument("--kick-trigger-threshold", type=float, default=1.0)
+    parser.add_argument("--kick-trigger-threshold", type=float)
     parser.add_argument("--fixed-kick-prior-index", type=int, default=-1)
     parser.add_argument(
         "--summary-only",
@@ -84,7 +94,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.num_rollouts < 1 or args.episode_length < 1:
         raise ValueError("rollout count and episode length must be positive")
-    if not 0.0 < args.kick_trigger_threshold <= 1.0:
+    if args.kick_trigger_threshold is not None and not (
+        0.0 < args.kick_trigger_threshold <= 1.0
+    ):
         raise ValueError("kick trigger threshold must be in (0, 1]")
     if not args.output.is_absolute() or args.output.is_relative_to(Path.cwd()):
         raise ValueError("output must be an absolute path outside the repository")
@@ -96,16 +108,15 @@ def main() -> None:
         contract,
         primary_condition_index=args.kick_prior_condition_index,
     )
-    overrides = {
+    overrides = _apply_optional_trigger_threshold({
         **STAGES[args.stage],
         "impl": args.impl,
         "episode_length": args.episode_length,
         "naconmax": max(2048, 16 * args.num_rollouts),
         "fixed_action_mode": 0,
         "fixed_desired_arrival_speed": 0.8,
-        "kick_trigger_threshold": args.kick_trigger_threshold,
         "fixed_kick_prior_index": args.fixed_kick_prior_index,
-    }
+    }, args.kick_trigger_threshold)
     env = LongHorizonStriker(
         config_overrides=overrides,
         contract=contract,
@@ -141,6 +152,8 @@ def main() -> None:
                 candidate.metrics["event/kick_trigger"],
                 candidate.metrics["event/success"],
                 candidate.metrics["cost/fall"],
+                candidate.metrics["cost/miss"],
+                candidate.done,
             ],
             axis=-1,
         ) * active[:, None]
@@ -159,9 +172,11 @@ def main() -> None:
     trigger = events_np[:, :, 1] > 0
     success = events_np[:, :, 2] > 0
     fall = events_np[:, :, 3] > 0
+    miss = events_np[:, :, 4] > 0
+    done_event = events_np[:, :, 5] > 0
     first_success = _first_event(success, args.episode_length)
     first_fall = _first_event(fall, args.episode_length)
-    first_done = np.minimum(first_success, first_fall)
+    first_done = _first_event(done_event, args.episode_length)
     episode_steps = np.where(
         first_done < args.episode_length,
         first_done + 1,
@@ -170,7 +185,9 @@ def main() -> None:
     contacted = contact.any(axis=0)
     triggered = trigger.any(axis=0)
     succeeded = success.any(axis=0)
-    fallen = first_fall < first_success
+    fallen = fall.any(axis=0)
+    missed = miss.any(axis=0)
+    timed_out = done_event.any(axis=0) & ~succeeded & ~fallen & ~missed
     final_contact_distance = np.asarray(
         final_state.metrics["diagnostic/contact_distance"]
     )
@@ -186,12 +203,21 @@ def main() -> None:
     maximum_directional_speed = np.asarray(
         final_state.info["maximum_directional_speed"]
     )
+    final_torso_planar_speed = np.linalg.norm(
+        np.asarray(final_state.data.qvel)[:, env._root_dof : env._root_dof + 2],
+        axis=1,
+    )
+    final_kick_settled_steps = np.asarray(
+        final_state.info["kick_settled_steps"]
+    )
     summary: dict[str, Any] = {
         "rollouts": args.num_rollouts,
         "triggered": int(triggered.sum()),
         "contacted": int(contacted.sum()),
         "succeeded": int(succeeded.sum()),
         "fallen": int(fallen.sum()),
+        "missed": int(missed.sum()),
+        "timed_out": int(timed_out.sum()),
         "trigger_rate": float(triggered.mean()),
         "contact_rate": float(contacted.mean()),
         "success_rate": float(succeeded.mean()),
@@ -205,6 +231,12 @@ def main() -> None:
         ),
         "goal_distance_mean_m": float(
             final_goal_distance.mean()
+        ),
+        "final_torso_planar_speed_mean_mps": float(
+            final_torso_planar_speed.mean()
+        ),
+        "final_torso_planar_speed_max_mps": float(
+            final_torso_planar_speed.max()
         ),
         "gate_passed": bool(
             succeeded.mean() >= 0.90 and not fallen.any()
@@ -233,6 +265,8 @@ def main() -> None:
                 "contacted": bool(contacted[index]),
                 "succeeded": bool(succeeded[index]),
                 "fallen": bool(fallen[index]),
+                "missed": bool(missed[index]),
+                "timed_out": bool(timed_out[index]),
                 "first_trigger_step": int(
                     _first_event(trigger, args.episode_length)[index]
                 ),
@@ -247,6 +281,12 @@ def main() -> None:
                 "final_heading_error_rad": float(final_heading_error[index]),
                 "final_activation": float(final_activation[index]),
                 "final_goal_distance_m": float(final_goal_distance[index]),
+                "final_torso_planar_speed_mps": float(
+                    final_torso_planar_speed[index]
+                ),
+                "final_kick_settled_steps": int(
+                    final_kick_settled_steps[index]
+                ),
             }
         )
     report = {

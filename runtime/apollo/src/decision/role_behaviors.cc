@@ -53,6 +53,14 @@ constexpr double kProceduralDribbleBallLocalYM = 0.04;
 // command switch; this converges near the 0.32 m optimization centre instead
 // of leaving the envelope before the debounce completes.
 constexpr double kProceduralDribbleBallLocalXM = 0.335;
+// Enter the release latch inside +/-20 mm, then permit at most 5 mm of
+// measured one-frame drift while the neutral command removes the remaining
+// gait phase.  The wider motion-layer boundary is backed by a 100/100 exact
+// physics held-out replay over y=[0.015, 0.065] m.
+constexpr double kProceduralDribbleLatchedLateralToleranceM = 0.025;
+constexpr double kProceduralPassBallLocalXM = 0.31;
+constexpr double kProceduralPassBallLocalYM = -0.04;
+constexpr double kProceduralPassBallPositionToleranceM = 0.02;
 // The server walk controller brakes about 2.3 cm long and 2.2 cm low in the
 // narrow strong-kick slot. These are approach set-points only; release is
 // still checked against each anchor's independently validated physical slot.
@@ -86,10 +94,11 @@ constexpr double kKickCooldownS = 0.5;
 // that problem.  A longer 0.60 s hold starved valid passes because normal
 // server yaw sway repeatedly reset the timer.
 constexpr double kKickSetupStableHoldS = 0.25;
-// Five consecutive 50 Hz neutral cycles are sufficient for the standalone
-// runner because it repeats the measured body/joint velocity guards at begin.
-// A longer hold lets residual translational momentum carry the robot through
-// the narrow server-calibrated ball slot before release.
+// Two neutral cycles remove the dynamic walk phase before a static-base kick
+// trajectory starts.  Dribble uses a separately validated 5 mm latch margin
+// so this short hold cannot be lost to ordinary one-frame localization sway.
+// Range-pass retains immediate release until its own expanded pose envelope is
+// independently evaluated; shot/clear keep their calibrated two-cycle hold.
 constexpr double kProceduralKickSetupStableHoldS = 0.04;
 // The deployed walk commonly retains 0.22--0.35 m/s of measured torso motion
 // after entering its neutral command. Requiring less than 0.20 m/s starved
@@ -114,10 +123,24 @@ constexpr double kKickSetupOrientationGain = 3.0;
 constexpr double kKickPreSettleLongitudinalToleranceM = 0.08;
 constexpr double kKickPreSettleLateralToleranceM = 0.08;
 constexpr double kKickPreSettleMaximumYawErrorDeg = 8.0;
+// Runtime traces show that the walk policy may accelerate for one or two
+// frames after a zero-command switch.  Use a conservative measured stopping
+// envelope to start neutral capture before that residual gait phase carries
+// the torso through the centimetre-scale contact slot.
+constexpr double kKickPreSettleEffectiveDecelMps2 = 0.35;
+constexpr double kKickPreSettlePaddingM = 0.05;
+constexpr double kKickPreSettleMaximumDistanceM = 0.45;
+constexpr double kKickPreSettleEntrySpeedMps = 0.25;
+constexpr double kKickPreSettleExitSpeedMps = 0.20;
+constexpr double kKickPreSettleStableHoldS = 0.10;
 // Preserve the original Apollo walk-through-ball behavior as an explicit,
 // observable last resort. It is available only after a sustained near-ball
 // setup attempt and inside this wider contact corridor.
-constexpr double kForwardContactFallbackDelayS = 1.20;
+// Non-pass actions recover the original Apollo contact tempo quickly when
+// precision setup stalls. A targeted pass keeps the longer window because a
+// fixed forward contact is not semantically equivalent to the agreed pass.
+constexpr double kForwardContactFastFallbackDelayS = 0.45;
+constexpr double kForwardContactPassFallbackDelayS = 1.20;
 constexpr double kForwardContactFallbackMinimumBehindM = 0.20;
 constexpr double kForwardContactFallbackMaximumBehindM = 0.60;
 constexpr double kForwardContactFallbackMaximumLateralM = 0.18;
@@ -309,6 +332,8 @@ HighLevelCommand make_dribble_command(
     if (context.state.kick_active_until_s > 0.0) {
         context.state.kick_active_until_s = 0.0;
         context.state.dribble_ready = false;
+        context.state.kick_pre_settling = false;
+        context.state.kick_pre_settle_stable_since_s = 0.0;
         context.state.kick_setup_stable_since_s = 0.0;
         context.state.kick_setup_started_s = 0.0;
         context.state.kick_setup_last_update_s = 0.0;
@@ -340,6 +365,8 @@ HighLevelCommand make_dribble_command(
         context.ball_distance > kDribblePrecisionEntryDistanceM) {
         context.state.kick_setup_started_s = 0.0;
         context.state.kick_setup_stable_since_s = 0.0;
+        context.state.kick_pre_settling = false;
+        context.state.kick_pre_settle_stable_since_s = 0.0;
     }
     if (context.snapshot.ball.position_valid &&
         context.ball_distance <= kDribblePrecisionEntryDistanceM &&
@@ -378,10 +405,19 @@ HighLevelCommand make_dribble_command(
         cooperative_action->category == strategy::ActionCategory::Clear &&
         restart_plan == nullptr &&
         context.snapshot.play_mode == world::PlayMode::PlayOn;
+    const bool use_procedural_range_pass =
+        context.procedural_kick_enabled && cooperative_action != nullptr &&
+        cooperative_action->category == strategy::ActionCategory::Pass &&
+        cooperative_action->requested_ball_speed_mps >
+            decision::kick_contract::kParameterizedPassRequestedSpeedMps +
+                0.20 &&
+        restart_plan == nullptr &&
+        context.snapshot.play_mode == world::PlayMode::PlayOn;
     const bool use_procedural_strong_kick =
         use_procedural_shot || use_procedural_clear;
     const bool use_procedural_kick =
-        use_procedural_dribble || use_procedural_strong_kick;
+        use_procedural_dribble || use_procedural_range_pass ||
+        use_procedural_strong_kick;
     const char* kick_mode = cooperative_action == nullptr
         ? (restart_plan == nullptr ? "forward" : "restart")
         : cooperative_action->category == strategy::ActionCategory::Pass
@@ -400,7 +436,16 @@ HighLevelCommand make_dribble_command(
     double lateral_tolerance_m = kKickSetupLateralToleranceM;
     double procedural_max_orientation_error_deg =
         decision::kick_contract::kProceduralDribbleMaximumTargetAngleDeg;
-    if (use_procedural_clear) {
+    if (use_procedural_range_pass) {
+        contact_behind_m = kProceduralPassBallLocalXM;
+        command_behind_m = kProceduralPassBallLocalXM;
+        release_ball_local_y_m = kProceduralPassBallLocalYM;
+        command_ball_local_y_m = kProceduralPassBallLocalYM;
+        longitudinal_tolerance_m = kProceduralPassBallPositionToleranceM;
+        lateral_tolerance_m = kProceduralPassBallPositionToleranceM;
+        procedural_max_orientation_error_deg =
+            decision::kick_contract::kParameterizedPassMaximumTargetAngleDeg;
+    } else if (use_procedural_clear) {
         contact_behind_m =
             decision::kick_contract::kProceduralClearBallLocalXM;
         command_behind_m = kProceduralStrongKickCommandBehindM;
@@ -460,6 +505,13 @@ HighLevelCommand make_dribble_command(
         std::abs(behind_distance - contact_behind_m) <=
             longitudinal_tolerance_m &&
         std::abs(release_lateral_error) <= lateral_tolerance_m;
+    const bool latched_position_ready =
+        position_ready ||
+        (use_procedural_dribble && context.state.dribble_ready &&
+         std::abs(behind_distance - contact_behind_m) <=
+             longitudinal_tolerance_m &&
+         std::abs(release_lateral_error) <=
+             kProceduralDribbleLatchedLateralToleranceM);
     const double required_orientation_error_deg = use_procedural_kick
         ? procedural_max_orientation_error_deg
         : kKickMaxOrientationErrorDeg;
@@ -490,12 +542,23 @@ HighLevelCommand make_dribble_command(
         lateral_offset <= kForwardContactFallbackMaximumLateralM &&
         orientation_error_deg <= kForwardContactFallbackMaximumYawErrorDeg &&
         planar_speed_mps <= kForwardContactFallbackMaximumPlanarSpeedMps;
+    const bool is_targeted_pass =
+        cooperative_action != nullptr &&
+        cooperative_action->category == strategy::ActionCategory::Pass;
+    const double fallback_delay_s = is_targeted_pass
+        ? kForwardContactPassFallbackDelayS
+        : kForwardContactFastFallbackDelayS;
     const bool fallback_due =
         context.state.kick_setup_started_s > 0.0 &&
         now - context.state.kick_setup_started_s >=
-            kForwardContactFallbackDelayS;
+            fallback_delay_s;
     const bool fallback_allowed =
+        // Never let a timeout pre-empt an exact procedural release slot. The
+        // controlled 0.45 s run reached 14.7 mm longitudinal and 0.5 mm
+        // lateral error, but the old ordering emitted fallback before the
+        // readiness latch could enter its short neutral debounce.
         allow_kick && fallback_due && fallback_contact_pose &&
+        !(use_procedural_kick && position_ready) &&
         now >= context.state.next_kick_allowed_s;
     const auto make_fallback_command = [&]() {
         trace_setup_gate(8, "fallback-forward-contact");
@@ -542,7 +605,7 @@ HighLevelCommand make_dribble_command(
         lateral_offset <= kDribbleMaxLateralOffsetM &&
         context.ball_distance <= field_geometry::kPushBallEngageDistanceM;
     if (context.state.dribble_ready &&
-        (!push_position_valid || !position_ready)) {
+        (!push_position_valid || !latched_position_ready)) {
         context.state.dribble_ready = false;
         context.state.kick_setup_stable_since_s = 0.0;
     }
@@ -551,19 +614,46 @@ HighLevelCommand make_dribble_command(
         if (fallback_allowed) {
             return make_fallback_command();
         }
+        if (use_procedural_kick && context.state.kick_pre_settling) {
+            if (planar_speed_mps > kKickPreSettleExitSpeedMps) {
+                context.state.kick_pre_settle_stable_since_s = 0.0;
+                trace_setup_gate(9, "pre-settle");
+                return NeutralCommand{};
+            }
+            if (context.state.kick_pre_settle_stable_since_s <= 0.0) {
+                context.state.kick_pre_settle_stable_since_s = now;
+            }
+            if (now - context.state.kick_pre_settle_stable_since_s <
+                kKickPreSettleStableHoldS) {
+                trace_setup_gate(9, "pre-settle");
+                return NeutralCommand{};
+            }
+            context.state.kick_pre_settling = false;
+            context.state.kick_pre_settle_stable_since_s = 0.0;
+        }
+        const double speed_aware_stopping_distance_m = std::clamp(
+            planar_speed_mps * planar_speed_mps /
+                    (2.0 * kKickPreSettleEffectiveDecelMps2) +
+                kKickPreSettlePaddingM,
+            kKickPreSettleLongitudinalToleranceM,
+            kKickPreSettleMaximumDistanceM);
         const bool near_release_slot =
-            std::abs(behind_distance - contact_behind_m) <=
-                kKickPreSettleLongitudinalToleranceM &&
+            behind_distance - contact_behind_m >=
+                -kKickPreSettleLongitudinalToleranceM &&
+            behind_distance - contact_behind_m <=
+                speed_aware_stopping_distance_m &&
             std::abs(command_lateral_error) <=
                 kKickPreSettleLateralToleranceM &&
             orientation_error_deg <= kKickPreSettleMaximumYawErrorDeg;
         if (use_procedural_kick && near_release_slot &&
-            planar_speed_mps > kKickSetupMaximumPlanarSpeedMps) {
+            planar_speed_mps > kKickPreSettleEntrySpeedMps) {
             // The previous controller waited for the centimetre-scale slot
             // before braking.  Natural play then crossed the slot at roughly
             // 0.7--0.8 m/s and never satisfied the release debounce.  Start
             // neutral capture in a bounded pre-slot corridor, then resume
             // precision positioning once the body is slow enough.
+            context.state.kick_pre_settling = true;
+            context.state.kick_pre_settle_stable_since_s = 0.0;
             trace_setup_gate(9, "pre-settle");
             return NeutralCommand{};
         }
@@ -622,7 +712,7 @@ HighLevelCommand make_dribble_command(
     }
 
     const bool contact_state_stable =
-        context.snapshot.ball.position_valid && position_ready &&
+        context.snapshot.ball.position_valid && latched_position_ready &&
         orientation_error_deg <= required_orientation_error_deg &&
         planar_speed_mps <= kKickSetupMaximumPlanarSpeedMps;
     if (contact_state_stable) {
@@ -635,9 +725,11 @@ HighLevelCommand make_dribble_command(
     const bool contact_state_confirmed =
         context.state.kick_setup_stable_since_s > 0.0 &&
         now - context.state.kick_setup_stable_since_s >=
-            (use_procedural_kick
-                ? kProceduralKickSetupStableHoldS
-                : kKickSetupStableHoldS);
+            (use_procedural_range_pass
+                ? 0.0
+                : use_procedural_kick
+                    ? kProceduralKickSetupStableHoldS
+                    : kKickSetupStableHoldS);
     const bool legal_kick =
         (context.snapshot.play_mode == world::PlayMode::PlayOn ||
          context.snapshot.play_mode_group == world::PlayModeGroup::OurKick) &&
@@ -665,6 +757,8 @@ HighLevelCommand make_dribble_command(
     }
     if (legal_kick) {
         trace_setup_gate(5, "release");
+        context.state.kick_pre_settling = false;
+        context.state.kick_pre_settle_stable_since_s = 0.0;
         context.state.kick_active_until_s = now + kKickDurationS;
         context.state.next_kick_allowed_s =
             context.state.kick_active_until_s + kKickCooldownS;
@@ -938,6 +1032,8 @@ void APBehavior::apply_execution_feedback(
     state_.active_kick_command.reset();
     state_.kick_active_until_s = 0.0;
     state_.dribble_ready = false;
+    state_.kick_pre_settling = false;
+    state_.kick_pre_settle_stable_since_s = 0.0;
     state_.kick_setup_stable_since_s = 0.0;
     if (matching_pass) {
         state_.pass_commit_until_s = 0.0;
@@ -1031,6 +1127,19 @@ HighLevelCommand APBehavior::make_command(
             : strategy::build_tactical_state(snapshot);
         strategy::PlanningResult plan = action_planner_.plan(
             snapshot, capabilities, enable_pass_strategy, tactical_state);
+        const double planar_speed_mps = math::norm2({
+            snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]});
+        constexpr double kSpecialistSetupMaximumBallDistanceM = 0.65;
+        constexpr double kSpecialistSetupMaximumSpeedMps = 0.35;
+        constexpr double kSpecialistMinimumOpponentEtaS = 1.0;
+        const bool controlled_specialist_setup =
+            context.ball_distance <= kSpecialistSetupMaximumBallDistanceM &&
+            planar_speed_mps <= kSpecialistSetupMaximumSpeedMps &&
+            tactical_state.possession == strategy::PossessionOwner::Ours &&
+            tactical_state.ball_owner_is_teammate &&
+            tactical_state.ball_owner_player_number == snapshot.player_number &&
+            tactical_state.nearest_opponent_ball_time_s >=
+                kSpecialistMinimumOpponentEtaS;
         if (plan.selected.has_value() &&
             plan.selected->category == strategy::ActionCategory::Pass &&
             snapshot.server_time < state_.pass_retry_after_s) {
@@ -1066,6 +1175,7 @@ HighLevelCommand APBehavior::make_command(
             lifecycle_state == comm::PassIntentState::Committed;
         if (state_.committed_pass.has_value() && awaiting_release &&
             (snapshot.server_time >= state_.pass_commit_until_s ||
+             !controlled_specialist_setup ||
              !pass_commit_is_valid(
                  snapshot, *state_.committed_pass, capabilities))) {
             state_.pass_lifecycle.cancel(snapshot.server_time);
@@ -1104,13 +1214,13 @@ HighLevelCommand APBehavior::make_command(
                 true, true, RoleManager::ROLE_AP);
         }
 
-        constexpr double kPassPlanningEngageDistanceM = 2.5;
         constexpr double kPassCommitDurationS = 6.0;
         if (!state_.committed_pass.has_value() && plan.selected.has_value() &&
             plan.selected->category == strategy::ActionCategory::Pass &&
             snapshot.server_time >= state_.pass_retry_after_s &&
+            controlled_specialist_setup &&
             capabilities.supported(*plan.selected) &&
-            context.ball_distance <= kPassPlanningEngageDistanceM) {
+            context.ball_distance <= kSpecialistSetupMaximumBallDistanceM) {
             strategy::CooperativeAction committed = *plan.selected;
             state_.next_pass_sequence_id = static_cast<std::uint8_t>(
                 state_.next_pass_sequence_id + 1U);
@@ -1165,7 +1275,7 @@ HighLevelCommand APBehavior::make_command(
         }
         if (plan.selected.has_value() &&
             plan.selected->category != strategy::ActionCategory::Pass &&
-            context.ball_distance <= kPassPlanningEngageDistanceM) {
+            controlled_specialist_setup) {
             const auto target_direction = math::vec2_sub(
                 plan.selected->target_point_m, context.ball);
             if (math::norm2(target_direction) > 1.0e-6) {
@@ -1178,6 +1288,11 @@ HighLevelCommand APBehavior::make_command(
                     context, direction_deg, &*plan.selected);
             }
         }
+        // No calm, self-owned release opportunity exists. Keep the action
+        // proposal in telemetry, but execute the original Apollo contact path
+        // below. This preserves ball-chase tempo under pressure instead of
+        // starting a centimetre-scale setup several metres from the ball.
+        context.procedural_kick_enabled = false;
     } else {
         if (state_.pass_lifecycle.active() &&
             !state_.pass_lifecycle.terminal()) {
@@ -1428,6 +1543,19 @@ HighLevelCommand GKBehavior::make_command(
                 clearance_context, 0.0, nullptr, true,
                 RoleManager::ROLE_GK);
         }
+
+        // Inside the last-line body-block radius, walking or turning to set
+        // up a clear is worse than remaining upright. A real match emergency
+        // ForwardContact moved the ball only 0.14 m, toppled the keeper, and
+        // conceded. Hold the blocking pose until the ball leaves this radius
+        // or a contact action was already committed above.
+        constexpr double kGoalkeeperBodyBlockDistanceM = 0.45;
+        if (context.ball[0] <=
+                -field_geometry::kActualHalfLengthM + 1.0 &&
+            context.ball_distance <= kGoalkeeperBodyBlockDistanceM) {
+            return NeutralCommand{};
+        }
+
         const strategy::ActionCapabilityRegistry capabilities(
             enable_targeted_kick);
         const strategy::TacticalState tactical_state = blackboard.exists(
@@ -1438,7 +1566,10 @@ HighLevelCommand GKBehavior::make_command(
         const strategy::PlanningResult plan = action_planner_.plan(
             snapshot, capabilities, false, tactical_state);
         blackboard.set(Blackboard::kKeyStrategyPlan, plan);
-        constexpr double kGoalkeeperClearEngageDistanceM = 2.5;
+        // First close down the goal-bound ball. Starting the centimetre-scale
+        // clear setup from metres away made the keeper stop defending while
+        // an opponent walked the ball over the line.
+        constexpr double kGoalkeeperClearEngageDistanceM = 0.55;
         if (plan.selected.has_value() &&
             plan.selected->category == strategy::ActionCategory::Clear &&
             capabilities.supported(*plan.selected) &&

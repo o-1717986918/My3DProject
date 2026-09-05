@@ -177,6 +177,59 @@ int main() {
         return 1;
     }
 
+    goalkeeper.ball.position_m = {-27.35, 1.0, 0.11};
+    goalkeeper.self.position_m = {-27.0, 0.0, 0.8};
+    goalkeeper.opponents = {player(1, -27.2, 1.0, false)};
+    const auto emergency_smother = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (emergency_smother.duty !=
+        decision::TacticalDuty::GoalkeeperSmother) {
+        std::cerr << "goalkeeper yielded an imminent goal-mouth challenge\n";
+        return 1;
+    }
+
+    // Regression from the 2026-12-17 comparison: the attacker carried the
+    // ball 36 cm outside the post at y=2.19 m, then cut inside before the old
+    // emergency corridor armed. Once the keeper has taken its angular cover
+    // position this must be treated as an imminent goal-mouth challenge.
+    goalkeeper.ball.position_m = {-27.0, 2.19, 0.11};
+    goalkeeper.self.position_m = {-27.0, 1.15, 0.8};
+    goalkeeper.opponents = {player(1, -27.0, 2.19, false)};
+    const auto outside_post_smother = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (outside_post_smother.duty !=
+        decision::TacticalDuty::GoalkeeperSmother) {
+        std::cerr << "goalkeeper waited too long on an outside-post carry\n";
+        return 1;
+    }
+
+    // Regression from the 2026-12-24 comparison: at this exact geometry the
+    // old 1.5 m depth gate held the keeper on its cover arc for another 360
+    // cycles.  It only challenged one sample before the goal.  The target is
+    // still inside the goalkeeper area and the keeper can reach it, so the
+    // emergency claim must begin now even when the opponent is ball-side.
+    goalkeeper.ball.position_m = {-25.80, 2.21, 0.11};
+    goalkeeper.self.position_m = {-26.86, 0.89, 0.8};
+    goalkeeper.opponents = {player(3, -25.80, 2.21, false)};
+    const auto early_goal_mouth_smother = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (early_goal_mouth_smother.duty !=
+        decision::TacticalDuty::GoalkeeperSmother) {
+        std::cerr << "goalkeeper repeated the late 2026-12-24 challenge\n";
+        return 1;
+    }
+
+    goalkeeper.ball.position_m = {-23.0, 5.0, 0.11};
+    goalkeeper.self.position_m = {-27.0, 0.0, 0.8};
+    goalkeeper.opponents.clear();
+    const auto angular_hold = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (angular_hold.duty != decision::TacticalDuty::GoalkeeperHold ||
+        angular_hold.position_m[1] < 0.70) {
+        std::cerr << "goalkeeper hold did not cover the near-post angle\n";
+        return 1;
+    }
+
     world::WorldSnapshot stopped = attack;
     stopped.play_mode = world::PlayMode::TheirFreeKick;
     const auto formation = tactics.plan(
@@ -323,13 +376,24 @@ int main() {
     stale_ball.ball.visible = false;
     stale_ball.ball.position_age_s = 0.76;
     const auto stale_plan = tactics.plan_all(stale_ball, roles);
-    if (stale_plan.fresh || stale_plan.revision == 0U || std::any_of(
-            stale_plan.assignments.begin(), stale_plan.assignments.end(),
-            [](const decision::TeamTacticalAssignment& assignment) {
-                return assignment.target.duty !=
-                    decision::TacticalDuty::Formation;
-            })) {
-        std::cerr << "stale ball leaked into a full-team tactical plan\n";
+    const auto* stale_keeper = stale_plan.for_role(
+        decision::RoleManager::ROLE_GK);
+    const bool field_player_left_shape = std::any_of(
+        stale_plan.assignments.begin(), stale_plan.assignments.end(),
+        [](const decision::TeamTacticalAssignment& assignment) {
+            return assignment.role_id != decision::RoleManager::ROLE_GK &&
+                assignment.target.duty != decision::TacticalDuty::Formation;
+        });
+    if (stale_plan.fresh || stale_plan.revision == 0U ||
+        field_player_left_shape || stale_keeper == nullptr ||
+        stale_keeper->target.duty !=
+            decision::TacticalDuty::GoalkeeperHold ||
+        std::abs(
+            stale_keeper->target.position_m[0] -
+            (-decision::field_geometry::kActualHalfLengthM +
+             decision::field_geometry::kGkHoldDepthM)) > 1.0e-9 ||
+        std::abs(stale_keeper->target.position_m[1]) > 1.0e-9) {
+        std::cerr << "stale ball did not produce the safe goalkeeper hold\n";
         return 1;
     }
     return 0;

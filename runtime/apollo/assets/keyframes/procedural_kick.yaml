@@ -9,13 +9,17 @@ anchors:
     target_distance_m: 0.55
     target_distance_tolerance_m: 0.10
     target_angle_deg: 0.0
-    target_angle_tolerance_deg: 1.0
+    # Dribble-only release envelope: at 0.55 m, 6 deg is about 5.8 cm of
+    # directional error. Pass, shot, and clear anchors remain stricter.
+    target_angle_tolerance_deg: 6.0
     requested_speed_mps: 0.90
     requested_speed_tolerance_mps: 0.05
     ball_local_x_m: 0.32
     ball_local_y_m: 0.04
     ball_x_tolerance_m: 0.02
-    ball_y_tolerance_m: 0.02
+    # The decision layer still releases inside +/-0.020 m.  The extra 5 mm is
+    # a measured one-frame dispatch margin between decision and motion.
+    ball_y_tolerance_m: 0.025
     kp: 150.0
     kd: 1.0
     base_pose: neutral
@@ -42,10 +46,12 @@ anchors:
       nominal_peak_speed_mps: 0.8727516427362522
       nominal_minimum_torso_height_m: 0.6466808629361646
       nominal_minimum_upright: 0.9706140903135335
-      heldout_trials: 20
-      heldout_successes: 20
+      heldout_ball_x_offset_range_m: [-0.020, 0.020]
+      heldout_ball_y_offset_range_m: [0.015, 0.065]
+      heldout_trials: 100
+      heldout_successes: 100
       training_manifest_sha256: 010b8a1bafad57ad78ee3581de0f542815f39a27dd8e0188fc42172a69539463
-      heldout_manifest_sha256: 327a74a43f54d8a74c5deacd8ea225da2afebcee9e61b0385a3f87b79eee80f6
+      heldout_manifest_sha256: 27bfba114fcda8ef495a541ffa37c91fac5bdfebecf23374580b12bf2982ee5b
       server_status: contact_observed
   - name: right_shot_4m_v1
     mode: shot
@@ -153,3 +159,87 @@ anchors:
       server_decision_samples: 13
       server_contact_events: 1
       server_ordered_log_set_sha256: 31425062b99a3711a393286d47bc455d300d7b23aaab9f279f4897caf2560c7b
+  - name: right_pass_3p5m_experimental_v1
+    mode: pass
+    target_distance_m: 3.5
+    target_distance_tolerance_m: 0.75
+    target_angle_deg: 0.0
+    target_angle_tolerance_deg: 2.0
+    requested_speed_mps: 2.20
+    requested_speed_tolerance_mps: 0.20
+    ball_local_x_m: 0.31
+    ball_local_y_m: -0.04
+    ball_x_tolerance_m: 0.02
+    ball_y_tolerance_m: 0.02
+    kp: 150.0
+    kd: 1.0
+    base_pose: neutral
+    kicking_foot: right
+    key_times_s: [0.0, 0.18, 0.34, 0.54, 0.76, 1.20]
+    parameters:
+      - -0.08410323447625498
+      - -0.021811002164689904
+      - 0.3498902409244769
+      - 0.4428462538429489
+      - 0.10083392451200629
+      - -0.6402743915756124
+      - 0.2580889399020736
+      - -0.2638257260987846
+      - 0.036502657321147484
+      - -0.11159670360396745
+      - 0.2367357226849713
+      - -0.278101716344015
+      - 0.16494286465333582
+      - 0.036035461421890444
+    evidence:
+      simulator: exact_mujoco_rcssservermj_assets
+      nominal_progress_m: 3.5517633934026462
+      nominal_lateral_error_m: 0.02566001760262913
+      nominal_arrival_speed_error_mps: 0.12332005045234018
+      nominal_minimum_torso_height_m: 0.6097721690461767
+      nominal_minimum_upright: 0.9932264461935759
+      heldout_status: not_run
+      server_status: not_run
+      training_manifest_sha256: bc91b2fd16d9c99d19e53517381a18a24d68965c50b35332195feb76ac6102b3
+  - name: right_pass_5m_experimental_v1
+    mode: pass
+    target_distance_m: 5.0
+    target_distance_tolerance_m: 0.75
+    target_angle_deg: 0.0
+    target_angle_tolerance_deg: 2.0
+    requested_speed_mps: 3.00
+    requested_speed_tolerance_mps: 0.20
+    ball_local_x_m: 0.31
+    ball_local_y_m: -0.04
+    ball_x_tolerance_m: 0.02
+    ball_y_tolerance_m: 0.02
+    kp: 150.0
+    kd: 1.0
+    base_pose: neutral
+    kicking_foot: right
+    key_times_s: [0.0, 0.18, 0.34, 0.54, 0.76, 1.20]
+    parameters:
+      - 0.015691192537934398
+      - 0.03630610836727967
+      - 0.23530446841805178
+      - 0.3927212737966278
+      - -0.4407029272644398
+      - -0.6250476576026497
+      - 0.11328020659779162
+      - -0.4155086226689468
+      - -0.20642849397885618
+      - -0.08489980401674418
+      - 0.0438223986220482
+      - -0.03203267710769589
+      - -0.03687013491558312
+      - -0.31544885481399254
+    evidence:
+      simulator: exact_mujoco_rcssservermj_assets
+      nominal_progress_m: 4.970255398362303
+      nominal_lateral_error_m: 0.0420384513799531
+      nominal_arrival_speed_error_mps: 0.2672508381872887
+      nominal_minimum_torso_height_m: 0.6163349053378362
+      nominal_minimum_upright: 0.995002409974648
+      heldout_status: not_run
+      server_status: not_run
+      training_manifest_sha256: 3ccee26b2e00510d4f06e433f2cc7a64742ebdc78de0c976ade5b176d1fb758a

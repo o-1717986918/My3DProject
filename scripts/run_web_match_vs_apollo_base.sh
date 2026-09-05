@@ -143,7 +143,11 @@ esac
 learned_kick_mode=${APOLLO_LEARNED_KICK_MODE:-}
 if [[ -z "$learned_kick_mode" ]]; then
     if [[ "$parameterized_kick_mode" == 1 ]]; then
-        learned_kick_mode=active
+        # The retained v3 actor is useful for inference telemetry but has not
+        # beaten the deterministic 2 m action on frozen execution trials.
+        # Keep it loaded in shadow mode so it cannot mask the stronger action
+        # bank during the developed-versus-pristine comparison.
+        learned_kick_mode=shadow
     else
         learned_kick_mode=off
     fi

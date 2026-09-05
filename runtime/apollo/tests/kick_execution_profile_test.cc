@@ -19,12 +19,15 @@ world::WorldSnapshot make_snapshot() {
     return snapshot;
 }
 
-decision::KickCommand make_targeted(double speed, double angle_deg) {
+decision::KickCommand make_targeted(
+    double speed,
+    double angle_deg,
+    double distance_m = 2.0) {
     decision::KickCommand command;
     const double angle_rad = angle_deg * 3.14159265358979323846 / 180.0;
     command.target_point_m = std::array<double, 2>{
-        1.0 + 2.0 * std::cos(angle_rad),
-        2.0 + 2.0 * std::sin(angle_rad),
+        1.0 + distance_m * std::cos(angle_rad),
+        2.0 + distance_m * std::sin(angle_rad),
     };
     command.requested_ball_speed_mps = speed;
     command.mode = decision::KickMode::TargetedPass;
@@ -94,6 +97,17 @@ int main() {
         std::cerr << "validated pass profile was not accepted\n";
         return 1;
     }
+    const auto medium_pass = behavior::make_kick_execution_profile(
+        snapshot, make_targeted(2.20, 0.0, 3.5), true);
+    const auto long_pass = behavior::make_kick_execution_profile(
+        snapshot, make_targeted(3.00, 0.0, 5.0), true);
+    if (medium_pass.kind != behavior::KickProfileKind::ParameterizedContact ||
+        long_pass.kind != behavior::KickProfileKind::ParameterizedContact ||
+        !near(medium_pass.target_distance_m, 3.5) ||
+        !near(long_pass.target_distance_m, 5.0)) {
+        std::cerr << "distance-conditioned pass profiles were rejected\n";
+        return 1;
+    }
 
     const auto dribble = behavior::make_kick_execution_profile(
         snapshot, make_dribble(), true);
@@ -148,9 +162,9 @@ int main() {
     const auto outside_speed = behavior::make_kick_execution_profile(
         snapshot, make_targeted(3.01, 0.0), true);
     const auto unsupported_pass_speed = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(1.42, 0.0), true);
+        snapshot, make_targeted(1.22, 0.0), true);
     const auto outside_dribble_angle = behavior::make_kick_execution_profile(
-        snapshot, make_dribble(3.01), true);
+        snapshot, make_dribble(6.01), true);
     const auto outside_shot_angle = behavior::make_kick_execution_profile(
         snapshot, make_shot(4.0, 1.01), true);
     const auto outside_shot_distance = behavior::make_kick_execution_profile(

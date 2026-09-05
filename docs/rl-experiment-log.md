@@ -1463,3 +1463,74 @@ training-schedule code now chooses an evaluation count that divides the epoch
 budget and records requested/effective values separately. The immutable old
 manifest is not rewritten; its discrepancy and hashes are preserved in
 `training/locks/lateral_expert_2026_09_05.yaml`.
+
+## Long-horizon chase, directional kick and range bank — 2026-09-05
+
+The `ball_chase-s20261204-v1` stage completed exactly 2,097,152 steps with no
+falls in 128 independent rollouts. The analytic Apollo approach already ended
+at a median contact distance of `0.06950 m`; the checkpoint changed this only
+to `0.06926 m`. It is retained as a stable training initializer, not mounted as
+a separate runtime skill.
+
+`directional-kick-s20261206-v1` restored that checkpoint and trained for exactly
+4,194,304 steps over targets from 2--5 m and +/-30 degrees while using only the
+2 m contact prior. On seed 20261207 the zero residual scored 15/128, the
+2,097,152-step checkpoint 17/128, and the final checkpoint 14/128; both learned
+candidates had one fall. This experiment is rejected because the task asked one
+trajectory to cover physically different kick ranges.
+
+Selecting existing 2, 3.5 and 5 m teachers by nearest requested distance raised
+the same zero-residual evaluation to 49/128 without a fall. A second
+4,194,304-step run, `directional-kick-bank-s20261208-v1`, was evaluated at its
+best-looking 1,572,864-step checkpoint on three independent seeds. The action
+bank scored `49/36/33`; bank plus learned residual scored `52/39/31`. Aggregate
+success was therefore 118/384 (30.73%) versus 122/384 (31.77%). The 1.04-point
+gain is not robust because the third seed regressed, so the learned residual is
+rejected and the deterministic bank is integrated first.
+
+The evaluator now records the simulator's actual terminal signal, misses and
+timeouts when calculating episode length. This corrects reporting only; contact
+and success counts above are unchanged. Full paths, seeds and hashes are frozen
+in `training/locks/striker_range_bank_2026_09_05.yaml`.
+
+## Narrow 2 m release and evaluator-contract repair — 2026-09-06
+
+Two 2,097,152-step continuations tested whether a small PPO residual could
+improve the existing 2 m prior without also learning the complete 2--5 m
+problem. The first run, `contact-release-2m-s20261226-v1`, scored 18/128 at its
+independently replayed midpoint versus 19/128 for the zero residual. It reduced
+falls from six to four but did not improve task success. The second run,
+`contact-release-2m-settled-s20261227-v1`, explicitly required a low-speed
+release dwell; its final training batch scored 12/64 and was also not promoted.
+
+Investigation found that the accelerated evaluator's optional
+`--kick-trigger-threshold` argument defaulted to `1.0` and unconditionally
+overrode the stage's declared `0.8`. Reports made without an explicit argument
+therefore evaluated a different trigger contract from training. The default is
+now unset, so the stage owns the threshold. The release controller also stops
+translation only after entering the actual activation envelope, preserves yaw
+alignment, and uses the runtime-matched `0.50 m/s` and two-cycle dwell. The
+evaluator now records terminal torso speed and settled-step state, making this
+failure mode directly inspectable.
+
+Under the repaired contract and identical seed 20261228, the deterministic
+prior triggers and contacts in 125/128 rollouts, succeeds in 24/128 and falls in
+two. The best-looking settled checkpoint triggers and contacts in the same
+125/128, succeeds in 21/128 and also falls in two. It is a 2.34 percentage-point
+regression, so neither PPO run is mounted. The useful result is the repaired
+approach-to-release data path, not a new model. The next learned candidate must
+start from successful-trajectory BC/DAgger and explicitly learn the transition,
+rather than repeating PPO on a weakly informative residual. Exact hashes and
+the invalidated-report boundary are frozen in
+`training/locks/contact_release_2m_2026_09_06.yaml`.
+
+The subsequent full comparison at
+`/home/win98/rl_runs/apollo-vs-base-nearpost-telemetry-s20261229-v1` ended
+`My3D-Current 0 - 0 Apollo-Base`. Current incurred no illegal-defense penalty;
+base incurred one. The corrected motion provenance reported 90 fallback status
+samples across Forward/Hold/Stabilize, while exact procedural kick samples
+remained zero. This is evidence that explicit fail-soft contact is active and
+observable, but that the server-side exact release transition is still the
+main action-integration defect. The goalkeeper stayed in Hold because no
+near-post challenge situation occurred, so that branch remains unit-tested but
+not server-exercised by this match.

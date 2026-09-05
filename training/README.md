@@ -378,9 +378,14 @@ PYTHONPATH=training python training/tools/export_kick_residual_table.py \
   --output runtime/apollo/assets/keyframes/kick_residual_table.yaml
 ```
 
-The checked-in 15-node table is experimental and defaults off. It may be
-exercised with `--enable-parameterized-kick`; the C++ runner accepts only its
-measured 2 m forward-pass envelope and otherwise uses the stable fallback.
+The checked-in dense residual table remains the 2 m forward-pass executor. In
+addition, the source-tree runtime now has discrete 3.5 m and 5 m procedural
+teacher anchors selected by target distance and requested speed. The two longer
+anchors have nominal exact-physics evidence but no held-out/server promotion,
+so they remain experimental and fail closed outside their declared envelopes.
+The unpromoted ONNX actor is loaded in shadow mode for developed-versus-base
+comparisons; set `APOLLO_LEARNED_KICK_MODE=active` only for a controlled model
+A/B experiment.
 
 Exercise one real PPO training/checkpoint path (integration test only):
 
