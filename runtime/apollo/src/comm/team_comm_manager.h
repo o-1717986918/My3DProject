@@ -43,7 +43,6 @@ private:
     std::unordered_map<int, TeamCommRecord> records_;
     std::unordered_map<int, PassIntentRecord> pass_intents_;
     mutable std::optional<ReadyGateState> ready_gate_state_;
-    mutable bool sent_pass_intent_last_slot_{false};
 };
 
 }  // namespace comm

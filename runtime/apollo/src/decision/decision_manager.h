@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "src/comm/team_comm_types.h"
 #include "src/decision/behavior_tree.h"
 #include "src/decision/blackboard.h"
 #include "src/decision/execution_feedback.h"
@@ -29,6 +30,7 @@ public:
     const Blackboard& blackboard() const;
     const strategy::PlanningResult* strategy_plan() const;
     const strategy::CooperativeAction* selected_cooperative_action() const;
+    const comm::OutgoingPassIntent* outgoing_pass_intent() const;
 
 private:
     Blackboard blackboard_;

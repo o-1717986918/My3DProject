@@ -56,6 +56,7 @@ private:
         behavior::SkillExecutionStatus::Running};
     std::uint64_t next_execution_request_id_{1U};
     std::optional<decision::ExecutionFeedback> pending_execution_feedback_;
+    std::uint64_t last_decision_latency_us_{0U};
 };
 
 }  // namespace app

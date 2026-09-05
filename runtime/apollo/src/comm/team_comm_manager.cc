@@ -54,11 +54,16 @@ TeamCommPacket TeamCommManager::make_packet(
     packet.sender_player_number = static_cast<std::uint8_t>(snapshot.player_number);
     if (outgoing_pass.has_value()) {
         packet.kind = TeamCommPacketKind::PassIntent;
-        packet.pass_intent_state = PassIntentState::Proposed;
-        packet.pass_intent_author = PassIntentAuthor::Passer;
+        packet.pass_intent_state = outgoing_pass->state;
+        packet.pass_intent_author = outgoing_pass->author;
         packet.pass_peer_player_number = static_cast<std::uint8_t>(
-            outgoing_pass->receiver_player_number);
-        packet.passer_player_number = static_cast<std::uint8_t>(snapshot.player_number);
+            outgoing_pass->author == PassIntentAuthor::Passer
+                ? outgoing_pass->receiver_player_number
+                : outgoing_pass->passer_player_number);
+        packet.passer_player_number = static_cast<std::uint8_t>(
+            outgoing_pass->passer_player_number > 0
+                ? outgoing_pass->passer_player_number
+                : snapshot.player_number);
         packet.receiver_player_number = static_cast<std::uint8_t>(
             outgoing_pass->receiver_player_number);
         packet.pass_sequence_id = outgoing_pass->sequence_id;
@@ -71,7 +76,15 @@ TeamCommPacket TeamCommManager::make_packet(
 
     const PassIntentRecord* proposed = nullptr;
     for (const auto& intent : snapshot.team_comm_snapshot.pass_intents) {
-        if (intent.state != PassIntentState::Proposed ||
+        const bool active_passer_state =
+            intent.state == PassIntentState::Proposed ||
+            intent.state == PassIntentState::Committed ||
+            intent.state == PassIntentState::Commanded ||
+            intent.state == PassIntentState::Executed ||
+            intent.state == PassIntentState::ReceiverZone;
+        if (!active_passer_state ||
+            intent.author != PassIntentAuthor::Passer ||
+            intent.sender_player_number != intent.passer_player_number ||
             intent.receiver_player_number != snapshot.player_number) {
             continue;
         }
@@ -100,10 +113,66 @@ TeamCommPacket TeamCommManager::make_packet(
             std::abs(math::normalize_deg(ball_heading_deg - yaw_deg)) <= 25.0 &&
             planar_speed_mps <= 0.35;
     }
+    constexpr double kReadyStableDwellS = 0.30;
+    bool ready_dwell_confirmed = false;
     if (proposed != nullptr && receiver_ready &&
+        proposed->state == PassIntentState::Proposed) {
+        const bool same_gate = ready_gate_state_.has_value() &&
+            ready_gate_state_->passer_player_number ==
+                proposed->passer_player_number &&
+            ready_gate_state_->receiver_player_number ==
+                proposed->receiver_player_number &&
+            ready_gate_state_->sequence_id == proposed->sequence_id &&
+            std::abs(ready_gate_state_->target_x_m - proposed->target_x_m) <=
+                0.05 &&
+            std::abs(ready_gate_state_->target_y_m - proposed->target_y_m) <=
+                0.05;
+        if (!same_gate) {
+            ready_gate_state_ = ReadyGateState{
+                proposed->passer_player_number,
+                proposed->receiver_player_number,
+                proposed->sequence_id,
+                proposed->target_x_m,
+                proposed->target_y_m,
+                snapshot.server_time};
+        }
+        ready_dwell_confirmed = ready_gate_state_.has_value() &&
+            snapshot.server_time - ready_gate_state_->stable_since_s >=
+                kReadyStableDwellS;
+    } else {
+        ready_gate_state_.reset();
+    }
+
+    std::optional<PassIntentState> receiver_state;
+    if (proposed != nullptr && snapshot.ball.position_valid &&
+        (proposed->state == PassIntentState::Commanded ||
+         proposed->state == PassIntentState::Executed ||
+         proposed->state == PassIntentState::ReceiverZone)) {
+        const std::array<double, 2> self{
+            snapshot.self.position_m[0], snapshot.self.position_m[1]};
+        const std::array<double, 2> ball{
+            snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+        const std::array<double, 2> target{
+            proposed->target_x_m, proposed->target_y_m};
+        const double ball_speed_mps = snapshot.ball.velocity_valid
+            ? math::norm2({
+                  snapshot.ball.velocity_mps[0],
+                  snapshot.ball.velocity_mps[1]})
+            : 0.0;
+        if (math::planar_dist(self, ball) <= 0.65 &&
+            ball_speed_mps <= 1.5) {
+            receiver_state = PassIntentState::Received;
+        } else if (math::planar_dist(target, ball) <= 1.0) {
+            receiver_state = PassIntentState::ReceiverZone;
+        }
+    } else if (ready_dwell_confirmed) {
+        receiver_state = PassIntentState::Ready;
+    }
+
+    if (proposed != nullptr && receiver_state.has_value() &&
         snapshot.play_mode == world::PlayMode::PlayOn) {
         packet.kind = TeamCommPacketKind::PassIntent;
-        packet.pass_intent_state = PassIntentState::Ready;
+        packet.pass_intent_state = *receiver_state;
         packet.pass_intent_author = PassIntentAuthor::Receiver;
         packet.pass_peer_player_number = static_cast<std::uint8_t>(
             proposed->passer_player_number);

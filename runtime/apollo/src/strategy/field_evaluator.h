@@ -20,6 +20,16 @@ public:
         double pressure_release_bonus{1.0};
         double boundary_risk{-1.2};
         double back_pass_cost{-1.0};
+        double dribble_bias{0.45};
+        double dribble_pressure_cost{-1.5};
+        double shot_bias{10.0};
+        double clear_bias{8.0};
+        double defensive_clear_urgency{8.0};
+        double protect_lead_clear_bonus{2.0};
+        double chase_goal_shot_bonus{2.0};
+        double hold_bias{1.0};
+        double move_bias{0.4};
+        double move_ball_distance{0.75};
     };
 
     FieldEvaluator();

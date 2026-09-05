@@ -243,7 +243,7 @@ std::vector<RoleAssignment> RoleManager::assign(
     ctx.field_length_m = field_length_m_;
     ctx.field_width_m = field_width_m_;
     const strategy::TacticalState tactical_state =
-        strategy::build_tactical_state(snapshot);
+        tactical_state_tracker_.update(snapshot);
     ctx.phase = tactical_state.phase;
     ctx.risk_mode = tactical_state.risk_mode;
 

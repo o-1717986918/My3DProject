@@ -30,6 +30,12 @@ const strategy::CooperativeAction* DecisionManager::selected_cooperative_action(
         Blackboard::kKeySelectedCooperativeAction);
 }
 
+const comm::OutgoingPassIntent* DecisionManager::outgoing_pass_intent() const {
+    if (!blackboard_.exists(Blackboard::kKeyOutgoingPassIntent)) return nullptr;
+    return &blackboard_.get<comm::OutgoingPassIntent>(
+        Blackboard::kKeyOutgoingPassIntent);
+}
+
 const Blackboard& DecisionManager::blackboard() const {
     return blackboard_;
 }

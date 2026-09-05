@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace comm {
@@ -96,6 +97,9 @@ struct PassIntentRecord {
 };
 
 struct OutgoingPassIntent {
+    PassIntentState state{PassIntentState::Proposed};
+    PassIntentAuthor author{PassIntentAuthor::Passer};
+    int passer_player_number{0};
     int receiver_player_number{0};
     std::uint8_t sequence_id{0U};
     double target_x_m{0.0};
@@ -109,5 +113,7 @@ struct TeamCommSnapshot {
     std::vector<TeamCommRecord> records;
     std::vector<PassIntentRecord> pass_intents;
 };
+
+std::string_view to_string(PassIntentState state);
 
 }  // namespace comm

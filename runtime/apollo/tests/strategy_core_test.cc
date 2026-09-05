@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "src/strategy/action_planner.h"
+#include "src/strategy/action_capability.h"
 #include "src/strategy/ball_trajectory_model.h"
 #include "src/strategy/pass_candidate_generator.h"
 
@@ -30,7 +31,7 @@ world::WorldSnapshot make_open_pass_snapshot() {
     auto& receiver = snapshot.teammates[5];
     receiver.seen = true;
     receiver.last_seen_time = snapshot.server_time;
-    receiver.position_m = {4.0, 0.0, 0.8};
+    receiver.position_m = {2.0, 0.0, 0.8};
     snapshot.opponents.resize(7);
     for (int number = 1; number <= 7; ++number) {
         snapshot.opponents[static_cast<std::size_t>(number - 1)].player_number = number;
@@ -66,8 +67,111 @@ int main() {
         first.selected->category != strategy::ActionCategory::Pass ||
         first.selected->target_player_number != 6 ||
         first.selected->action_id != second.selected->action_id ||
-        first.tactical_state.possession != strategy::PossessionOwner::Ours) {
+        first.tactical_state.possession != strategy::PossessionOwner::Ours ||
+        first.tactical_state.ball_owner_player_number != 7 ||
+        !first.tactical_state.ball_owner_is_teammate) {
         std::cerr << "open passing lane was not selected deterministically\n";
+        return 1;
+    }
+
+    const strategy::ActionCapabilityRegistry enabled_capabilities(true);
+    world::WorldSnapshot no_pass = open;
+    no_pass.teammates.clear();
+    const auto dribble = planner.plan(
+        no_pass, enabled_capabilities, false);
+    if (!dribble.selected.has_value() ||
+        dribble.selected->category != strategy::ActionCategory::Dribble) {
+        std::cerr << "unified planner did not retain executable dribble\n";
+        return 1;
+    }
+
+    world::WorldSnapshot shot = no_pass;
+    shot.ball.position_m = {24.0, 0.0, 0.11};
+    const auto shot_plan = planner.plan(
+        shot, enabled_capabilities, false);
+    if (!shot_plan.selected.has_value() ||
+        shot_plan.selected->category != strategy::ActionCategory::Shoot) {
+        std::cerr << "unified planner did not prefer an in-envelope shot\n";
+        return 1;
+    }
+
+    world::WorldSnapshot clear = no_pass;
+    clear.ball.position_m = {-20.0, 0.0, 0.11};
+    const auto clear_plan = planner.plan(
+        clear, enabled_capabilities, false);
+    if (!clear_plan.selected.has_value() ||
+        clear_plan.selected->category != strategy::ActionCategory::Clear) {
+        std::cerr << "unified planner did not prefer a defensive clearance\n";
+        return 1;
+    }
+
+    const strategy::ActionCapabilityRegistry disabled_capabilities(false);
+    const auto unavailable = planner.plan(
+        no_pass, disabled_capabilities, false);
+    if (!unavailable.selected.has_value() ||
+        unavailable.selected->category != strategy::ActionCategory::Hold) {
+        std::cerr << "disabled ball actions did not retain stable hold\n";
+        return 1;
+    }
+
+    world::WorldSnapshot far_from_ball = no_pass;
+    far_from_ball.self.position_m = {-10.0, 0.0, 0.8};
+    const auto move = planner.plan(
+        far_from_ball, enabled_capabilities, false);
+    if (!move.selected.has_value() ||
+        move.selected->category != strategy::ActionCategory::Move) {
+        std::cerr << "unified planner did not select movement to a distant ball\n";
+        return 1;
+    }
+
+    strategy::TacticalStateTracker phase_tracker;
+    world::WorldSnapshot possession = make_open_pass_snapshot();
+    possession.server_time = 10.0;
+    if (phase_tracker.update(possession).phase !=
+        strategy::TacticalPhase::Attack) {
+        std::cerr << "phase tracker did not initialize from clear possession\n";
+        return 1;
+    }
+    world::WorldSnapshot weak_turnover = possession;
+    weak_turnover.server_time = 10.1;
+    weak_turnover.teammates.clear();
+    weak_turnover.self.position_m = {1.2, 0.0, 0.8};
+    weak_turnover.self.orientation_wxyz = {0.0, 0.0, 0.0, 1.0};
+    weak_turnover.opponents.clear();
+    world::PlayerObservation opponent;
+    opponent.player_number = 1;
+    opponent.seen = true;
+    opponent.last_seen_time = weak_turnover.server_time;
+    opponent.position_m = {0.8, 0.0, 0.8};
+    weak_turnover.opponents.push_back(opponent);
+    const auto pending_turnover = phase_tracker.update(weak_turnover);
+    if (pending_turnover.possession != strategy::PossessionOwner::Ours ||
+        pending_turnover.phase != strategy::TacticalPhase::Attack) {
+        std::cerr << "single weak turnover sample bypassed possession hysteresis\n";
+        return 1;
+    }
+    weak_turnover.server_time = 10.6;
+    weak_turnover.opponents.front().last_seen_time = weak_turnover.server_time;
+    const auto counter_press = phase_tracker.update(weak_turnover);
+    if (counter_press.possession != strategy::PossessionOwner::Theirs ||
+        counter_press.phase != strategy::TacticalPhase::Transition) {
+        std::cerr << "confirmed turnover did not enter counter-press transition\n";
+        return 1;
+    }
+    weak_turnover.server_time = 12.0;
+    weak_turnover.opponents.front().last_seen_time = weak_turnover.server_time;
+    if (phase_tracker.update(weak_turnover).phase !=
+        strategy::TacticalPhase::Defend) {
+        std::cerr << "counter-press transition did not expire into defense\n";
+        return 1;
+    }
+    weak_turnover.server_time = 12.1;
+    weak_turnover.ball.visible = false;
+    weak_turnover.ball.position_age_s = 0.8;
+    const auto stale_phase = phase_tracker.update(weak_turnover);
+    if (stale_phase.possession != strategy::PossessionOwner::Unknown ||
+        stale_phase.phase != strategy::TacticalPhase::Unknown) {
+        std::cerr << "stale ball did not invalidate tactical possession\n";
         return 1;
     }
 

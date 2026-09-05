@@ -44,6 +44,7 @@ enum class RejectionReason : std::uint8_t {
     ReceiverLate,
     OpponentFirst,
     UnsafeBackPass,
+    CapabilityUnavailable,
     BelowUtilityFloor,
 };
 

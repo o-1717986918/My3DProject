@@ -42,6 +42,12 @@ enum class RestartFallbackReason : std::uint8_t {
     ReleaseNotObserved,
 };
 
+enum class RestartVariant : std::uint8_t {
+    Primary,
+    Alternate,
+    Safety,
+};
+
 struct RestartExecutionFeedback {
     std::uint64_t epoch{0U};
     std::uint32_t revision{0U};
@@ -55,9 +61,11 @@ struct RestartPlan {
     world::PlayMode mode{world::PlayMode::NotInitialized};
     std::uint64_t epoch{0U};
     std::uint32_t revision{0U};
+    RestartVariant variant{RestartVariant::Primary};
     int taker_player_number{0};
     int receiver_player_number{0};
     field_geometry::Position2 ball_anchor_m{0.0, 0.0};
+    field_geometry::Position2 contact_target_m{0.0, 0.0};
     field_geometry::Position2 receiver_target_m{0.0, 0.0};
     double contact_direction_deg{0.0};
     bool ball_anchor_valid{false};
@@ -80,6 +88,7 @@ struct RestartCoordinatorInput {
     bool ball_position_valid{false};
     bool ball_velocity_valid{false};
     std::vector<RoleAssignment> role_assignments;
+    std::vector<field_geometry::Position2> opponent_positions_m;
     bool team_positioned{false};
     bool receiver_ready{false};
     bool taker_aligned{false};
@@ -160,5 +169,6 @@ std::optional<double> safe_restart_contact_direction_deg(
 std::string_view to_string(RestartPhase phase);
 std::string_view to_string(RestartExecutionStatus status);
 std::string_view to_string(RestartFallbackReason reason);
+std::string_view to_string(RestartVariant variant);
 
 }  // namespace decision

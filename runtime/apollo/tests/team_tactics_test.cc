@@ -158,6 +158,25 @@ int main() {
         return 1;
     }
 
+    goalkeeper.ball.position_m = {-25.2, 1.0, 0.11};
+    goalkeeper.ball.velocity_valid = false;
+    goalkeeper.opponents = {player(1, -20.0, 4.0, false)};
+    const auto smother = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (smother.duty != decision::TacticalDuty::GoalkeeperSmother ||
+        !decision::field_geometry::is_in_our_goalie_area(
+            smother.position_m)) {
+        std::cerr << "goalkeeper did not claim a safe loose ball in its area\n";
+        return 1;
+    }
+    goalkeeper.opponents = {player(1, -25.1, 1.0, false)};
+    const auto contested_smother = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (contested_smother.duty == decision::TacticalDuty::GoalkeeperSmother) {
+        std::cerr << "goalkeeper smother ignored an opponent-first race\n";
+        return 1;
+    }
+
     world::WorldSnapshot stopped = attack;
     stopped.play_mode = world::PlayMode::TheirFreeKick;
     const auto formation = tactics.plan(
@@ -215,6 +234,70 @@ int main() {
         return 1;
     }
 
+    world::WorldSnapshot team_attack = base_snapshot();
+    team_attack.server_time = 20.0;
+    team_attack.player_number = 7;
+    team_attack.self.position_m = {0.3, 0.0, 0.8};
+    team_attack.teammates = {
+        player(1, -27.0, 0.0, true),
+        player(2, -10.0, 4.0, true),
+        player(3, -10.0, -4.0, true),
+        player(4, -5.0, 0.0, true),
+        player(5, -3.0, 2.0, true),
+        player(6, 4.0, 3.0, true),
+        player(7, 0.3, 0.0, true),
+    };
+    for (auto& teammate : team_attack.teammates) {
+        teammate.last_seen_time = team_attack.server_time;
+    }
+    team_attack.opponents = {player(1, 8.0, 6.0, false)};
+    team_attack.opponents.front().last_seen_time = team_attack.server_time;
+    const auto attack_plan = tactics.plan_all(team_attack, roles);
+    const auto* striker_support = attack_plan.for_role(
+        decision::RoleManager::ROLE_ST);
+    const auto* central_support = attack_plan.for_role(
+        decision::RoleManager::ROLE_CBM);
+    if (striker_support == nullptr || central_support == nullptr ||
+        !attack_plan.fresh || attack_plan.revision == 0U ||
+        attack_plan.tactical_state.ball_owner_player_number != 7 ||
+        (striker_support->target.duty != decision::TacticalDuty::Support &&
+         striker_support->target.duty != decision::TacticalDuty::Unmark) ||
+        (central_support->target.duty != decision::TacticalDuty::Support &&
+         central_support->target.duty != decision::TacticalDuty::Unmark) ||
+        std::hypot(
+            striker_support->target.position_m[0] -
+                central_support->target.position_m[0],
+            striker_support->target.position_m[1] -
+                central_support->target.position_m[1]) < 2.0) {
+        std::cerr << "joint attack plan did not allocate separated support lanes\n";
+        return 1;
+    }
+
+    world::WorldSnapshot keeper_claim = team_defense;
+    keeper_claim.server_time = 21.0;
+    keeper_claim.ball.position_m = {-25.2, 1.0, 0.11};
+    keeper_claim.ball.velocity_valid = false;
+    keeper_claim.opponents = {player(1, -18.0, 6.0, false)};
+    keeper_claim.opponents.front().last_seen_time = keeper_claim.server_time;
+    keeper_claim.teammates[0].position_m = {-26.0, 0.5, 0.8};
+    for (auto& teammate : keeper_claim.teammates) {
+        teammate.last_seen_time = keeper_claim.server_time;
+    }
+    const auto keeper_claim_plan = tactics.plan_all(keeper_claim, roles);
+    const auto* keeper_duty = keeper_claim_plan.for_role(
+        decision::RoleManager::ROLE_GK);
+    const auto* ap_cover = keeper_claim_plan.for_role(
+        decision::RoleManager::ROLE_AP);
+    if (keeper_duty == nullptr || ap_cover == nullptr ||
+        keeper_duty->target.duty !=
+            decision::TacticalDuty::GoalkeeperSmother ||
+        ap_cover->target.duty != decision::TacticalDuty::Cover ||
+        decision::field_geometry::is_in_our_goalie_area(
+            ap_cover->target.position_m)) {
+        std::cerr << "team did not protect the goalkeeper's smother claim\n";
+        return 1;
+    }
+
     auto reversed_roles = roles;
     std::reverse(reversed_roles.begin(), reversed_roles.end());
     const auto reordered_plan = tactics.plan_all(team_defense, reversed_roles);
@@ -226,6 +309,7 @@ int main() {
             original->target.duty != reordered->target.duty ||
             original->target.marked_opponent_player_number !=
                 reordered->target.marked_opponent_player_number ||
+            team_plan.revision != reordered_plan.revision ||
             std::hypot(
                 original->target.position_m[0] - reordered->target.position_m[0],
                 original->target.position_m[1] - reordered->target.position_m[1]) >
@@ -239,7 +323,7 @@ int main() {
     stale_ball.ball.visible = false;
     stale_ball.ball.position_age_s = 0.76;
     const auto stale_plan = tactics.plan_all(stale_ball, roles);
-    if (std::any_of(
+    if (stale_plan.fresh || stale_plan.revision == 0U || std::any_of(
             stale_plan.assignments.begin(), stale_plan.assignments.end(),
             [](const decision::TeamTacticalAssignment& assignment) {
                 return assignment.target.duty !=

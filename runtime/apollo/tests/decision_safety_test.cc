@@ -2,6 +2,7 @@
 
 #include "src/decision/behavior_tree.h"
 #include "src/decision/role_manager.h"
+#include "src/math/math_utils.h"
 
 #include <algorithm>
 #include <array>
@@ -239,6 +240,34 @@ int main() {
         goal_kick, goal_kick_blackboard, goal_kick_roles, true, false);
     if (std::holds_alternative<decision::KickCommand>(stabilizing)) {
         std::cerr << "goal kick skipped the stable setup hold\n";
+        return 1;
+    }
+    const auto& frozen_restart = goal_kick_blackboard.get<
+        decision::RestartCoordinationDecision>(
+            decision::Blackboard::kKeyRestartDecision);
+    if (!frozen_restart.plan.has_value()) {
+        std::cerr << "goal kick did not publish a frozen restart plan\n";
+        return 1;
+    }
+    const double goal_kick_direction_rad = math::deg_to_rad(
+        frozen_restart.plan->contact_direction_deg);
+    goal_kick.self.position_m = {
+        goal_kick.ball.position_m[0] -
+            0.33 * std::cos(goal_kick_direction_rad),
+        goal_kick.ball.position_m[1] -
+            0.33 * std::sin(goal_kick_direction_rad),
+        0.8};
+    goal_kick.self.orientation_wxyz = {
+        std::cos(goal_kick_direction_rad * 0.5),
+        0.0,
+        0.0,
+        std::sin(goal_kick_direction_rad * 0.5)};
+    goal_kick.teammates[0].position_m = goal_kick.self.position_m;
+    goal_kick.server_time += 0.10;
+    const auto aligned_hold = goal_kick_tree.evaluate(
+        goal_kick, goal_kick_blackboard, goal_kick_roles, true, false);
+    if (std::holds_alternative<decision::KickCommand>(aligned_hold)) {
+        std::cerr << "goal kick skipped the aligned stable hold\n";
         return 1;
     }
     goal_kick.server_time += 0.30;

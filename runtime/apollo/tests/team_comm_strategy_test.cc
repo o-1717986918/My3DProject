@@ -75,6 +75,12 @@ int main() {
     receiver_snapshot.self.orientation_wxyz = {
         std::cos(ball_heading * 0.5), 0.0, 0.0,
         std::sin(ball_heading * 0.5)};
+    const auto ready_arming = receiver.make_packet(receiver_snapshot, 4);
+    if (ready_arming.kind != comm::TeamCommPacketKind::State) {
+        std::cerr << "receiver skipped the stable Ready dwell\n";
+        return 1;
+    }
+    receiver_snapshot.server_time += 0.31;
     const auto ready = comm::TeamCommCodec::decode(
         comm::TeamCommCodec::encode(
             receiver.make_packet(receiver_snapshot, 4)));
@@ -92,6 +98,27 @@ int main() {
     if (handshake.pass_intents.size() != 1U ||
         handshake.pass_intents.front().state != comm::PassIntentState::Ready) {
         std::cerr << "ready acknowledgement was not retained\n";
+        return 1;
+    }
+
+    comm::OutgoingPassIntent commanded = outgoing;
+    commanded.state = comm::PassIntentState::Commanded;
+    commanded.passer_player_number = 7;
+    const auto commanded_packet = comm::TeamCommCodec::decode(
+        comm::TeamCommCodec::encode(
+            passer.make_packet(passer_snapshot, 3, commanded)));
+    receiver.ingest(commanded_packet, 12);
+    receiver_snapshot.team_comm_snapshot = receiver.make_snapshot(12);
+    receiver_snapshot.ball.position_m = {3.8, 1.0, 0.11};
+    receiver_snapshot.ball.velocity_valid = true;
+    receiver_snapshot.ball.velocity_mps = {0.2, 0.0, 0.0};
+    const auto received = comm::TeamCommCodec::decode(
+        comm::TeamCommCodec::encode(
+            receiver.make_packet(receiver_snapshot, 4)));
+    if (received.pass_intent_state != comm::PassIntentState::Received ||
+        received.pass_intent_author != comm::PassIntentAuthor::Receiver ||
+        received.pass_sequence_id != 42U) {
+        std::cerr << "receiver did not report the physical pass outcome\n";
         return 1;
     }
 

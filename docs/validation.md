@@ -1,9 +1,53 @@
 # Validation record
 
-Validation date: 2026-08-31
+Validation date: 2026-09-05 (strategy closure update; historical results below
+retain their original dates)
 Platform: WSL2 Ubuntu 22.04
 Client environment: `my3d-team`, Python 3.13.15
 Server: RCSSServerMJ 0.2.1, `fifa7vs7`, `ssim26`, synchronous mode
+
+## Strategy closure update
+
+The current WSL build includes sixteen CTest targets covering configuration,
+geometry, formation, action planning/capabilities, communication, decision
+integration, motion feedback, the complete pass lifecycle, full-team tactics,
+safety/restarts and every deployed kick runner. The strategy-specific snapshot
+sequences cover possession hysteresis/counter-pressure, deterministic plan
+revision, joint support spacing, unique marking/interception, stale-world
+fallback, goalkeeper smother and open-play clear, complete physical pass
+terminal states, receiver intent persistence, and restart branch/fallback
+behavior.
+
+`MY3D_STATUS` now reports the stable tactical phase/owner, team-plan revision
+and freshness, duty/target/marked opponent, selected candidate and rejection
+counts, pass lifecycle, restart variant/target, motion state, and decision time
+in microseconds. Older physical-action measurements below remain historical
+evidence and are not reinterpreted as reliable pass accuracy.
+
+Final local verification on WSL Ubuntu 22.04:
+
+```text
+CMake build: passed
+CTest: 16/16 passed
+main Python tests: 59 passed
+training deployment contract: 5/5 passed
+shell syntax: passed
+git diff --check: passed
+
+7v7 targeted scenario, 900 cycles:
+connections=14 joins=14 play_on=14 clean_exits=14
+failures=0 server_errors=0 illegal_defense=0
+pass_plan_samples=124 pass_ready_samples=6
+targeted_pass_kick_samples=9 pass_contact_events=1
+```
+
+The preserved local trace is `/tmp/my3d-strategy-closure-20260905`. Across
+2,520 status samples, decision latency was 67 us median, 2,412 us p99 and
+3,279 us maximum. The trace exercised Move, Dribble and Pass selection plus
+Formation, Support, Unmark, Outlet, Pressure, Cover, Mark, BlockLane and
+Receive duties. It observed one physical targeted-pass contact, not a completed
+reception, so it proves runtime wiring and process health rather than reliable
+pass accuracy.
 
 ## Apollo C++ release-path validation
 

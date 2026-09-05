@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <limits>
@@ -169,8 +170,12 @@ std::string AgentApp::process_perception_message(const std::string& message) {
     world_state_.set_team_comm_snapshot(team_comm_manager_.make_snapshot(frame.server_cycle));
 
     const world::WorldSnapshot& snapshot = world_state_.snapshot();
+    const auto decision_started_at = std::chrono::steady_clock::now();
     const auto command = decision_manager_.decide(
         snapshot, pending_execution_feedback_);
+    last_decision_latency_us_ = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - decision_started_at).count());
     pending_execution_feedback_.reset();
     const auto* kick_command = std::get_if<decision::KickCommand>(&command);
     const auto* selected_action =
@@ -207,17 +212,9 @@ std::string AgentApp::process_perception_message(const std::string& message) {
 
     if (team_comm_manager_.is_send_slot(config_.player_number, frame.server_cycle)) {
         std::optional<comm::OutgoingPassIntent> outgoing_pass;
-        if (selected_action != nullptr &&
-            selected_action->category == strategy::ActionCategory::Pass &&
-            selected_action->actor_player_number == snapshot.player_number) {
-            outgoing_pass = comm::OutgoingPassIntent{
-                selected_action->target_player_number,
-                selected_action->sequence_id,
-                selected_action->target_point_m[0],
-                selected_action->target_point_m[1],
-                selected_action->requested_ball_speed_mps,
-                selected_action->predicted_ball_time_s,
-            };
+        if (const auto* lifecycle = decision_manager_.outgoing_pass_intent();
+            lifecycle != nullptr) {
+            outgoing_pass = *lifecycle;
         }
         const auto packet = team_comm_manager_.make_packet(
             snapshot,
@@ -234,6 +231,13 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                   decision::RestartCoordinationDecision>(
                   decision::Blackboard::kKeyRestartDecision)
             : nullptr;
+        const auto* team_plan = decision_manager_.blackboard().exists(
+                decision::Blackboard::kKeyTeamPlan)
+            ? &decision_manager_.blackboard().get<decision::TeamPlan>(
+                  decision::Blackboard::kKeyTeamPlan)
+            : nullptr;
+        const auto* pass_lifecycle =
+            decision_manager_.outgoing_pass_intent();
         const double self_yaw_deg =
             world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
                 snapshot.self.orientation_wxyz);
@@ -284,6 +288,21 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                     restart_decision->plan.has_value()
                     ? restart_decision->plan->revision
                     : 0U)
+            << " restart_variant="
+            << (restart_decision != nullptr &&
+                    restart_decision->plan.has_value()
+                    ? decision::to_string(restart_decision->plan->variant)
+                    : std::string_view{"None"})
+            << " restart_target_x="
+            << (restart_decision != nullptr &&
+                    restart_decision->plan.has_value()
+                    ? restart_decision->plan->contact_target_m[0]
+                    : 0.0)
+            << " restart_target_y="
+            << (restart_decision != nullptr &&
+                    restart_decision->plan.has_value()
+                    ? restart_decision->plan->contact_target_m[1]
+                    : 0.0)
             << " restart_taker="
             << (restart_decision != nullptr &&
                     restart_decision->plan.has_value()
@@ -315,6 +334,12 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                     decision::Blackboard::kKeyTacticalTarget)
                     .marked_opponent_player_number
                 : 0)
+            << " plan_revision=" << (team_plan != nullptr
+                    ? team_plan->revision
+                    : 0U)
+            << " plan_fresh=" << (team_plan != nullptr && team_plan->fresh
+                    ? 1
+                    : 0)
             << " risk_mode="
             << (decision_manager_.blackboard().exists(
                     decision::Blackboard::kKeyTacticalRiskMode)
@@ -392,6 +417,9 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                     : 0)
             << " pass_ready=" << (selected_action != nullptr &&
                     pass_ready(snapshot, *selected_action) ? 1 : 0)
+            << " pass_lifecycle=" << (pass_lifecycle != nullptr
+                    ? comm::to_string(pass_lifecycle->state)
+                    : std::string_view{"None"})
             << " pass_target_x=" << (selected_action != nullptr
                     ? selected_action->target_point_m[0]
                     : 0.0)
@@ -410,12 +438,29 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << " rejected=" << (strategy_plan != nullptr
                     ? strategy_plan->rejections.size()
                     : 0U)
-            << " phase=" << (strategy_plan != nullptr
+            << " decision_us=" << last_decision_latency_us_
+            << " phase=" << (team_plan != nullptr
+                    ? strategy::to_string(team_plan->tactical_state.phase)
+                    : strategy_plan != nullptr
                     ? strategy::to_string(strategy_plan->tactical_state.phase)
                     : std::string_view{"Unknown"})
-            << " possession=" << (strategy_plan != nullptr
+            << " possession=" << (team_plan != nullptr
+                    ? strategy::to_string(team_plan->tactical_state.possession)
+                    : strategy_plan != nullptr
                     ? strategy::to_string(strategy_plan->tactical_state.possession)
                     : std::string_view{"Unknown"})
+            << " ball_owner=" << (team_plan != nullptr
+                    ? team_plan->tactical_state.ball_owner_player_number
+                    : strategy_plan != nullptr
+                    ? strategy_plan->tactical_state.ball_owner_player_number
+                    : 0)
+            << " ball_owner_team=" << (team_plan != nullptr
+                    ? (team_plan->tactical_state.ball_owner_player_number <= 0
+                        ? "unknown"
+                        : team_plan->tactical_state.ball_owner_is_teammate
+                        ? "ours"
+                        : "theirs")
+                    : "unknown")
             << '\n';
     }
 

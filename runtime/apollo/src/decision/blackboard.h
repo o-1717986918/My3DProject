@@ -24,6 +24,7 @@ public:
     static constexpr const char* kKeyRoleAssignments = "role_assignments";
     static constexpr const char* kKeyRestartDecision = "restart_decision";
     static constexpr const char* kKeyTacticalRiskMode = "tactical_risk_mode";
+    static constexpr const char* kKeyOutgoingPassIntent = "outgoing_pass_intent";
 
     template <typename T>
     void set(const std::string& key, T value) {

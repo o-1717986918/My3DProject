@@ -43,6 +43,8 @@ std::string_view to_string(RejectionReason reason) {
         case RejectionReason::ReceiverLate: return "ReceiverLate";
         case RejectionReason::OpponentFirst: return "OpponentFirst";
         case RejectionReason::UnsafeBackPass: return "UnsafeBackPass";
+        case RejectionReason::CapabilityUnavailable:
+            return "CapabilityUnavailable";
         case RejectionReason::BelowUtilityFloor: return "BelowUtilityFloor";
     }
     return "None";

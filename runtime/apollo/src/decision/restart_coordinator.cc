@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace decision {
@@ -62,6 +63,16 @@ Position2 receiver_target(
     return target;
 }
 
+bool finite_position(const Position2& position) {
+    return std::isfinite(position[0]) && std::isfinite(position[1]);
+}
+
+bool inside_actual_field(const Position2& position) {
+    return finite_position(position) &&
+        std::abs(position[0]) <= field_geometry::kActualHalfLengthM &&
+        std::abs(position[1]) <= field_geometry::kActualHalfWidthM;
+}
+
 bool valid_parameters(const RestartCoordinator::Parameters& parameters) {
     return std::isfinite(parameters.soft_deadline_s) &&
         std::isfinite(parameters.hard_deadline_s) &&
@@ -78,11 +89,112 @@ bool valid_parameters(const RestartCoordinator::Parameters& parameters) {
         parameters.receiver_standoff_m > 0.0;
 }
 
+bool has_restart_alternate(world::PlayMode mode) {
+    return mode != world::PlayMode::OurKickOff;
+}
+
+Position2 restart_contact_target(
+    world::PlayMode mode,
+    const Position2& ball,
+    RestartVariant variant) {
+    const double half_length = field_geometry::kActualHalfLengthM;
+    const double half_width = field_geometry::kActualHalfWidthM;
+    const double side = ball[1] < 0.0 ? -1.0 : 1.0;
+    Position2 target{half_length, 0.0};
+
+    if (variant == RestartVariant::Safety) {
+        if (mode == world::PlayMode::OurCornerKick) {
+            target = {half_length - 7.0, 0.0};
+        } else {
+            target = {
+                std::clamp(ball[0] + 4.0, -half_length + 1.0, half_length - 1.0),
+                ball[1] - side * std::min(4.0, std::abs(ball[1]))};
+        }
+    } else if (mode == world::PlayMode::OurKickOff) {
+        target = {5.0, 0.0};
+    } else if (mode == world::PlayMode::OurGoalKick) {
+        target = {
+            std::min(ball[0] + 7.0, half_length - 1.0),
+            variant == RestartVariant::Primary ? 4.0 : -4.0};
+    } else if (mode == world::PlayMode::OurPenaltyKick ||
+               mode == world::PlayMode::OurPenaltyShoot) {
+        target = {
+            half_length,
+            variant == RestartVariant::Primary ? 0.8 : -0.8};
+    } else if (mode == world::PlayMode::OurCornerKick) {
+        target = variant == RestartVariant::Primary
+            ? Position2{
+                  half_length - 4.0,
+                  side * (half_width - 6.0)}
+            : Position2{half_length - 7.0, 0.0};
+    } else if (mode == world::PlayMode::OurThrowIn) {
+        target = variant == RestartVariant::Primary
+            ? Position2{
+                  std::clamp(ball[0] + 4.0, -half_length + 1.0, half_length - 1.0),
+                  side * std::max(0.0, std::abs(ball[1]) - 4.0)}
+            : Position2{
+                  std::clamp(ball[0] + 1.5, -half_length + 1.0, half_length - 1.0),
+                  side * std::max(0.0, std::abs(ball[1]) - 6.0)};
+    } else if (variant == RestartVariant::Alternate) {
+        target = {
+            std::clamp(ball[0] + 5.0, -half_length + 1.0, half_length - 1.0),
+            std::abs(ball[1]) < 1.0
+                ? 4.0
+                : ball[1] - side * std::min(4.0, std::abs(ball[1]))};
+    }
+
+    target[0] = std::clamp(target[0], -half_length, half_length);
+    target[1] = std::clamp(target[1], -half_width, half_width);
+    return target;
+}
+
+double restart_lane_clearance(
+    const Position2& ball,
+    const Position2& target,
+    const std::vector<Position2>& opponents) {
+    double clearance = std::numeric_limits<double>::infinity();
+    for (const auto& opponent : opponents) {
+        if (!std::isfinite(opponent[0]) || !std::isfinite(opponent[1])) continue;
+        clearance = std::min(
+            clearance,
+            math::point_segment_distance(opponent, ball, target));
+    }
+    return clearance;
+}
+
+RestartVariant select_restart_variant(
+    const RestartCoordinatorInput& input,
+    std::uint64_t epoch) {
+    if (!has_restart_alternate(input.play_mode)) {
+        return RestartVariant::Primary;
+    }
+    const Position2 primary = restart_contact_target(
+        input.play_mode, input.ball_position_m, RestartVariant::Primary);
+    const Position2 alternate = restart_contact_target(
+        input.play_mode, input.ball_position_m, RestartVariant::Alternate);
+    const double primary_clearance = restart_lane_clearance(
+        input.ball_position_m, primary, input.opponent_positions_m);
+    const double alternate_clearance = restart_lane_clearance(
+        input.ball_position_m, alternate, input.opponent_positions_m);
+    if (alternate_clearance > primary_clearance + 0.25) {
+        return RestartVariant::Alternate;
+    }
+    if (primary_clearance > alternate_clearance + 0.25) {
+        return RestartVariant::Primary;
+    }
+    return epoch % 2U == 0U
+        ? RestartVariant::Alternate
+        : RestartVariant::Primary;
+}
+
 }  // namespace
 
 bool RestartPlan::executable_coordination() const {
     return is_our_restart(mode) && epoch != 0U && revision != 0U &&
         taker_player_number > 0 && ball_anchor_valid &&
+        inside_actual_field(ball_anchor_m) &&
+        inside_actual_field(contact_target_m) &&
+        inside_actual_field(receiver_target_m) &&
         std::isfinite(contact_direction_deg) &&
         (!requires_receiver_ready || receiver_player_number > 0);
 }
@@ -116,30 +228,48 @@ void RestartCoordinator::begin_restart(const RestartCoordinatorInput& input) {
         ? RoleManager::ROLE_GK
         : RoleManager::ROLE_AP;
     const int taker = player_for_role(input.role_assignments, taker_role);
-    const bool needs_receiver = restart_requires_receiver(input.play_mode);
-    const int receiver = needs_receiver
-        ? player_for_role(input.role_assignments, RoleManager::ROLE_ST, taker)
-        : 0;
     const std::uint64_t epoch = input.restart_epoch != 0U
         ? input.restart_epoch
         : next_nonzero_epoch(&next_local_epoch_);
     next_local_epoch_ = std::max(next_local_epoch_, epoch);
+    const bool finite_ball = input.ball_position_valid &&
+        inside_actual_field(input.ball_position_m);
+    const RestartVariant variant = finite_ball
+        ? select_restart_variant(input, epoch)
+        : RestartVariant::Primary;
+    const bool needs_receiver = restart_requires_receiver(input.play_mode);
+    const int receiver = needs_receiver
+        ? player_for_role(input.role_assignments, RoleManager::ROLE_ST, taker)
+        : 0;
 
-    const auto direction = safe_restart_contact_direction_deg(
-        input.play_mode, input.ball_position_m);
+    const Position2 contact_target = finite_ball
+        ? restart_contact_target(input.play_mode, input.ball_position_m, variant)
+        : Position2{0.0, 0.0};
+    const Position2 contact_delta = math::vec2_sub(
+        contact_target, input.ball_position_m);
+    const std::optional<double> direction = finite_ball &&
+        finite_position(contact_target) && math::norm2(contact_delta) > 1.0e-6
+        ? std::optional<double>{math::vector_angle_deg(contact_delta)}
+        : std::nullopt;
     RestartPlan plan;
     plan.mode = input.play_mode;
     plan.epoch = epoch;
     plan.revision = 1U;
+    plan.variant = variant;
     plan.taker_player_number = taker;
     plan.receiver_player_number = receiver;
-    plan.ball_anchor_m = input.ball_position_m;
+    plan.ball_anchor_m = finite_ball
+        ? input.ball_position_m
+        : Position2{0.0, 0.0};
+    plan.contact_target_m = contact_target;
     plan.contact_direction_deg = direction.value_or(0.0);
-    plan.ball_anchor_valid = input.ball_position_valid && direction.has_value();
+    plan.ball_anchor_valid = finite_ball && direction.has_value();
     plan.requires_receiver_ready = needs_receiver;
-    plan.receiver_target_m = receiver_target(
-        input.ball_position_m, plan.contact_direction_deg,
-        parameters_.receiver_standoff_m);
+    plan.receiver_target_m = plan.ball_anchor_valid
+        ? receiver_target(
+              plan.ball_anchor_m, plan.contact_direction_deg,
+              parameters_.receiver_standoff_m)
+        : Position2{0.0, 0.0};
     plan_ = plan;
 
     phase_ = RestartPhase::Positioning;
@@ -165,14 +295,18 @@ void RestartCoordinator::enter_fallback(
     ++plan_->revision;
     if (plan_->revision == 0U) plan_->revision = 1U;
     plan_->fallback = true;
+    plan_->variant = RestartVariant::Safety;
     plan_->requires_receiver_ready = false;
     plan_->receiver_player_number = 0;
-    if (input.ball_position_valid) {
-        const auto direction = safe_restart_contact_direction_deg(
-            plan_->mode, input.ball_position_m);
-        if (direction.has_value()) {
+    if (input.ball_position_valid && inside_actual_field(input.ball_position_m)) {
+        const Position2 contact_target = restart_contact_target(
+            plan_->mode, input.ball_position_m, RestartVariant::Safety);
+        const Position2 delta = math::vec2_sub(
+            contact_target, input.ball_position_m);
+        if (math::norm2(delta) > 1.0e-6) {
             plan_->ball_anchor_m = input.ball_position_m;
-            plan_->contact_direction_deg = *direction;
+            plan_->contact_target_m = contact_target;
+            plan_->contact_direction_deg = math::vector_angle_deg(delta);
             plan_->ball_anchor_valid = true;
         }
     }
@@ -421,27 +555,12 @@ std::optional<double> safe_restart_contact_direction_deg(
         return std::nullopt;
     }
 
-    Position2 target{field_geometry::kActualHalfLengthM, 0.0};
     if (mode == world::PlayMode::OurGoalKick ||
         mode == world::PlayMode::OurKickOff) {
         return 0.0;
     }
-    if (mode == world::PlayMode::OurCornerKick) {
-        const double side = ball[1] < 0.0 ? -1.0 : 1.0;
-        target = {
-            field_geometry::kActualHalfLengthM - 4.0,
-            side * (field_geometry::kActualHalfWidthM - 6.0),
-        };
-    } else if (mode == world::PlayMode::OurThrowIn) {
-        const double side = ball[1] < 0.0 ? -1.0 : 1.0;
-        target = {
-            std::clamp(
-                ball[0] + 4.0,
-                -field_geometry::kActualHalfLengthM + 1.0,
-                field_geometry::kActualHalfLengthM - 1.0),
-            side * std::max(0.0, std::abs(ball[1]) - 4.0),
-        };
-    }
+    const Position2 target = restart_contact_target(
+        mode, ball, RestartVariant::Primary);
 
     const Position2 delta = math::vec2_sub(target, ball);
     if (math::norm2(delta) <= 1.0e-6) return 0.0;
@@ -481,6 +600,15 @@ std::string_view to_string(RestartFallbackReason reason) {
         case RestartFallbackReason::ReleaseNotObserved: return "ReleaseNotObserved";
     }
     return "None";
+}
+
+std::string_view to_string(RestartVariant variant) {
+    switch (variant) {
+        case RestartVariant::Primary: return "Primary";
+        case RestartVariant::Alternate: return "Alternate";
+        case RestartVariant::Safety: return "Safety";
+    }
+    return "Primary";
 }
 
 }  // namespace decision

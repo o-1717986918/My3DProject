@@ -20,6 +20,7 @@ using decision::RestartExecutionFeedback;
 using decision::RestartExecutionStatus;
 using decision::RestartFallbackReason;
 using decision::RestartPhase;
+using decision::RestartVariant;
 using decision::RoleAssignment;
 
 std::vector<RoleAssignment> assignments() {
@@ -265,6 +266,7 @@ bool test_soft_deadline_and_single_fallback() {
     if (!expect(
             decision.phase == RestartPhase::Aligning &&
                 decision.plan->fallback && decision.plan->revision == 2U &&
+                decision.plan->variant == RestartVariant::Safety &&
                 !decision.plan->requires_receiver_ready &&
                 decision.plan->ball_anchor_valid &&
                 std::isfinite(decision.plan->ball_anchor_m[0]) &&
@@ -393,11 +395,36 @@ bool test_hard_deadline_and_invalid_plan() {
     }
     input.server_time_s = 73.0;
     decision = coordinator.update(input);
-    return expect(
+    if (!expect(
         decision.phase == RestartPhase::Complete &&
             decision.hard_deadline_reached &&
             !decision.execution_authorized,
-        "hard deadline did not terminate invalid coordination");
+        "hard deadline did not terminate invalid coordination")) {
+        return false;
+    }
+
+    RestartCoordinator invalid_ball;
+    input = input_for(world::PlayMode::OurFreeKick, 74.0, 102U);
+    input.ball_position_m = {
+        std::numeric_limits<double>::quiet_NaN(), 0.0};
+    decision = invalid_ball.update(input);
+    if (!expect(
+            decision.plan.has_value() &&
+                !decision.plan->ball_anchor_valid &&
+                !decision.plan->executable_coordination(),
+            "non-finite ball produced executable restart coordination")) {
+        return false;
+    }
+
+    RestartCoordinator out_of_field_ball;
+    input = input_for(world::PlayMode::OurFreeKick, 75.0, 103U);
+    input.ball_position_m = {
+        decision::field_geometry::kActualHalfLengthM + 0.1, 0.0};
+    decision = out_of_field_ball.update(input);
+    return expect(
+        decision.plan.has_value() && !decision.plan->ball_anchor_valid &&
+            !decision.plan->executable_coordination(),
+        "out-of-field ball produced executable restart coordination");
 }
 
 bool test_determinism_and_legal_directions() {
@@ -447,15 +474,39 @@ bool test_determinism_and_legal_directions() {
     std::reverse(rhs.role_assignments.begin(), rhs.role_assignments.end());
     const auto first_decision = first.update(lhs);
     const auto second_decision = second.update(rhs);
-    return expect(
+    if (!expect(
         first_decision.plan.has_value() && second_decision.plan.has_value() &&
             first_decision.plan->taker_player_number ==
                 second_decision.plan->taker_player_number &&
             first_decision.plan->receiver_player_number ==
                 second_decision.plan->receiver_player_number &&
+            first_decision.plan->variant == second_decision.plan->variant &&
             std::abs(first_decision.plan->contact_direction_deg -
                      second_decision.plan->contact_direction_deg) < 1.0e-12,
-        "RoleAssignment ordering changed the frozen restart plan");
+        "RoleAssignment ordering changed the frozen restart plan")) {
+        return false;
+    }
+
+    RestartCoordinator opponent_aware;
+    auto blocked_primary = input_for(
+        world::PlayMode::OurFreeKick, 90.0, 121U);
+    blocked_primary.opponent_positions_m = {{2.0, 0.0}};
+    const auto alternate = opponent_aware.update(blocked_primary);
+    if (!expect(
+            alternate.plan.has_value() &&
+                alternate.plan->variant == RestartVariant::Alternate &&
+                std::abs(alternate.plan->contact_target_m[1]) > 1.0,
+            "blocked primary restart lane did not select the alternate")) {
+        return false;
+    }
+
+    RestartCoordinator epoch_variant;
+    const auto even_epoch = epoch_variant.update(input_for(
+        world::PlayMode::OurFreeKick, 91.0, 122U));
+    return expect(
+        even_epoch.plan.has_value() &&
+            even_epoch.plan->variant == RestartVariant::Alternate,
+        "unblocked restart tie-break did not rotate the legal variant");
 }
 
 bool test_parameter_validation() {

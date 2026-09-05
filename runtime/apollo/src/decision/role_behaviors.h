@@ -6,6 +6,7 @@
 #include "src/decision/blackboard.h"
 #include "src/decision/execution_feedback.h"
 #include "src/decision/high_level_command.h"
+#include "src/decision/pass_lifecycle.h"
 #include "src/decision/restart_coordinator.h"
 #include "src/decision/role_manager.h"
 #include "src/decision/team_tactics.h"
@@ -39,6 +40,7 @@ struct APState {
     std::uint8_t next_pass_sequence_id{0U};
     std::optional<strategy::CooperativeAction> committed_pass;
     std::optional<KickCommand> active_kick_command;
+    PassLifecycle pass_lifecycle;
 };
 
 /// Generates the active-player command and set-play handoff state.
@@ -70,11 +72,13 @@ public:
     HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
         Blackboard& blackboard) const override;
-    void reset_state() const { relay_state_ = {}; }
+    void reset_state() const;
 private:
     int role_id_;
     bool defensive_opponent_clip_;
     mutable APState relay_state_;
+    mutable std::optional<comm::PassIntentRecord> receive_intent_;
+    mutable double receive_intent_until_s_{0.0};
 };
 
 /// Generates goalkeeper positioning and goal-kick commands.
@@ -84,9 +88,15 @@ public:
     HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
         Blackboard& blackboard) const override;
+    HighLevelCommand make_command(
+        const world::WorldSnapshot& snapshot,
+        Blackboard& blackboard,
+        bool enable_targeted_kick) const;
+    void apply_execution_feedback(const ExecutionFeedback& feedback) const;
     void reset_state() const { clearance_state_ = {}; }
 private:
     mutable APState clearance_state_;
+    strategy::ActionPlanner action_planner_;
 };
 
 /// Per-agent owner for every persistent role behavior. Keeping this object in

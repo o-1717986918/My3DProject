@@ -55,6 +55,20 @@ Position2 clamp_goalkeeper(Position2 point) {
     return point;
 }
 
+Position2 clamp_goalkeeper_area(Position2 point) {
+    constexpr double margin = 0.35;
+    point[0] = std::clamp(
+        point[0],
+        -field_geometry::kActualHalfLengthM + margin,
+        -field_geometry::kActualHalfLengthM +
+            field_geometry::kGoalieAreaDepthM - margin);
+    point[1] = std::clamp(
+        point[1],
+        -field_geometry::kGoalieAreaWidthM * 0.5 + margin,
+        field_geometry::kGoalieAreaWidthM * 0.5 - margin);
+    return point;
+}
+
 bool fresh(const world::PlayerObservation& player, double now) {
     return !player.fallen &&
         (player.seen ||
@@ -151,7 +165,8 @@ TacticalTarget plan_support(
     int player_number,
     const std::vector<KnownOpponent>& opponents,
     const world::WorldSnapshot& snapshot,
-    strategy::TacticalRiskMode risk_mode) {
+    strategy::TacticalRiskMode risk_mode,
+    const std::vector<Position2>& reserved_targets) {
     const Position2 goal{field_geometry::kActualHalfLengthM, 0.0};
     const Position2 forward = math::vec2_unit_or(math::vec2_sub(goal, ball), {1.0, 0.0});
     const Position2 lateral = math::perpendicular_left(forward);
@@ -194,6 +209,12 @@ TacticalTarget plan_support(
     bool found = false;
     for (const auto& candidate : candidates) {
         if (math::planar_dist(candidate, formation) > 8.0) continue;
+        const bool reserved_collision = std::any_of(
+            reserved_targets.begin(), reserved_targets.end(),
+            [&](const Position2& reserved) {
+                return math::planar_dist(candidate, reserved) < 2.0;
+            });
+        if (reserved_collision) continue;
         const double opponent_space = std::min(
             nearest_opponent_distance(candidate, opponents), 6.0);
         const double pass_lane = std::min(lane_clearance(ball, candidate, opponents), 4.0);
@@ -398,6 +419,7 @@ TacticalTarget plan_goalkeeper(
     const world::WorldSnapshot& snapshot,
     const Position2& ball,
     const Position2& goalkeeper_position,
+    const std::vector<KnownOpponent>& opponents,
     std::optional<double> goalkeeper_yaw_deg = std::nullopt) {
     constexpr double hold_x =
         -field_geometry::kActualHalfLengthM + field_geometry::kGkHoldDepthM;
@@ -425,6 +447,48 @@ TacticalTarget plan_goalkeeper(
             }
         }
     }
+
+    // A walk-based smother is safe only inside the goalkeeper area and only
+    // when the keeper wins the reach-time race. Fast goal-bound balls remain
+    // on the line-intercept branch above; this is not a synthetic dive skill.
+    if (field_geometry::is_in_our_goalie_area(ball)) {
+        Position2 target = ball;
+        const double ball_speed_mps = snapshot.ball.velocity_valid
+            ? math::norm2({
+                  snapshot.ball.velocity_mps[0],
+                  snapshot.ball.velocity_mps[1]})
+            : 0.0;
+        if (snapshot.ball.velocity_valid && ball_speed_mps > 0.20) {
+            target = predicted_ball_position(
+                ball,
+                {snapshot.ball.velocity_mps[0], snapshot.ball.velocity_mps[1]},
+                0.30);
+        }
+        target = clamp_goalkeeper_area(target);
+        const strategy::ReachTimeModel keeper_reach(
+            strategy::ReachTimeModel::Parameters{
+                1.10, 120.0, 0.20, 0.15, 0.10});
+        const strategy::ReachTimeModel opponent_reach(
+            strategy::ReachTimeModel::Parameters{
+                1.35, 180.0, 0.10, 0.35, 0.05});
+        const double keeper_eta_s = keeper_reach.estimate_s(
+            goalkeeper_position, target, goalkeeper_yaw_deg);
+        double opponent_eta_s = std::numeric_limits<double>::infinity();
+        for (const auto& opponent : opponents) {
+            opponent_eta_s = std::min(
+                opponent_eta_s,
+                opponent_reach.estimate_s(opponent.position_m, target));
+        }
+        if (ball_speed_mps <= 1.8 && keeper_eta_s <= 3.0 &&
+            keeper_eta_s + 0.25 < opponent_eta_s) {
+            return {
+                TacticalDuty::GoalkeeperSmother,
+                target,
+                ball,
+                0,
+                std::clamp(1.0 - keeper_eta_s / 4.0, 0.5, 0.95)};
+        }
+    }
     const double angle_cover_y = std::clamp(
         ball[1] * 0.10,
         -field_geometry::kGoalHalfWidthM + 0.35,
@@ -435,6 +499,42 @@ TacticalTarget plan_goalkeeper(
         ball,
         0,
         snapshot.ball.position_valid ? 0.7 : 0.3};
+}
+
+void finalize_team_plan(
+    TeamPlan& plan,
+    const world::WorldSnapshot& snapshot) {
+    plan.source_server_time_s = snapshot.server_time;
+    plan.fresh = snapshot.ball.position_valid &&
+        (snapshot.ball.visible || snapshot.ball.position_age_s <= 0.75);
+    std::uint64_t hash = 1469598103934665603ULL;
+    const auto mix = [&hash](std::uint64_t value) {
+        hash ^= value;
+        hash *= 1099511628211ULL;
+    };
+    mix(static_cast<std::uint64_t>(plan.tactical_state.phase));
+    mix(static_cast<std::uint64_t>(plan.tactical_state.possession));
+    mix(static_cast<std::uint64_t>(
+        std::max(0, plan.tactical_state.ball_owner_player_number)));
+    mix(plan.tactical_state.ball_owner_is_teammate ? 1U : 0U);
+    mix(plan.fresh ? 1U : 0U);
+    for (const auto& assignment : plan.assignments) {
+        mix(static_cast<std::uint64_t>(std::max(0, assignment.player_number)));
+        // Preserve the distinction between an unassigned player (-1) and the
+        // goalkeeper role (0) in the deterministic plan revision.
+        mix(static_cast<std::uint64_t>(
+            static_cast<std::int64_t>(assignment.role_id) + 1));
+        mix(static_cast<std::uint64_t>(assignment.target.duty));
+        const auto qx = static_cast<std::int64_t>(
+            std::llround(assignment.target.position_m[0] * 20.0));
+        const auto qy = static_cast<std::int64_t>(
+            std::llround(assignment.target.position_m[1] * 20.0));
+        mix(static_cast<std::uint64_t>(qx));
+        mix(static_cast<std::uint64_t>(qy));
+        mix(static_cast<std::uint64_t>(
+            std::max(0, assignment.target.marked_opponent_player_number)));
+    }
+    plan.revision = hash == 0U ? 1U : hash;
 }
 
 }  // namespace
@@ -460,7 +560,13 @@ const TeamTacticalAssignment* TeamPlan::for_role(int role_id) const {
 TeamPlan TeamTactics::plan_all(
     const world::WorldSnapshot& snapshot,
     const std::vector<RoleAssignment>& role_assignments) const {
+    if (last_plan_server_time_s_ >= 0.0 &&
+        snapshot.server_time + 1.0e-9 < last_plan_server_time_s_) {
+        reset();
+    }
+    last_plan_server_time_s_ = snapshot.server_time;
     TeamPlan result;
+    result.tactical_state = tactical_state_tracker_.update(snapshot);
     result.assignments.reserve(role_assignments.size());
     for (const auto& assignment : role_assignments) {
         const Position2 formation = assignment.role_id == RoleManager::ROLE_GK
@@ -487,12 +593,13 @@ TeamPlan TeamTactics::plan_all(
         !snapshot.ball.position_valid ||
         (!snapshot.ball.visible && snapshot.ball.position_age_s > 0.75)) {
         clear_support_latches();
+        finalize_team_plan(result, snapshot);
         return result;
     }
 
     const Position2 ball{snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
     const auto opponents = known_opponents(snapshot);
-    const strategy::TacticalState state = strategy::build_tactical_state(snapshot);
+    const strategy::TacticalState& state = result.tactical_state;
     const auto intercept_owner = state.phase == strategy::TacticalPhase::Attack
         ? std::optional<InterceptCandidate>{}
         : select_intercept_owner(snapshot, role_assignments);
@@ -500,19 +607,99 @@ TeamPlan TeamTactics::plan_all(
     const Position2 goal_direction = math::vec2_unit_or(
         math::vec2_sub(own_goal, ball), {-1.0, 0.0});
 
+    std::optional<TacticalTarget> goalkeeper_target;
+    const auto goalkeeper_assignment = std::find_if(
+        result.assignments.begin(), result.assignments.end(),
+        [](const TeamTacticalAssignment& assignment) {
+            return assignment.role_id == RoleManager::ROLE_GK;
+        });
+    if (goalkeeper_assignment != result.assignments.end()) {
+        const Position2 keeper_position = player_position(
+            snapshot, goalkeeper_assignment->player_number)
+                .value_or(goalkeeper_assignment->target.position_m);
+        goalkeeper_target = plan_goalkeeper(
+            snapshot, ball, keeper_position, opponents);
+    }
+
+    // Allocate the two attacking support lanes once for the full team.  A
+    // deterministic ST-first order and a hard future-target spacing prevent
+    // independently good local choices from sending both runners to one lane.
+    std::array<std::optional<TacticalTarget>, RoleManager::kPreviousRoleSlots>
+        support_targets{};
+    if (state.phase == strategy::TacticalPhase::Attack) {
+        std::vector<Position2> reserved_targets;
+        constexpr std::array<int, 2> support_roles{
+            RoleManager::ROLE_ST, RoleManager::ROLE_CBM};
+        for (const int support_role : support_roles) {
+            const auto assignment_it = std::find_if(
+                result.assignments.begin(), result.assignments.end(),
+                [support_role](const TeamTacticalAssignment& assignment) {
+                    return assignment.role_id == support_role;
+                });
+            if (assignment_it == result.assignments.end()) continue;
+
+            TacticalTarget support = plan_support(
+                ball, assignment_it->target.position_m, support_role,
+                assignment_it->player_number, opponents, snapshot,
+                state.risk_mode, reserved_targets);
+            const auto index = static_cast<std::size_t>(
+                assignment_it->player_number);
+            if (index < support_latches_.size()) {
+                auto& latch = support_latches_[index];
+                const bool held_target_clear = latch.target.has_value() &&
+                    std::all_of(
+                        reserved_targets.begin(), reserved_targets.end(),
+                        [&](const Position2& reserved) {
+                            return math::planar_dist(
+                                latch.target->position_m, reserved) >= 2.0;
+                        });
+                if (held_target_clear && latch.role_id == support_role &&
+                    snapshot.server_time < latch.until_s &&
+                    support.duty != TacticalDuty::Formation) {
+                    const TacticalDuty current_duty = support.duty;
+                    support = *latch.target;
+                    support.duty = current_duty;
+                    support.face_point_m = ball;
+                } else if (support.duty == TacticalDuty::Formation) {
+                    latch = {};
+                } else {
+                    latch.target = support;
+                    latch.until_s = snapshot.server_time + 0.5;
+                    latch.role_id = support_role;
+                }
+            }
+            if (index < support_targets.size()) support_targets[index] = support;
+            if (support.duty != TacticalDuty::Formation) {
+                reserved_targets.push_back(support.position_m);
+            }
+        }
+    }
+
     for (auto& assignment : result.assignments) {
         const int role_id = assignment.role_id;
         const Position2 formation = assignment.target.position_m;
         if (role_id == RoleManager::ROLE_GK) {
-            const Position2 keeper_position =
-                player_position(snapshot, assignment.player_number)
-                    .value_or(formation);
-            assignment.target = plan_goalkeeper(
-                snapshot, ball, keeper_position);
+            if (goalkeeper_target.has_value()) {
+                assignment.target = *goalkeeper_target;
+            }
             continue;
         }
         if (role_id == RoleManager::ROLE_AP) {
-            if (state.risk_mode == strategy::TacticalRiskMode::ProtectLead &&
+            if (goalkeeper_target.has_value() &&
+                goalkeeper_target->duty == TacticalDuty::GoalkeeperSmother) {
+                assignment.target = {
+                    TacticalDuty::Cover,
+                    clamp_field_player({
+                        -field_geometry::kActualHalfLengthM +
+                            field_geometry::kGoalieAreaDepthM + 1.0,
+                        std::clamp(
+                            ball[1],
+                            -field_geometry::kGoalieAreaWidthM * 0.5,
+                            field_geometry::kGoalieAreaWidthM * 0.5)}),
+                    ball,
+                    0,
+                    0.9};
+            } else if (state.risk_mode == strategy::TacticalRiskMode::ProtectLead &&
                 state.phase != strategy::TacticalPhase::Attack) {
                 assignment.target = {
                     TacticalDuty::Cover,
@@ -531,32 +718,12 @@ TeamPlan TeamTactics::plan_all(
         if (state.phase == strategy::TacticalPhase::Attack) {
             if (role_id == RoleManager::ROLE_ST ||
                 role_id == RoleManager::ROLE_CBM) {
-                TacticalTarget support = plan_support(
-                    ball, formation, role_id, assignment.player_number,
-                    opponents, snapshot, state.risk_mode);
                 const auto index = static_cast<std::size_t>(
                     assignment.player_number);
-                if (index < support_latches_.size()) {
-                    auto& latch = support_latches_[index];
-                    if (latch.target.has_value() &&
-                        latch.role_id == role_id &&
-                        snapshot.server_time < latch.until_s &&
-                        support.duty != TacticalDuty::Formation) {
-                        TacticalTarget held = *latch.target;
-                        held.duty = support.duty;
-                        held.face_point_m = ball;
-                        assignment.target = held;
-                        continue;
-                    }
-                    if (support.duty == TacticalDuty::Formation) {
-                        latch = {};
-                    } else {
-                        latch.target = support;
-                        latch.until_s = snapshot.server_time + 0.5;
-                        latch.role_id = role_id;
-                    }
+                if (index < support_targets.size() &&
+                    support_targets[index].has_value()) {
+                    assignment.target = *support_targets[index];
                 }
-                assignment.target = support;
                 continue;
             }
             if (role_id == RoleManager::ROLE_CDM) {
@@ -620,7 +787,14 @@ TeamPlan TeamTactics::plan_all(
     if (state.phase != strategy::TacticalPhase::Attack) {
         clear_support_latches();
     }
+    finalize_team_plan(result, snapshot);
     return result;
+}
+
+void TeamTactics::reset() const {
+    for (auto& latch : support_latches_) latch = {};
+    tactical_state_tracker_.reset();
+    last_plan_server_time_s_ = -1.0;
 }
 
 TacticalTarget TeamTactics::plan(
@@ -657,6 +831,7 @@ std::string_view to_string(TacticalDuty duty) {
         case TacticalDuty::Intercept: return "Intercept";
         case TacticalDuty::GoalkeeperHold: return "GoalkeeperHold";
         case TacticalDuty::GoalkeeperIntercept: return "GoalkeeperIntercept";
+        case TacticalDuty::GoalkeeperSmother: return "GoalkeeperSmother";
         case TacticalDuty::Receive: return "Receive";
     }
     return "Formation";

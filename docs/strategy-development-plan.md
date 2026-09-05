@@ -1,17 +1,31 @@
 # Strategy development and 2D migration plan
 
-Status: active sub-plan; first one-step passing delivery accepted
+Status: historical design specification; strategy code closure delivered on
+2026-09-05
 
 Planning date: 2026-08-31
 
 Runtime: `runtime/apollo/` on WSL2 Ubuntu 22.04
 
-Project-level target: a complete and excellent team. This document owns the
-strategy-migration workstream inside the broader promotion program in
-`team-excellence-roadmap.md`. Its original minimum release gates remain useful
-intermediate checks, but they no longer define the final project objective.
+Project-level target: a complete and excellent team. This document preserves
+the original migration reasoning and stage gates. The audited current state and
+remaining performance work are authoritative in `team-excellence-roadmap.md`.
 
-## Implementation progress on 2026-08-31
+## Closure update on 2026-09-05
+
+The code-level items that were open in the original plan are now integrated:
+stable possession/phase tracking, explicit owner identity, a revisioned
+full-team plan, joint support lanes, unique defensive jobs, the complete pass
+lifecycle, persistent moving-ball receive intent, a common executable-action
+selector, goalkeeper smother/rebound/clear behavior, and restart variants with
+feedback and open-play handoff. Repository C++ tests exercise those paths.
+
+Physical targeted passing remains experimental and narrow; through passes wait
+for player velocity/run intent; opponent-diverse A/B evidence remains future
+performance work. Those facts do not leave an unhandled match-state branch in
+the strategy runtime.
+
+## Historical implementation progress on 2026-08-31
 
 The first executable strategy slice is complete. It delivers the S1 contracts,
 seed 3D ball/reach models from S2, direct and leading candidates from S3, a
@@ -19,11 +33,10 @@ minimal `Proposed -> Ready` coordination loop from S4, and behavior-tree
 integration with physical-outcome telemetry. Native tests and a strict full
 7v7 deterministic pass scenario passed.
 
-This does not close the full stage definition below. Through passes, calibrated
-2--5 m execution, the complete intent lifecycle, receiver completion, combined
-action selection, team tactics, and multi-match A/B gates remain open. The
-exact implementation, reference-source audit, evidence, limitations, and next
-training contract are in `strategy-migration-implementation.md`.
+At that date this did not close the full stage definition below. It is retained
+as a dated record, not as the current capability inventory. The exact current
+implementation and limitations are in `strategy-migration-implementation.md`
+and `team-excellence-roadmap.md`.
 
 ## Mission
 

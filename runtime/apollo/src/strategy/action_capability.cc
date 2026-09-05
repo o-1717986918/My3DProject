@@ -5,12 +5,33 @@
 #include "src/decision/kick_contract.h"
 
 #include <cmath>
+#include <optional>
 
 namespace strategy {
 
 namespace {
 constexpr std::size_t index_of(SkillCapability capability) {
     return static_cast<std::size_t>(capability);
+}
+
+std::optional<SkillCapability> capability_for_action(
+    ActionCategory category) {
+    switch (category) {
+        case ActionCategory::Hold:
+        case ActionCategory::Move:
+            return SkillCapability::Walk;
+        case ActionCategory::Dribble:
+            return SkillCapability::DribbleTouch;
+        case ActionCategory::Pass:
+            return SkillCapability::TargetedPass;
+        case ActionCategory::Shoot:
+            return SkillCapability::Shot;
+        case ActionCategory::Clear:
+            return SkillCapability::Clear;
+        case ActionCategory::NoAction:
+            return std::nullopt;
+    }
+    return std::nullopt;
 }
 }  // namespace
 
@@ -81,27 +102,12 @@ CapabilityState ActionCapabilityRegistry::state(SkillCapability capability) cons
     return envelope(capability).state;
 }
 
-bool ActionCapabilityRegistry::executable(
-    const CooperativeAction& action,
-    double relative_target_angle_deg) const {
-    SkillCapability capability = SkillCapability::ForwardContact;
-    if (action.category == ActionCategory::Dribble) {
-        capability = SkillCapability::DribbleTouch;
-    } else if (action.category == ActionCategory::Pass) {
-        capability = SkillCapability::TargetedPass;
-    } else if (action.category == ActionCategory::Shoot) {
-        capability = SkillCapability::Shot;
-    } else if (action.category == ActionCategory::Clear) {
-        capability = SkillCapability::Clear;
-    } else {
-        return false;
-    }
-    const auto& limits = envelope(capability);
-    if (limits.state == CapabilityState::Unavailable ||
-        !std::isfinite(relative_target_angle_deg) ||
-        std::abs(relative_target_angle_deg) > limits.maximum_abs_angle_deg) {
-        return false;
-    }
+bool ActionCapabilityRegistry::supported(
+    const CooperativeAction& action) const {
+    const auto capability = capability_for_action(action.category);
+    if (!capability.has_value()) return false;
+    const auto& limits = envelope(*capability);
+    if (limits.state == CapabilityState::Unavailable) return false;
     const double distance = std::hypot(
         action.target_point_m[0] - action.start_ball_point_m[0],
         action.target_point_m[1] - action.start_ball_point_m[1]);
@@ -111,6 +117,16 @@ bool ActionCapabilityRegistry::executable(
         std::isfinite(action.requested_ball_speed_mps) &&
         action.requested_ball_speed_mps >= limits.minimum_requested_speed_mps &&
         action.requested_ball_speed_mps <= limits.maximum_requested_speed_mps;
+}
+
+bool ActionCapabilityRegistry::executable(
+    const CooperativeAction& action,
+    double relative_target_angle_deg) const {
+    const auto capability = capability_for_action(action.category);
+    if (!capability.has_value() || !supported(action)) return false;
+    const auto& limits = envelope(*capability);
+    return std::isfinite(relative_target_angle_deg) &&
+        std::abs(relative_target_angle_deg) <= limits.maximum_abs_angle_deg;
 }
 
 std::string_view to_string(CapabilityState state) {

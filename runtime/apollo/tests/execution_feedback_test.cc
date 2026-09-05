@@ -53,6 +53,8 @@ void add_ready_intent(
     ready.target_y_m = selected.target_point_m[1];
     ready.requested_ball_speed_mps = selected.requested_ball_speed_mps;
     ready.predicted_ball_time_s = selected.predicted_ball_time_s;
+    ready.author = comm::PassIntentAuthor::Receiver;
+    ready.peer_player_number = snapshot.player_number;
     snapshot.team_comm_snapshot.pass_intents.push_back(ready);
 }
 
@@ -147,8 +149,15 @@ bool test_failure_cancels_and_replans(decision::ExecutionStatus status) {
     const auto failed_command = manager.decide(
         snapshot,
         make_kick_feedback(status, kick, 100U, 1.31));
-    if (manager.selected_cooperative_action() != nullptr) {
-        std::cerr << "matching failed kick did not cancel the pass commitment\n";
+    const auto* terminal_action = manager.selected_cooperative_action();
+    const auto* terminal_intent = manager.outgoing_pass_intent();
+    const auto expected_terminal = status == decision::ExecutionStatus::Rejected
+        ? comm::PassIntentState::Cancelled
+        : comm::PassIntentState::Timeout;
+    if (terminal_action == nullptr || terminal_intent == nullptr ||
+        terminal_action->action_id != kick.action_id ||
+        terminal_intent->state != expected_terminal) {
+        std::cerr << "matching failed kick did not publish a terminal outcome\n";
         return false;
     }
     if (manager.strategy_plan() == nullptr ||
@@ -166,9 +175,17 @@ bool test_failure_cancels_and_replans(decision::ExecutionStatus status) {
         return false;
     }
 
-    // Planning continues during the retry delay, but the same physical kick
-    // is not immediately resubmitted. After the delay a new sequence commits.
+    // The terminal outcome remains visible long enough to cross at least two
+    // team-speech slots. It is not immediately resubmitted; after retention
+    // and the retry delay, a new sequence commits.
     snapshot.server_time = 1.82;
+    manager.decide(snapshot);
+    const auto* retained = manager.outgoing_pass_intent();
+    if (retained == nullptr || retained->state != expected_terminal) {
+        std::cerr << "terminal pass outcome was not retained for broadcast\n";
+        return false;
+    }
+    snapshot.server_time = 2.13;
     manager.decide(snapshot);
     const auto* retry = manager.selected_cooperative_action();
     if (retry == nullptr || retry->sequence_id == selected.sequence_id) {

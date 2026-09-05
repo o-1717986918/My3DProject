@@ -1,6 +1,7 @@
 # One-step passing migration: implementation record
 
-Status: first delivery loop accepted
+Status: historical first-delivery record with 2026-09-05 strategy closure
+appendix
 
 Implementation date: 2026-08-31
 
@@ -32,9 +33,9 @@ WorldSnapshot
   -> physical ball-progress analysis
 ```
 
-This is the first strategy migration closure, not the completion of the whole
-strategy roadmap. It proves the interfaces, decision path, communication path,
-fallback, telemetry, and physical-outcome gate in a complete 7v7 process.
+This was the first strategy migration closure. The later code-level completion
+is recorded in the 2026-09-05 appendix below and in
+`team-excellence-roadmap.md`.
 
 ## Local 2D reference audit
 
@@ -189,37 +190,39 @@ release verification, one bounded fallback, and post-release lockout. These
 paths are covered by repository unit/integration tests and preserved match
 evidence.
 
-The current implementation deliberately does not claim useful physical
-targeted passes: the retained fixed contact has produced only 0.186--0.644 m
-in preserved trials, while the parameterized kick remains opt-in and
-experimental. It also does not claim shot/clear capability or receiver first
-touch until those skills have physical outcome evidence.
+The current implementation deliberately does not claim a competition-reliable
+physical targeted pass: preserved early trials produced only 0.186--0.644 m,
+and the target-directed path remains experimental. Later training delivered
+narrow procedural shot and safety-clear anchors, but those contracts are not
+evidence of general placement accuracy or receiver first touch.
 
-The remaining migration work is narrower and more explicit:
+## 2026-09-05 migration closure
 
-- direct and leading pass generation exists, but through-space generation and
-  non-pass action generators do not;
-- the lifecycle enum and packet authorship exist, but only `Proposed` and
-  `Ready` are actively emitted; later states must be driven by matching motion
-  feedback and physical ball observations, not inferred from command issue;
-- the receiver currently walks to a target but has no persistent intention,
-  trajectory intercept, first touch, or next-action handoff;
-- `TeamCommManager::ReadyGateState` is declared but not used, so the current
-  Ready checks do not yet enforce a stable residence interval;
-- each robot deterministically computes a full plan from its own partial world
-  view, but the protocol does not yet detect or resolve plan disagreement;
-- defensive and support duties are unique in current fixtures, but they are
-  assigned by sequential rules rather than one threat-prioritized constrained
-  assignment;
-- decision replay, physical outcome ownership, and side/seed/opponent A/B
-  evidence remain absent.
+The previously open code-level migration work is now implemented:
 
-This document is now an implementation record for the first 2D-to-3D passing
-increment, not a second active roadmap. The authoritative continuation order
-is `docs/team-excellence-roadmap.md`: team-state consistency and global duty
-ownership first; action/pass lifecycle and receiver intention second; unified
-executable-action choice and complete positional play next; motion training in
-parallel.
+- the common planner generates and compares capability-gated Hold, Move,
+  Dribble, direct/leading Pass, Shoot, and Clear actions;
+- the pass lifecycle actively emits and consumes `Proposed`, `Ready`,
+  `Committed`, `Commanded`, `Executed`, `ReceiverZone`, `Received`,
+  `Intercepted`, `Out`, `Timeout`, `Cancelled`, and `Expired`;
+- motor completion is separated from observed ball execution and terminal
+  physical outcomes;
+- receiver readiness has a stable dwell; receive intent persists across speech
+  gaps, predicts a reachable moving-ball intercept, times out/cancels, and
+  releases after local ball control so role reassignment can take over;
+- `TeamPlan::plan_all()` carries stable possession owner/phase, freshness and a
+  deterministic revision, assigns separated attacking support lanes and unique
+  defensive jobs, and protects the second ball during a goalkeeper claim;
+- goalkeeper behavior now separates hold, goal-line intercept, safe smother,
+  goal-kick execution and capability-gated open-play clear;
+- restarts include frozen primary/alternate/safety variants, opponent-aware
+  branch selection, feedback, release verification and bounded fallback.
+
+Through-space passes remain intentionally absent until the world model exposes
+player velocity or a receiver run intent. Cross-agent plan-revision consensus
+and paired opponent A/B evaluation are performance/evidence extensions rather
+than an unhandled code path. The authoritative current inventory is
+`docs/team-excellence-roadmap.md`.
 
 Training details are maintained in `docs/rl-training-plan.md` and
 `docs/model-free-parameterized-kick-plan.md`. End-to-end seven-agent strategy

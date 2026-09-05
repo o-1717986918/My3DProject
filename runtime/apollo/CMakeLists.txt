@@ -104,6 +104,7 @@ add_library(decision_core
     src/decision/behavior_tree.cc
     src/decision/decision_manager.cc
     src/decision/formation.cc
+    src/decision/pass_lifecycle.cc
     src/decision/restart_coordinator.cc
     src/decision/role_behaviors.cc
     src/decision/role_manager_core.cc
@@ -300,6 +301,12 @@ if(BUILD_TESTING)
     target_include_directories(execution_feedback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(execution_feedback_test PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME execution_feedback_test COMMAND execution_feedback_test)
+
+    add_executable(pass_lifecycle_test tests/pass_lifecycle_test.cc)
+    target_link_libraries(pass_lifecycle_test PRIVATE decision_core)
+    target_include_directories(pass_lifecycle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(pass_lifecycle_test PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME pass_lifecycle_test COMMAND pass_lifecycle_test)
 
     add_executable(team_tactics_test tests/team_tactics_test.cc)
     target_link_libraries(team_tactics_test PRIVATE decision_core)

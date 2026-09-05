@@ -283,4 +283,22 @@ PassIntentRecord TeamCommCodec::to_pass_intent_record(const TeamCommPacket& pack
     };
 }
 
+std::string_view to_string(PassIntentState state) {
+    switch (state) {
+        case PassIntentState::Proposed: return "Proposed";
+        case PassIntentState::Ready: return "Ready";
+        case PassIntentState::Committed: return "Committed";
+        case PassIntentState::Commanded: return "Commanded";
+        case PassIntentState::Executed: return "Executed";
+        case PassIntentState::ReceiverZone: return "ReceiverZone";
+        case PassIntentState::Received: return "Received";
+        case PassIntentState::Intercepted: return "Intercepted";
+        case PassIntentState::Out: return "Out";
+        case PassIntentState::Timeout: return "Timeout";
+        case PassIntentState::Cancelled: return "Cancelled";
+        case PassIntentState::Expired: return "Expired";
+    }
+    return "Expired";
+}
+
 }  // namespace comm

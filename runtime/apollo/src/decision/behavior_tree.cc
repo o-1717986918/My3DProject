@@ -110,6 +110,7 @@ WalkCommand walk_to_current_role_position(BehaviorContext& context) {
 HighLevelCommand make_beam_command(BehaviorContext& context) {
     context.role_behaviors.reset();
     context.restart_coordinator.reset();
+    context.team_tactics.reset();
     // The role manager has not yet run at beam time, so we cannot map this
     // player to a formation slot. Use the player-number pose table, with a
     // deeper front-player pose only when the next kickoff belongs to the other
@@ -320,6 +321,30 @@ NodeResult compute_formation(BehaviorContext& context) {
     restart_input.ball_position_valid = context.snapshot.ball.position_valid;
     restart_input.ball_velocity_valid = context.snapshot.ball.velocity_valid;
     restart_input.role_assignments = role_assignments;
+    const auto append_restart_opponent = [&](const world::PlayerObservation& opponent) {
+        const bool fresh = opponent.seen ||
+            (opponent.last_seen_time >= 0.0 &&
+             context.snapshot.server_time - opponent.last_seen_time <= 2.0);
+        if (!fresh || opponent.fallen) return;
+        const std::array<double, 2> position{
+            opponent.position_m[0], opponent.position_m[1]};
+        const bool duplicate = std::any_of(
+            restart_input.opponent_positions_m.begin(),
+            restart_input.opponent_positions_m.end(),
+            [&](const std::array<double, 2>& existing) {
+                return math::planar_dist(existing, position) < 0.5;
+            });
+        if (!duplicate) restart_input.opponent_positions_m.push_back(position);
+    };
+    for (const auto& opponent : context.snapshot.opponents) {
+        append_restart_opponent(opponent);
+    }
+    for (const auto& opponent : context.snapshot.shared_opponents) {
+        append_restart_opponent(opponent);
+    }
+    std::sort(
+        restart_input.opponent_positions_m.begin(),
+        restart_input.opponent_positions_m.end());
     restart_input.team_positioned = restart_team_positioned(
         context.snapshot, role_assignments,
         context.restart_coordinator.plan());
@@ -421,7 +446,7 @@ NodeResult compute_formation(BehaviorContext& context) {
         Blackboard::kKeyTacticalTarget, own_target);
     context.blackboard.set(
         Blackboard::kKeyTacticalRiskMode,
-        strategy::build_tactical_state(context.snapshot).risk_mode);
+        team_plan.tactical_state.risk_mode);
     context.blackboard.set(Blackboard::kKeyTeamPlan, team_plan);
     context.blackboard.set(
         Blackboard::kKeyRoleAssignments, role_assignments);

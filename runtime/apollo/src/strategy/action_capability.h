@@ -48,6 +48,10 @@ public:
 
     const ActionEnvelope& envelope(SkillCapability capability) const;
     CapabilityState state(SkillCapability capability) const;
+    /// True when the request lies inside a deployed skill's distance/speed
+    /// contract. Orientation is deliberately excluded: a supported action may
+    /// first use the bounded approach controller to align for release.
+    bool supported(const CooperativeAction& action) const;
     bool executable(
         const CooperativeAction& action,
         double relative_target_angle_deg) const;

@@ -45,12 +45,13 @@ int main() {
     decision::APBehavior misaligned_behavior;
     decision::Blackboard misaligned_blackboard;
     decision::RoleManager misaligned_role_manager;
-    misaligned_behavior.make_command(
+    const auto misaligned_command = misaligned_behavior.make_command(
         misaligned_snapshot, misaligned_blackboard, misaligned_role_manager,
         true, true);
-    if (misaligned_blackboard.exists(
-            decision::Blackboard::kKeySelectedCooperativeAction)) {
-        std::cerr << "misaligned targeted pass bypassed the angle envelope\n";
+    if (!misaligned_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction) ||
+        std::holds_alternative<decision::KickCommand>(misaligned_command)) {
+        std::cerr << "misaligned targeted pass was not retained for safe alignment\n";
         return 1;
     }
 
@@ -108,6 +109,8 @@ int main() {
         selected.target_point_m[1],
         selected.requested_ball_speed_mps,
         selected.predicted_ball_time_s,
+        comm::PassIntentAuthor::Receiver,
+        snapshot.player_number,
     });
     const decision::HighLevelCommand stabilizing = behavior.make_command(
         snapshot, blackboard, role_manager, true, true);
@@ -226,6 +229,38 @@ int main() {
         return 1;
     }
 
+    world::WorldSnapshot goalkeeper_snapshot = clear_snapshot;
+    goalkeeper_snapshot.player_number = 1;
+    decision::GKBehavior goalkeeper_behavior;
+    decision::Blackboard goalkeeper_blackboard;
+    goalkeeper_blackboard.set(
+        decision::Blackboard::kKeyTacticalTarget,
+        decision::TacticalTarget{
+            decision::TacticalDuty::GoalkeeperSmother,
+            {-20.0, 0.0},
+            std::array<double, 2>{-20.0, 0.0},
+            0,
+            0.9});
+    const auto goalkeeper_stabilizing = goalkeeper_behavior.make_command(
+        goalkeeper_snapshot, goalkeeper_blackboard, true);
+    if (std::holds_alternative<decision::KickCommand>(
+            goalkeeper_stabilizing) ||
+        !goalkeeper_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "goalkeeper smother did not enter the clear lifecycle\n";
+        return 1;
+    }
+    goalkeeper_snapshot.server_time += 0.10;
+    const auto goalkeeper_release = goalkeeper_behavior.make_command(
+        goalkeeper_snapshot, goalkeeper_blackboard, true);
+    const auto* goalkeeper_clear =
+        std::get_if<decision::KickCommand>(&goalkeeper_release);
+    if (goalkeeper_clear == nullptr ||
+        goalkeeper_clear->mode != decision::KickMode::Clear) {
+        std::cerr << "goalkeeper smother did not release a contracted clear\n";
+        return 1;
+    }
+
     decision::APBehavior risk_behavior;
     decision::Blackboard risk_blackboard;
     risk_blackboard.set(
@@ -242,6 +277,97 @@ int main() {
             decision::Blackboard::kKeyTacticalTarget).duty !=
         decision::TacticalDuty::Cover) {
         std::cerr << "AP behavior overwrote the team tactical duty\n";
+        return 1;
+    }
+
+    world::WorldSnapshot receive_snapshot = make_open_pass_snapshot();
+    receive_snapshot.player_number = 6;
+    receive_snapshot.server_time = 30.0;
+    receive_snapshot.self.position_m = {1.0, 0.0, 0.8};
+    receive_snapshot.teammates.clear();
+    receive_snapshot.opponents.clear();
+    receive_snapshot.ball.position_m = {0.0, 0.0, 0.11};
+    receive_snapshot.ball.velocity_valid = true;
+    receive_snapshot.ball.velocity_mps = {2.0, 0.0, 0.0};
+    receive_snapshot.team_comm_snapshot.pass_intents.push_back({
+        7,
+        100,
+        comm::PassIntentState::Commanded,
+        7,
+        6,
+        42,
+        3.0,
+        0.0,
+        1.43,
+        1.5,
+        comm::PassIntentAuthor::Passer,
+        6,
+    });
+    decision::SimpleRoleBehavior receiver_behavior(
+        decision::RoleManager::ROLE_ST, false);
+    decision::Blackboard receiver_blackboard;
+    const auto set_receiver_formation = [&]() {
+        receiver_blackboard.set(
+            decision::Blackboard::kKeyRolePos,
+            std::array<double, 2>{4.0, 2.0});
+        receiver_blackboard.set(
+            decision::Blackboard::kKeyTacticalTarget,
+            decision::TacticalTarget{
+                decision::TacticalDuty::Formation,
+                {4.0, 2.0},
+                std::nullopt,
+                0,
+                0.5});
+    };
+    set_receiver_formation();
+    const auto dynamic_receive = receiver_behavior.make_command(
+        receive_snapshot, receiver_blackboard);
+    const auto* receive_walk = std::get_if<decision::WalkCommand>(
+        &dynamic_receive);
+    const auto& receive_target = receiver_blackboard.get<
+        decision::TacticalTarget>(decision::Blackboard::kKeyTacticalTarget);
+    if (receive_walk == nullptr ||
+        receive_target.duty != decision::TacticalDuty::Receive ||
+        receive_target.position_m[0] <= 0.0 ||
+        receive_target.position_m[0] >= 2.9) {
+        std::cerr << "moving pass did not produce a reachable intercept intent\n";
+        return 1;
+    }
+
+    receive_snapshot.server_time = 30.1;
+    receive_snapshot.team_comm_snapshot.pass_intents.clear();
+    set_receiver_formation();
+    static_cast<void>(receiver_behavior.make_command(
+        receive_snapshot, receiver_blackboard));
+    if (receiver_blackboard.get<decision::TacticalTarget>(
+            decision::Blackboard::kKeyTacticalTarget).duty !=
+        decision::TacticalDuty::Receive) {
+        std::cerr << "receive intent did not survive a speech-slot gap\n";
+        return 1;
+    }
+
+    receive_snapshot.server_time = 30.2;
+    receive_snapshot.team_comm_snapshot.pass_intents.push_back({
+        7,
+        101,
+        comm::PassIntentState::Timeout,
+        7,
+        6,
+        42,
+        3.0,
+        0.0,
+        1.43,
+        1.5,
+        comm::PassIntentAuthor::Passer,
+        6,
+    });
+    set_receiver_formation();
+    static_cast<void>(receiver_behavior.make_command(
+        receive_snapshot, receiver_blackboard));
+    if (receiver_blackboard.get<decision::TacticalTarget>(
+            decision::Blackboard::kKeyTacticalTarget).duty ==
+        decision::TacticalDuty::Receive) {
+        std::cerr << "terminal pass outcome did not cancel receive intent\n";
         return 1;
     }
     return 0;

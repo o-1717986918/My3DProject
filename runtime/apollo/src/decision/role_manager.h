@@ -5,6 +5,7 @@
 
 #include "src/decision/field_geometry.h"
 #include "src/decision/formation.h"
+#include "src/strategy/tactical_state.h"
 #include "src/world/world_snapshot.h"
 
 #include <array>
@@ -71,6 +72,11 @@ private:
     // bias this tick's free-role assignment toward the previous outcome and
     // prevent 1-tick role flips when two players have nearly equal cost.
     mutable PreviousRoleByPlayer previous_role_by_player_;
+    // Formation depth uses the same possession hysteresis contract as the
+    // team-duty planner. Both trackers consume one identical snapshot per
+    // decision cycle and therefore remain deterministic without coupling the
+    // role-assignment solver back to TeamTactics.
+    mutable strategy::TacticalStateTracker tactical_state_tracker_;
     // Per-agent latch: the player number that already pushed the ball in the
     // current our-kick set play and must not be re-selected as AP. Cleared the
     // next time the world leaves OurKick.

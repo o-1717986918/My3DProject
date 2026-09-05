@@ -4,9 +4,11 @@
 
 #include "src/decision/field_geometry.h"
 #include "src/decision/role_manager.h"
+#include "src/strategy/tactical_state.h"
 #include "src/world/world_snapshot.h"
 
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -25,6 +27,7 @@ enum class TacticalDuty {
     Intercept,
     GoalkeeperHold,
     GoalkeeperIntercept,
+    GoalkeeperSmother,
     Receive,
 };
 
@@ -47,6 +50,10 @@ struct TeamTacticalAssignment {
 /// only its own entry.
 struct TeamPlan {
     std::vector<TeamTacticalAssignment> assignments;
+    strategy::TacticalState tactical_state;
+    double source_server_time_s{0.0};
+    std::uint64_t revision{0U};
+    bool fresh{false};
 
     const TeamTacticalAssignment* for_player(int player_number) const;
     const TeamTacticalAssignment* for_role(int role_id) const;
@@ -68,6 +75,8 @@ public:
         int role_id,
         const field_geometry::Position2& formation_target_m) const;
 
+    void reset() const;
+
 private:
     struct SupportLatch {
         std::optional<TacticalTarget> target;
@@ -76,6 +85,8 @@ private:
     };
     mutable std::array<SupportLatch, RoleManager::kPreviousRoleSlots>
         support_latches_{};
+    mutable strategy::TacticalStateTracker tactical_state_tracker_;
+    mutable double last_plan_server_time_s_{-1.0};
 };
 
 std::string_view to_string(TacticalDuty duty);
