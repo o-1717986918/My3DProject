@@ -138,6 +138,32 @@ def test_axis_aligned_command_sampler_zeroes_two_command_axes():
     assert np.any(np.abs(commands[:, 2]) > 1.0e-7)
 
 
+def test_axis_sampler_skips_disabled_axis_and_can_bias_weak_turn_direction():
+    env = DirectionalRun(
+        config_overrides={
+            "axis_aligned_command_probability": 1.0,
+            "axis_command_weights": [0.0, 0.0, 1.0],
+            "stand_probability": 0.0,
+            "lin_vel_x": [0.15, 1.55],
+            "lin_vel_y": [0.0, 0.0],
+            "ang_vel_yaw": [-0.9, 0.9],
+            "minimum_abs_yaw": 0.25,
+            "yaw_negative_probability": 1.0,
+        }
+    )
+    commands = np.asarray(
+        jax.vmap(env._sample_command)(jax.random.split(jax.random.PRNGKey(93), 128))
+    )
+
+    np.testing.assert_allclose(commands[:, :2], 0.0)
+    assert np.all(commands[:, 2] <= -0.25)
+
+
+def test_command_sampler_rejects_invalid_axis_weights():
+    with np.testing.assert_raises_regex(ValueError, "axis_command_weights"):
+        DirectionalRun(config_overrides={"axis_command_weights": [1.0, 0.0]})
+
+
 def test_pure_yaw_advances_phase_and_reports_planted_foot_slip():
     env = DirectionalRun(
         config_overrides={

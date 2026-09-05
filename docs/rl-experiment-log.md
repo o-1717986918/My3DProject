@@ -1315,7 +1315,7 @@ suite still rejects it: reverse completes 7/8 episodes and pure right turn only
 4/8, so the candidate remains unmounted. It passes 8/10 commands, the same
 count as the imported teacher; it improves teacher reverse completion from 4/8
 but worsens right-turn completion from 5/8. The next M2 run must mix universal
-teacher replay with the forward curriculum instead of specializing away
+command replay with the forward curriculum instead of specializing away
 untrained commands. The candidate is stored at
 `/home/win98/rl_runs/stable-motion/stable-forward-s20261120-v1` with ONNX
 SHA-256 `85c40c218d8eefd33b665fe2f93b508b3ec3f45fd7dd9591039b0d1b443de832`.

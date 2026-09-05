@@ -2,7 +2,9 @@
 
 Status: stable v1 remains the competition default; FastWalkV2 has been removed
 from launcher defaults after 7v7 fall evidence; staged rapid-turn,
-stable-forward and lateral training is active as of 2026-09-05
+stable-forward and lateral training is active as of 2026-09-05. This fallback
+does not close the task: the trained fast controller must become stable enough
+to regain frequent-use ownership.
 
 Owner environment: WSL2 Ubuntu 22.04, Conda `my3d-rl`
 

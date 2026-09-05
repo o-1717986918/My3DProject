@@ -269,6 +269,44 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.pose": -0.04,
         "reward.fall": -120.0,
     },
+    # Competition locomotion recovery: improve the frequently used forward and
+    # turn-in-place primitives together so a specialist update cannot forget
+    # the opposite turn direction. The weaker negative-yaw direction receives
+    # a small, explicit hard-case bias. Lateral translation remains disabled
+    # until this surface passes the frozen command suite.
+    "fast_walk_recovery": {
+        "lin_vel_x": [0.15, 1.55],
+        "lin_vel_y": [0.0, 0.0],
+        "ang_vel_yaw": [-0.90, 0.90],
+        "gait_frequency": [1.0, 2.0],
+        "stand_probability": 0.15,
+        "axis_aligned_command_probability": 1.0,
+        "axis_command_weights": [0.55, 0.0, 0.45],
+        "minimum_abs_yaw": 0.25,
+        "yaw_negative_probability": 0.58,
+        "command_resample_steps": 100,
+        "reset_joint_noise": 0.025,
+        "reset_root_velocity_noise": 0.04,
+        "reset_yaw_range": 0.15,
+        "push_enable": True,
+        "push_interval_steps": 200,
+        "push_magnitude": [0.01, 0.08],
+        "action_delay_max_steps": 1,
+        "reward.tracking_linear": 7.0,
+        "reward.tracking_yaw": 8.0,
+        "reward.upright": 3.0,
+        "reward.height": 2.0,
+        "reward.alive": 0.75,
+        "reward.lateral_tracking": -8.0,
+        "reward.yaw_rate_error": -6.0,
+        "reward.vertical_velocity": -0.45,
+        "reward.angular_xy": -0.40,
+        "reward.action_rate": -0.045,
+        "reward.action_acceleration": -0.018,
+        "reward.foot_slip": -0.03,
+        "reward.pose": -0.04,
+        "reward.fall": -150.0,
+    },
     # Stage C: only after A and B survive held-out tests, expand into genuine
     # pure-lateral and coupled commands rather than hiding them in curves.
     "soccer_lateral": {

@@ -104,6 +104,9 @@ def default_config() -> config_dict.ConfigDict:
         swing_period=0.20,
         stand_probability=0.2,
         axis_aligned_command_probability=0.0,
+        axis_command_weights=[1.0, 1.0, 1.0],
+        minimum_abs_yaw=0.0,
+        yaw_negative_probability=0.5,
         command_resample_steps=500,
         fixed_command=[0.0, 0.0, 0.0],
         use_fixed_command=False,
@@ -178,6 +181,38 @@ class DirectionalRun(mjx_env.MjxEnv):
             raise ValueError("stand_probability must be in [0, 1]")
         if not 0.0 <= self._config.axis_aligned_command_probability <= 1.0:
             raise ValueError("axis_aligned_command_probability must be in [0, 1]")
+        axis_command_weights = np.asarray(
+            self._config.axis_command_weights, dtype=np.float64
+        )
+        if (
+            axis_command_weights.shape != (3,)
+            or not np.isfinite(axis_command_weights).all()
+            or np.any(axis_command_weights < 0.0)
+            or not np.sum(axis_command_weights) > 0.0
+        ):
+            raise ValueError(
+                "axis_command_weights must contain three finite non-negative "
+                "values with positive sum"
+            )
+        self._axis_command_logits = jp.log(
+            jp.asarray(
+                np.maximum(
+                    axis_command_weights / np.sum(axis_command_weights), 1.0e-30
+                ),
+                dtype=jp.float32,
+            )
+        )
+        if self._config.minimum_abs_yaw < 0.0:
+            raise ValueError("minimum_abs_yaw must be non-negative")
+        if not 0.0 <= self._config.yaw_negative_probability <= 1.0:
+            raise ValueError("yaw_negative_probability must be in [0, 1]")
+        if self._config.minimum_abs_yaw > 0.0 and not (
+            self._config.ang_vel_yaw[0] <= -self._config.minimum_abs_yaw
+            and self._config.ang_vel_yaw[1] >= self._config.minimum_abs_yaw
+        ):
+            raise ValueError(
+                "minimum_abs_yaw requires a yaw range spanning both signs"
+            )
         if self._config.command_resample_steps < 1:
             raise ValueError("command_resample_steps must be positive")
         if self.contract.action_scale is None:
@@ -949,10 +984,41 @@ class DirectionalRun(mjx_env.MjxEnv):
             rng_x,
             rng_y,
             rng_yaw,
+            rng_yaw_magnitude,
+            rng_yaw_sign,
             rng_stand,
             rng_axis_gate,
             rng_axis_index,
-        ) = jax.random.split(rng, 6)
+        ) = jax.random.split(rng, 8)
+        sampled_yaw = jax.random.uniform(
+            rng_yaw,
+            minval=self._config.ang_vel_yaw[0],
+            maxval=self._config.ang_vel_yaw[1],
+        )
+        yaw_magnitude = jax.random.uniform(
+            rng_yaw_magnitude,
+            minval=self._config.minimum_abs_yaw,
+            maxval=max(
+                abs(self._config.ang_vel_yaw[0]),
+                abs(self._config.ang_vel_yaw[1]),
+            ),
+        )
+        signed_yaw = jp.where(
+            jax.random.bernoulli(
+                rng_yaw_sign, self._config.yaw_negative_probability
+            ),
+            -yaw_magnitude,
+            yaw_magnitude,
+        )
+        sampled_yaw = jp.where(
+            self._config.minimum_abs_yaw > 0.0,
+            jp.clip(
+                signed_yaw,
+                self._config.ang_vel_yaw[0],
+                self._config.ang_vel_yaw[1],
+            ),
+            sampled_yaw,
+        )
         command = jp.array(
             [
                 jax.random.uniform(
@@ -965,14 +1031,12 @@ class DirectionalRun(mjx_env.MjxEnv):
                     minval=self._config.lin_vel_y[0],
                     maxval=self._config.lin_vel_y[1],
                 ),
-                jax.random.uniform(
-                    rng_yaw,
-                    minval=self._config.ang_vel_yaw[0],
-                    maxval=self._config.ang_vel_yaw[1],
-                ),
+                sampled_yaw,
             ]
         )
-        axis_index = jax.random.randint(rng_axis_index, (), 0, 3)
+        axis_index = jax.random.categorical(
+            rng_axis_index, self._axis_command_logits
+        )
         axis_command = jp.where(
             axis_index == 0,
             jp.array([command[0], 0.0, 0.0]),

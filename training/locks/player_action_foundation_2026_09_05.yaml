@@ -189,7 +189,7 @@ verification:
 
 remaining_learning_route:
   - fix rapid_turn left_right symmetry and transition stability
-  - train stable_forward before reopening lateral commands
+  - train fast_walk_recovery with forward_and_turn command replay before reopening lateral commands
   - train soccer_lateral with explicit pure-axis evaluation
   - build multi-condition pass teachers and a self-contained BC/DAgger actor
   - extend pass_teacher anchors to 3.5m_and_5m and shot anchors to 6m_and_8m

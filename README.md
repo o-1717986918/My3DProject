@@ -161,7 +161,9 @@ its fall rate is not yet competition-release quality.
 The WSL team, acceptance and browser-match launchers enable parameterized
 residual/procedural contact and the bounded learned-kick actor by default.
 FastWalkV2 is no longer enabled by default after repeated 7v7 falls; stable
-walk/get-up own the competition movement path. The current transition actor is only 27/92 on its frozen
+walk/get-up temporarily own the competition movement path while FastWalk itself
+is retrained for frequent stable use. Disabling it is a runtime safety measure,
+not the locomotion deliverable. The current transition actor is only 27/92 on its frozen
 exact-CPU set with one fall, so it receives joint ownership only in its narrow
 measured 2 m envelope; all other target contacts retain the stronger fallback.
 
