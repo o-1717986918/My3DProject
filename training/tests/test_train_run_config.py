@@ -1,4 +1,4 @@
-from tools.train_run import STAGES, _effective_timesteps
+from tools.train_run import STAGES, _compatible_num_evals, _effective_timesteps
 
 
 def test_motion_reference_initialization_is_scoped_to_motion_stages():
@@ -66,6 +66,11 @@ def test_fast_walk_recovery_trains_forward_and_both_turns_without_lateral():
 def test_effective_timesteps_rounds_to_complete_ppo_epochs():
     assert _effective_timesteps(196_608, 196_608) == 196_608
     assert _effective_timesteps(1_048_576, 196_608) == 1_179_648
+
+
+def test_eval_cadence_does_not_silently_expand_training_budget():
+    assert _compatible_num_evals(1_179_648, 196_608, 6) == 7
+    assert _compatible_num_evals(1_179_648, 196_608, 4) == 4
 
 
 def test_right_turn_expert_is_scoped_to_negative_yaw_teacher_data():

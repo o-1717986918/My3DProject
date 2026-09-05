@@ -140,3 +140,35 @@ next_iteration:
     - increase_zero_yaw_tracking_weight_without_increasing_speed_range
     - evaluate_fixed_030_and_045_before_transition_recovery
   runtime_fallback_until_passed: turn_then_forward_with_stable_walk
+
+yaw_lock_result:
+  run: /home/win98/rl_runs/stable-motion/lateral-left-yaw-lock-s20261193-v1
+  source_revision: d82e00282a27c74c49af56312e381b101d377814
+  requested_timesteps: 1179648
+  observed_final_progress_steps: 1966080
+  accounting_note:
+    - brax_rounded_each_of_num_evals_minus_one_intervals_to_full_epochs
+    - original_manifest_effective_timesteps_is_therefore_not_authoritative
+    - trainer_fixed_after_this_run_to_choose_an_epoch_compatible_eval_cadence
+  manifest_sha256: 99381033c3bac1cebaef61d1131b7abba45c9d83e70dc7745804e4f8446aa70d
+  planned_checkpoint_1179648:
+    model_sha256: 36a1cf9167e19e92fdfe724fe2bc59f5e163abf891fcd10dec75823f16c19658
+    onnx_parity_max_abs_error: 0.000009059906005859375
+    upright_left_and_mirrored_right: 64_of_64_each
+    vy_030_actual_mps: [0.20141304594327225, -0.203913259330324]
+    vy_030_yaw_rate_rad_s: [-0.15160102045233065, 0.15163856394411535]
+    vy_045_actual_mps: [0.3398582397289442, -0.34391551654654806]
+    vy_045_yaw_rate_rad_s: [-0.14639329986656596, 0.1466535241379816]
+  overrun_checkpoint_1966080:
+    model_sha256: 4503ea7ccbdd5a111c3f22f5802004ef897ace567d47b7f9a34dd3d1e4b8104c
+    onnx_parity_max_abs_error: 0.0000095367431640625
+    upright_left_and_mirrored_right: 64_of_64_each
+    vy_030_actual_mps: [0.19705647445054808, -0.19977024026818285]
+    vy_030_yaw_rate_rad_s: [-0.17168378597264272, 0.17120992098150184]
+    vy_045_actual_mps: [0.33930465909393537, -0.34231645166691677]
+    vy_045_yaw_rate_rad_s: [-0.16749685756237936, 0.16773320885295795]
+  decision: rejected_yaw_gate_and_no_improvement_over_first_lateral_expert
+  next_method:
+    - do_not_continue_scalar_yaw_reward_tuning
+    - use_teacher_distillation_or_action_space_projection_for_axis_decoupling
+    - retain_turn_then_forward_runtime_fallback

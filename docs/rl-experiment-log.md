@@ -1444,3 +1444,22 @@ with no illegal defense and two fallback contacts; it did not naturally enter
 an exact release slot. This is positive evidence for fail-soft continuity, not
 promotion evidence for the exact skill. Continuous chase-to-contact training
 remains the corrective path.
+
+## Lateral yaw-lock continuation — 2026-09-05
+
+The formal run at
+`/home/win98/rl_runs/stable-motion/lateral-left-yaw-lock-s20261193-v1`
+restored the first lateral expert and increased zero-yaw tracking penalties.
+The planned 1,179,648-step checkpoint retained 64/64 upright completion in
+each direct/mirrored direction. At `vy=0.45 m/s` it produced approximately
+`+0.340/-0.344 m/s`, but yaw remained `-0.146/+0.147 rad/s`, worse than the
+first expert's approximately `0.123 rad/s`. It is rejected.
+
+This run also exposed a trainer accounting defect: Brax rounded each of five
+evaluation intervals to complete PPO epochs, so progress reached 1,966,080
+while the old manifest recorded 1,179,648. The overrun checkpoint remained
+upright but yaw worsened to about `±0.168 rad/s` and is also rejected. Shared
+training-schedule code now chooses an evaluation count that divides the epoch
+budget and records requested/effective values separately. The immutable old
+manifest is not rewritten; its discrepancy and hashes are preserved in
+`training/locks/lateral_expert_2026_09_05.yaml`.

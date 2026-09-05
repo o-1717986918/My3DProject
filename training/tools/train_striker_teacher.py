@@ -25,6 +25,7 @@ from my3d_rl.striker_env import (
     DEFAULT_CONTRACT,
     LongHorizonStriker,
 )
+from my3d_rl.training_schedule import compatible_num_evals, effective_timesteps
 
 
 STAGES: dict[str, dict[str, Any]] = {
@@ -304,7 +305,12 @@ def main() -> None:
     if (batch_size * num_minibatches) % args.num_envs:
         raise ValueError("num-envs must divide batch-size times num-minibatches")
     minimum_timesteps = batch_size * num_minibatches * unroll_length
-    effective_timesteps = max(args.num_timesteps, minimum_timesteps)
+    effective_num_timesteps = effective_timesteps(
+        args.num_timesteps, minimum_timesteps
+    )
+    effective_num_evals = compatible_num_evals(
+        effective_num_timesteps, minimum_timesteps, args.num_evals
+    )
 
     contract = load_policy_contract(args.contract)
     if contract.policy_name != "striker_policy_v1":
@@ -387,7 +393,10 @@ def main() -> None:
         "kick_prior": kick_prior_metadata,
         "num_envs": args.num_envs,
         "requested_timesteps": args.num_timesteps,
-        "effective_timesteps": effective_timesteps,
+        "minimum_epoch_timesteps": minimum_timesteps,
+        "effective_timesteps": effective_num_timesteps,
+        "requested_num_evals": args.num_evals,
+        "effective_num_evals": effective_num_evals,
         "seed": args.seed,
         "environment_config": env._config.to_dict(),
         "evaluation_environment_config": eval_env._config.to_dict(),
@@ -428,7 +437,7 @@ def main() -> None:
         _, _, final_metrics = ppo.train(
             environment=env,
             eval_env=eval_env,
-            num_timesteps=effective_timesteps,
+            num_timesteps=effective_num_timesteps,
             num_envs=args.num_envs,
             episode_length=env._config.episode_length,
             action_repeat=1,
@@ -448,7 +457,7 @@ def main() -> None:
             bootstrap_on_timeout=True,
             network_factory=network_factory,
             seed=args.seed,
-            num_evals=args.num_evals,
+            num_evals=effective_num_evals,
             num_eval_envs=args.num_eval_envs,
             deterministic_eval=True,
             run_evals=True,

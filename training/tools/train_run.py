@@ -26,6 +26,10 @@ from my3d_rl.contract import load_policy_contract
 from my3d_rl.motion_reference import validate_motion_reference
 from my3d_rl.ppo_profile import PROFILES, get_ppo_profile
 from my3d_rl.run_env import DirectionalRun
+from my3d_rl.training_schedule import (
+    compatible_num_evals as _compatible_num_evals,
+    effective_timesteps as _effective_timesteps,
+)
 
 
 STAGES: dict[str, dict[str, Any]] = {
@@ -611,13 +615,6 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _effective_timesteps(requested: int, epoch_size: int) -> int:
-    """Round a requested rollout budget up to the trainer's full PPO epoch."""
-    if requested < 1 or epoch_size < 1:
-        raise ValueError("requested timesteps and epoch size must be positive")
-    return (requested + epoch_size - 1) // epoch_size * epoch_size
-
-
 def _teacher_restore_params(
     env: DirectionalRun, profile: Any, model_path: Path, seed: int
 ) -> tuple[tuple[Any, Any, Any], float]:
@@ -758,6 +755,9 @@ def main() -> None:
     effective_num_timesteps = _effective_timesteps(
         args.num_timesteps, minimum_epoch_timesteps
     )
+    effective_num_evals = _compatible_num_evals(
+        effective_num_timesteps, minimum_epoch_timesteps, args.num_evals
+    )
 
     args.run_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = args.run_dir / "checkpoints"
@@ -823,6 +823,8 @@ def main() -> None:
         "requested_timesteps": args.num_timesteps,
         "minimum_epoch_timesteps": minimum_epoch_timesteps,
         "effective_timesteps": effective_num_timesteps,
+        "requested_num_evals": args.num_evals,
+        "effective_num_evals": effective_num_evals,
         "seed": args.seed,
         "environment_config": env._config.to_dict(),
         "evaluation_environment_config": (
@@ -903,7 +905,7 @@ def main() -> None:
             bootstrap_on_timeout=False,
             network_factory=network_factory,
             seed=args.seed,
-            num_evals=args.num_evals,
+            num_evals=effective_num_evals,
             num_eval_envs=args.num_eval_envs,
             deterministic_eval=True,
             run_evals=True,
