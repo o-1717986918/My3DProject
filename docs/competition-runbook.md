@@ -220,6 +220,42 @@ scripts/analyze_apollo_vs_base_match.py /home/win98/rl_runs/RUN_DIRECTORY
 The current evidence and interpretation limits are recorded in
 `docs/current-vs-apollo-strategy-audit.md`.
 
+### BoosterSoccer binary comparisons
+
+The supplied `BoosterSoccer.tar.gz` can be used as a black-box opponent through
+two separate launchers.  Neither launcher changes the ordinary self-play or
+developed-versus-pristine scripts:
+
+```bash
+# Current developed team versus BoosterSoccer
+scripts/run_web_match_vs_booster_soccer.sh 120000
+
+# Pristine Apollo 71018c9 versus BoosterSoccer
+scripts/run_web_match_apollo_base_vs_booster_soccer.sh 120000
+```
+
+Both default to 20 minutes of referee time, 4x simulation, a `1600x900` Web
+view in the Windows default browser, Apollo on the left, and BoosterSoccer on
+the right.  Use `MATCH_APOLLO_SIDE=right` to swap sides or
+`MATCH_KICKOFF_SIDE=right` to select the kickoff side independently.  The
+standard `MATCH_DURATION_SECONDS`, rendering, port, browser, and run-directory
+overrides remain available.
+
+The input archive is locked to SHA-256
+`e38e2fda3dd22999f2dac5a2e0812855cda38b380b628e0b0e0ac20ddd0777a0` and
+defaults to `/mnt/c/Users/26532/Downloads/BoosterSoccer.tar.gz`.  Override
+`BOOSTER_ARCHIVE` and `BOOSTER_ARCHIVE_SHA256` together for an intentional
+package update, or set `BOOSTER_ROOT` to a pre-extracted compatible package.
+Extraction, logs, and compatibility files stay under `/home/win98`.
+
+The supplied binary requires GLIBC 2.38 while Ubuntu 22.04 provides 2.35.  The
+shared launcher does not replace the system C library: it downloads the locked
+Ubuntu 24.04 `libc6` package into a private WSL cache and invokes BoosterSoccer
+through that package's loader.  The downloaded package is locked to SHA-256
+`3b8d5391b6b484a4c81fd000b6064885ad967ec3cb966bc57603f3fb3ebf0ed5`.
+Two short physical smoke matches have verified 14/14 player joins and clean
+GameOver for both comparison variants.
+
 ## 6. Package and inspect
 
 ```bash
