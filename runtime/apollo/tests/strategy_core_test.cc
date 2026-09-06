@@ -198,6 +198,46 @@ int main() {
         std::cerr << "phase tracker did not initialize from clear possession\n";
         return 1;
     }
+    world::WorldSnapshot ambiguous = possession;
+    ambiguous.server_time = 10.1;
+    ambiguous.teammates.clear();
+    ambiguous.opponents.clear();
+    world::PlayerObservation ambiguous_opponent;
+    ambiguous_opponent.player_number = 1;
+    ambiguous_opponent.seen = true;
+    ambiguous_opponent.last_seen_time = ambiguous.server_time;
+    ambiguous_opponent.position_m = {0.6, 0.0, 0.8};
+    ambiguous.opponents.push_back(ambiguous_opponent);
+    if (strategy::build_tactical_state(ambiguous).possession !=
+            strategy::PossessionOwner::Contested) {
+        std::cerr << "ambiguous hysteresis fixture was not contested\n";
+        return 1;
+    }
+    const auto ambiguous_grace = phase_tracker.update(ambiguous);
+    if (ambiguous_grace.possession != strategy::PossessionOwner::Ours ||
+        ambiguous_grace.phase != strategy::TacticalPhase::Attack ||
+        ambiguous_grace.ball_owner_player_number != 7) {
+        std::cerr << "single ambiguous sample bypassed possession grace\n";
+        return 1;
+    }
+    ambiguous.server_time = 10.6;
+    ambiguous.opponents.front().last_seen_time = ambiguous.server_time;
+    const auto sustained_ambiguous = phase_tracker.update(ambiguous);
+    if (sustained_ambiguous.possession !=
+            strategy::PossessionOwner::Contested ||
+        sustained_ambiguous.phase != strategy::TacticalPhase::Transition ||
+        sustained_ambiguous.ball_owner_player_number != 0) {
+        std::cerr << "sustained ambiguity did not enter transition\n";
+        return 1;
+    }
+
+    // Reinitialize so the turnover timing below remains an isolated contract.
+    phase_tracker.reset();
+    if (phase_tracker.update(possession).phase !=
+        strategy::TacticalPhase::Attack) {
+        std::cerr << "phase tracker did not reset to clear possession\n";
+        return 1;
+    }
     world::WorldSnapshot weak_turnover = possession;
     weak_turnover.server_time = 10.1;
     weak_turnover.teammates.clear();

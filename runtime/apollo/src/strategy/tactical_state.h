@@ -64,6 +64,11 @@ class TacticalStateTracker {
 public:
     struct Parameters {
         double possession_confirmation_s{0.40};
+        // A one-frame Contested/Unknown estimate is common while the ball or
+        // nearest player is briefly occluded.  Keep the last firm phase for a
+        // short grace period instead of bypassing possession hysteresis and
+        // making every off-ball player reverse its tactical target.
+        double ambiguous_observation_grace_s{0.40};
         double strong_evidence_confidence{0.85};
         double counter_press_window_s{1.20};
         double maximum_ball_age_s{0.75};

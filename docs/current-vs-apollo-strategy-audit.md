@@ -617,6 +617,96 @@ committed three. The retained natural record is now `2W-5D-1L`, goals `2:1`.
 Strategy can hold useful territory, but action acquisition, ordinary locomotion
 stability and completed contact still prevent a superiority claim.
 
+### 4.15 Tactical-churn ablation and conservative phase handling
+
+V36 also exposed a separate strategy cost. With the complete `TeamTactics`
+layer enabled, periodic telemetry contained 832 duty switches, 6,673 plan-
+revision switches, 829 target jumps above 1 m and 534 facing changes above
+45 degrees. These counts include legitimate ball and play-mode changes and are
+not physical-event counts, but they are much larger than the same measurements
+with only dynamic open-play duties disabled. The difference matters because the
+deployed walk frequently falls and every unnecessary target reversal consumes
+the scarce stable gait time needed to reach a pass or shot release.
+
+Two independent natural ablations retained the developed role assignment,
+formation, restart coordinator, goalkeeper fixes and full action stack, while
+setting only `APOLLO_ENABLE_TEAM_TACTICS=0`. Both beat pristine Apollo `1:0`.
+V37 placed 83.0% of fresh-ball buckets in the opponent half and recorded nine
+independent GetUp episodes; its goal followed continuous pressure/forward ball
+progress rather than an exact kick. V38 placed 63.5% of fresh-ball buckets and
+84.3% of strictly visible-ball buckets in the opponent half, with 13 independent
+GetUp episodes and three attributed fallback contacts. Neither run executed an
+exact targeted kick. The paired result is strong evidence that the former
+high-frequency duty layer could obstruct the currently usable simple pressure
+game; it is not yet proof that all marking or support concepts are inferior.
+
+The repair keeps emergency behavior and removes only unsupported urgency:
+
+- a transient `Contested` or `Unknown` observation now receives the same 0.40 s
+  grace as an ordinary weak possession change, rather than bypassing phase
+  hysteresis for one frame;
+- sustained ambiguity still becomes `Transition`, but off-ball players retain
+  their phase-aware formation instead of simultaneously switching to mark,
+  cover, block and outlet targets;
+- a reachable moving-ball intercept, goalkeeper duty and AP pressure continue
+  to bypass the conservative hold immediately;
+- attacking support targets are held for 0.9 s, long enough for the current
+  walking stack to settle onto one lane, without becoming action ownership.
+
+V39 exercised that conservative repair with dynamic tactics enabled. It reduced
+plan-revision changes from 6,673 to 5,659, but still produced 861 duty switches
+and 689 target jumps above 1 m. The match finished `0:0`; fresh-ball median x
+was `-10.27 m` and only 4.7% of fresh buckets reached the opponent half. Ten
+independent GetUp entries followed ordinary Walk, and no exact or fallback
+contact executed. The state repair is valid and retained, but it did not make
+the complete dynamic layer competitive with the two simple-shape ablations.
+
+The full dynamic orchestrator remains available behind
+`APOLLO_ENABLE_TEAM_TACTICS=1` for diagnosis, but is no longer the production
+architecture. The default now extracts only independently useful cooperation:
+Support/Unmark for the two attacking lanes, unique centre-back Mark targets,
+pass communication/receiving, bounded lost-ball search and goalkeeper safety.
+Broad Cover/BlockLane/Intercept/Outlet retasking is discarded from the default.
+AP is forced back to Pressure whenever the ball is actionable, so a whole-team
+plan cannot pull the only ball player away from a walk, turn or contact action.
+Stable superiority is still unproven, but it is no longer a prerequisite for
+continuing action-layer development.
+
+The same motion-first rule applies inside the AP action selector. A planner
+`Move` candidate remains visible in telemetry, but no longer executes a generic
+walk whose stop radius is centred on the ball. The direct approach/push
+controller owns that translation and keeps its target beyond the ball. Exact
+Dribble/Pass/Shoot/Clear actions may still take ownership when their concrete
+capability contract is satisfied; failed or unavailable releases fall back to
+continuous pressure instead of a team-strategy hold.
+
+The first right-side comparison, v40, then lost `0:1`; fresh-ball median x was
+`-4.55 m` and only 21.6% of fresh buckets were in the opponent half. Its first
+analysis incorrectly reported 31 current-team Illegal defense events because
+the parser interpreted the robot id prefix `r` as the right side. The referee
+message carries the actual area at the end of the line. Re-parsing that field
+attributes 30 events to left-side pristine Apollo and one to the right-side
+current team. The analyzer now reports both physical side and developed-team
+counts explicitly.
+
+V40 still revealed a real, smaller legality risk: with dynamic duties disabled,
+player 6 received ordinary Formation targets as deep as `x=-26.8 m`, while the
+server permits only two own-team bodies in the goalkeeper area. A first repair
+reserved the area for the goalkeeper alone. V41 exercised that configuration
+from the right and also lost `0:1`, but current-team Illegal defense fell to
+zero while left-side Apollo received 30 events. Fresh-ball median x improved to
+`-0.22 m`, strictly visible-ball median x was `+0.74 m`, and only five
+independent GetUp entries followed Walk. No exact or fallback contact executed,
+so the result still exposes finishing and deep-defense weakness rather than an
+action success.
+
+The final geometry contract uses the legal capacity instead of abandoning it:
+GK and the fixed CBL role may enter, while every other formation and generic
+walk target stays at least 0.8 m beyond the inclusive boundary. A fixed role
+avoids transient overlap when the ball changes side. Unit and decision-level
+tests cover the v40 deep-defense geometry; the two-player version still needs a
+right-side natural replay before promotion evidence is updated.
+
 ## 5. What is actually better, and what is not yet proven
 
 The following improvements are supported by code invariants and tests rather
@@ -640,17 +730,21 @@ match the deployed locomotion speed.
 
 ## 6. Controlled comparison protocol
 
-The comparison launcher keeps role assignment, formation, and restart legality
-constant while allowing only the new open-play duty layer to be disabled:
+The comparison launcher keeps role assignment, formation, lightweight
+cooperation and restart legality constant. The switch below adds the discarded
+broad duty orchestrator; it does not disable support, marking or pass comms in
+the default path:
 
 ```bash
-# Full developed stack versus pristine Apollo
+# Experimental full dynamic-duty stack versus pristine Apollo
 APOLLO_ENABLE_TEAM_TACTICS=1 \
   scripts/run_web_match_vs_apollo_base.sh 120000
 
-# Same developed action stack, without new open-play TeamTactics duties
-APOLLO_ENABLE_TEAM_TACTICS=0 \
-  scripts/run_web_match_vs_apollo_base.sh 120000
+# Motion-first collaboration default with the same developed action stack
+scripts/run_web_match_vs_apollo_base.sh 120000
+
+# Put the developed team on the right while preserving it as kickoff side
+MATCH_CURRENT_SIDE=right scripts/run_web_match_vs_apollo_base.sh 120000
 ```
 
 Action attribution can then be separated without changing team strategy:
@@ -678,9 +772,9 @@ itself.
 
 ## 7. Immediate development order
 
-1. Repeat natural, side-swapped comparison matches after the pass-retention
-   repair. Preserve v30 as the first natural stale-keeper replay and do not
-   convert the controlled v35 execution into a score-line claim.
+1. Complete the motion-owned ball path: direct pressure must reach and cross
+   the ball; exact Dribble/Pass/Shoot/Clear must either acquire and release or
+   return immediately to pressure. A planner Move/Hold may not stop the AP.
 2. Improve the learned transition's distance and complete the receiver
    lifecycle. V35 reached only 1.052/2.046 m and timed out; the next corpus must
    include those underpowered server outcomes as hard negatives/DAgger states.
@@ -701,7 +795,9 @@ itself.
    implicated in current falls and must remain in the audit.
 8. Keep the 2/3.5/5 m deterministic bank and original forward contact as
    explicit fallbacks while collecting server outcome traces.
-9. Calibrate reach time and action utility from deployed FastWalk/turn logs,
-   then repeat tactics-on/tactics-off and side-swapped comparisons.
-10. Decide superiority only from repeated full matches; retain every loss and
-   draw instead of selecting favourable scores.
+9. Calibrate reach time and action utility from deployed FastWalk/turn logs.
+   Reintroduce a discarded broad duty only when it cannot pre-empt an available
+   action and its local value is clear; otherwise delete it from production.
+10. Use periodic full matches as diagnosis, not as a gate on action or
+   collaboration implementation. Retain losses and draws when comparisons are
+   run so regressions remain visible.

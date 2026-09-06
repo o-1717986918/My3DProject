@@ -337,7 +337,13 @@ std::optional<robot::JointTargets> WalkRunner::step_fast_walk(
 bool WalkRunner::rapid_turn_supported(
     const world::WorldSnapshot& snapshot,
     const std::array<float, 3>& stable_velocity_command) {
-    constexpr double kBallHandlingExclusionRadiusM = 1.50;
+    // The mounted mirrored turn expert is 64/64 upright on both directions
+    // with about 7.5--8.0 cm median drift.  A 1.50 m exclusion forced the
+    // much slower generic gait to own almost every ball-side turn. Keep the
+    // expert out of the actual contact corridor, but allow it to win the race
+    // from a safe setup distance; precision kick release remains independently
+    // gated and will fall back to the stable actor inside this radius.
+    constexpr double kBallHandlingExclusionRadiusM = 0.70;
     const bool near_actionable_ball = snapshot.ball.position_valid &&
         math::planar_dist(
             {snapshot.self.position_m[0], snapshot.self.position_m[1]},

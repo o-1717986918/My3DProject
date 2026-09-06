@@ -88,6 +88,9 @@ int main() {
     }
 
     world::WorldSnapshot defense = base_snapshot();
+    // The following fixture is an independent defensive episode rather than
+    // the next camera frame of the attacking fixtures above.
+    tactics.reset();
     defense.self.position_m = {-9.0, 4.0, 0.8};
     defense.teammates = {player(6, -9.0, 4.0, true)};
     defense.opponents = {
@@ -356,6 +359,33 @@ int main() {
         {6, decision::RoleManager::ROLE_ST, {4.0, 3.0}},
         {7, decision::RoleManager::ROLE_AP, {0.0, 1.0}},
     };
+
+    decision::TeamTactics ambiguous_tactics;
+    world::WorldSnapshot ambiguous_team = base_snapshot();
+    ambiguous_team.player_number = 7;
+    ambiguous_team.self.position_m = {-0.6, 0.0, 0.8};
+    ambiguous_team.teammates = {player(7, -0.6, 0.0, true)};
+    ambiguous_team.opponents = {player(1, 0.6, 0.0, false)};
+    ambiguous_team.ball.velocity_valid = false;
+    const auto ambiguous_plan = ambiguous_tactics.plan_all(
+        ambiguous_team, roles);
+    const bool ambiguous_field_player_left_shape = std::any_of(
+        ambiguous_plan.assignments.begin(), ambiguous_plan.assignments.end(),
+        [](const decision::TeamTacticalAssignment& assignment) {
+            return assignment.role_id != decision::RoleManager::ROLE_GK &&
+                assignment.role_id != decision::RoleManager::ROLE_AP &&
+                assignment.target.duty != decision::TacticalDuty::Formation;
+        });
+    const auto* ambiguous_ap = ambiguous_plan.for_role(
+        decision::RoleManager::ROLE_AP);
+    if (ambiguous_plan.tactical_state.phase !=
+            strategy::TacticalPhase::Transition ||
+        ambiguous_field_player_left_shape || ambiguous_ap == nullptr ||
+        ambiguous_ap->target.duty != decision::TacticalDuty::Pressure) {
+        std::cerr << "ambiguous midfield estimate churned noncritical duties\n";
+        return 1;
+    }
+
     const auto team_plan = tactics.plan_all(team_defense, roles);
     int intercept_count = 0;
     std::vector<int> marked_players;
@@ -411,6 +441,64 @@ int main() {
             striker_support->target.position_m[1] -
                 central_support->target.position_m[1]) < 2.0) {
         std::cerr << "joint attack plan did not allocate separated support lanes\n";
+        return 1;
+    }
+
+    // The production path deliberately filters the broad orchestrator rather
+    // than disabling all useful cooperation.  Support/unmark survives, the AP
+    // remains on direct pressure, and unrelated cover/outlet retasking falls
+    // back to the stable formation so motion execution owns the ball path.
+    decision::TeamTactics attack_collaboration_tactics;
+    const auto attack_collaboration =
+        attack_collaboration_tactics.plan_collaboration(team_attack, roles);
+    const auto* collaboration_striker = attack_collaboration.for_role(
+        decision::RoleManager::ROLE_ST);
+    const auto* collaboration_central = attack_collaboration.for_role(
+        decision::RoleManager::ROLE_CBM);
+    const auto* collaboration_ap = attack_collaboration.for_role(
+        decision::RoleManager::ROLE_AP);
+    const auto* collaboration_cdm = attack_collaboration.for_role(
+        decision::RoleManager::ROLE_CDM);
+    if (collaboration_striker == nullptr || collaboration_central == nullptr ||
+        collaboration_ap == nullptr || collaboration_cdm == nullptr ||
+        (collaboration_striker->target.duty !=
+             decision::TacticalDuty::Support &&
+         collaboration_striker->target.duty !=
+             decision::TacticalDuty::Unmark) ||
+        (collaboration_central->target.duty !=
+             decision::TacticalDuty::Support &&
+         collaboration_central->target.duty !=
+             decision::TacticalDuty::Unmark) ||
+        collaboration_ap->target.duty != decision::TacticalDuty::Pressure ||
+        collaboration_cdm->target.duty != decision::TacticalDuty::Formation) {
+        std::cerr << "motion-first plan did not retain only attacking collaboration\n";
+        return 1;
+    }
+
+    decision::TeamTactics defense_collaboration_tactics;
+    const auto defense_collaboration =
+        defense_collaboration_tactics.plan_collaboration(team_defense, roles);
+    int collaboration_mark_count = 0;
+    for (const auto& assignment : defense_collaboration.assignments) {
+        if (assignment.target.duty == decision::TacticalDuty::Mark) {
+            ++collaboration_mark_count;
+            continue;
+        }
+        if (assignment.role_id == decision::RoleManager::ROLE_GK ||
+            assignment.role_id == decision::RoleManager::ROLE_AP) {
+            continue;
+        }
+        if (assignment.target.duty != decision::TacticalDuty::Formation) {
+            std::cerr << "motion-first defense retained a broad tactical duty\n";
+            return 1;
+        }
+    }
+    const auto* defense_collaboration_ap = defense_collaboration.for_role(
+        decision::RoleManager::ROLE_AP);
+    if (collaboration_mark_count != 2 || defense_collaboration_ap == nullptr ||
+        defense_collaboration_ap->target.duty !=
+            decision::TacticalDuty::Pressure) {
+        std::cerr << "motion-first defense lost marking or direct AP pressure\n";
         return 1;
     }
 

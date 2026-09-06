@@ -17,6 +17,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -28,12 +29,17 @@ namespace {
 constexpr double kWalkMaxSpeedM = 3.0;
 constexpr double kWalkBrakeDecelMps2 = 1.0;
 constexpr double kWalkStopRadiusM = 0.15;
-constexpr double kWalkHeadingSlowStartDeg = 35.0;
+constexpr double kWalkHeadingSlowStartDeg = 18.0;
 // The currently deployed walk is substantially more reliable in its forward
 // domain than while translating sideways. Above this heading error, compose a
 // pure turn with a later forward walk instead of asking the policy to strafe or
 // backpedal. This is a runtime fallback, not a learned omnidirectional claim.
-constexpr double kWalkHeadingStopDeg = 55.0;
+constexpr double kWalkHeadingStopDeg = 32.0;
+constexpr double kEmergencyChallengePushPastBallM = 0.70;
+// An opponent inside this corridor makes centimetre-scale setup or a detour
+// around the ball strictly lower priority than immediate physical pressure.
+constexpr double kUrgentOpponentBallDistanceM = 1.40;
+constexpr double kUrgentSelfBallDistanceM = 1.10;
 // The exact-physics kick table was validated with the ball 0.31--0.40 m in
 // front and at most 0.08 m to either side.  Keep the decision release gate in
 // the same domain instead of starting the one-second macro from the former
@@ -376,11 +382,18 @@ WalkCommand make_walk_command_avoiding(
     std::optional<int> role_id = std::nullopt,
     bool suppress_heading_slowdown = false,
     bool avoid_obstacles = true) {
+    const std::array<double, 2> legal_target_position_m =
+        role_id.has_value() &&
+            (*role_id == RoleManager::ROLE_GK ||
+             *role_id == RoleManager::ROLE_CBL)
+        ? target_position_m
+        : field_geometry::keep_field_player_outside_our_goalie_area(
+              target_position_m);
     const std::array<double, 2> self{snapshot.self.position_m[0], snapshot.self.position_m[1]};
-    const double dist = math::planar_dist(self, target_position_m);
+    const double dist = math::planar_dist(self, legal_target_position_m);
 
     if (dist < field_geometry::kNearTargetM) {
-        WalkCommand command = make_walk_command(target_position_m);
+        WalkCommand command = make_walk_command(legal_target_position_m);
         command.orientation_deg = orient_to_ball
             ? orientation_to_ball_from_self(snapshot)
             : std::nullopt;
@@ -391,7 +404,7 @@ WalkCommand make_walk_command_avoiding(
 
     const auto plan = plan_walk(
         self,
-        target_position_m,
+        legal_target_position_m,
         snapshot,
         snapshot.player_number,
         opponent_x_threshold,
@@ -434,7 +447,43 @@ struct APDecisionContext {
     std::array<double, 2> ball{0.0, 0.0};
     std::array<double, 2> self{0.0, 0.0};
     double ball_distance{0.0};
+    bool urgent_contest{false};
 };
+
+double nearest_fresh_opponent_ball_distance_m(
+    const world::WorldSnapshot& snapshot) {
+    if (!snapshot.ball.position_valid) {
+        return std::numeric_limits<double>::infinity();
+    }
+    const std::array<double, 2> ball{
+        snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+    double nearest = std::numeric_limits<double>::infinity();
+    const auto consider = [&](const world::PlayerObservation& opponent) {
+        const bool fresh = opponent.seen ||
+            (opponent.last_seen_time >= 0.0 &&
+             snapshot.server_time - opponent.last_seen_time <= 0.75);
+        if (!fresh || opponent.fallen) return;
+        nearest = std::min(
+            nearest,
+            math::planar_dist(
+                ball,
+                {opponent.position_m[0], opponent.position_m[1]}));
+    };
+    for (const auto& opponent : snapshot.opponents) consider(opponent);
+    for (const auto& opponent : snapshot.shared_opponents) consider(opponent);
+    return nearest;
+}
+
+bool urgent_ball_contest(
+    const world::WorldSnapshot& snapshot,
+    double self_ball_distance_m) {
+    return snapshot.play_mode == world::PlayMode::PlayOn &&
+        snapshot.ball.position_valid &&
+        (snapshot.ball.visible || snapshot.ball.position_age_s <= 0.75) &&
+        self_ball_distance_m <= kUrgentSelfBallDistanceM &&
+        nearest_fresh_opponent_ball_distance_m(snapshot) <=
+            kUrgentOpponentBallDistanceM;
+}
 
 bool static_shot_setup_feasible(
     const world::WorldSnapshot& snapshot,
@@ -615,6 +664,51 @@ HighLevelCommand make_dribble_command(
             self_from_ball[0] * perpendicular[0] +
             self_from_ball[1] * perpendicular[1];
         const double lateral_offset = std::abs(signed_lateral_offset);
+        if (context.urgent_contest) {
+            // Under a live challenge, going 0.8 m around the ball to recover a
+            // textbook behind-ball pose loses the race we are trying to win.
+            // Walk through the ball on the shortest line; use the desired goal
+            // direction only when the body is already broadly behind it.
+            const auto self_to_ball = math::vec2_sub(
+                context.ball, context.self);
+            const auto shortest_contact_direction = math::vec2_unit_or(
+                self_to_ball, direction);
+            const double goal_alignment =
+                shortest_contact_direction[0] * direction[0] +
+                shortest_contact_direction[1] * direction[1];
+            const auto contest_direction = goal_alignment >= 0.35
+                ? direction
+                : shortest_contact_direction;
+            const std::array<double, 2> contest_target{
+                context.ball[0] + contest_direction[0] *
+                    kEmergencyChallengePushPastBallM,
+                context.ball[1] + contest_direction[1] *
+                    kEmergencyChallengePushPastBallM,
+            };
+            if (context.state.last_kick_setup_gate != 104) {
+                context.state.last_kick_setup_gate = 104;
+                std::cerr
+                    << "MY3D_KICK_SETUP player="
+                    << context.snapshot.player_number
+                    << " time=" << context.snapshot.server_time
+                    << " mode=forward phase=urgent-contest"
+                    << " action_id=0 setup_elapsed=0"
+                    << " ball_distance=" << context.ball_distance
+                    << " behind_error="
+                    << (-along_direction - kPressurePushSetupDistanceM)
+                    << " lateral_error=" << signed_lateral_offset
+                    << " yaw_error_deg=" << orientation_error_deg
+                    << " speed="
+                    << math::norm2({
+                           context.snapshot.self.lin_vel_b[0],
+                           context.snapshot.self.lin_vel_b[1]})
+                    << " tilt_rate_deg_s=0 leg_rate_deg_s=0\n";
+            }
+            context.state.pressure_push_latched = false;
+            return make_walk_command_avoiding(
+                contest_target, context.snapshot, std::nullopt,
+                true, false, motion_role_id, false, false);
+        }
         const bool needs_side_step =
             along_direction > -kDribbleSideStepBehindThresholdM &&
             lateral_offset < kDribbleSideClearanceM;
@@ -1708,6 +1802,8 @@ HighLevelCommand APBehavior::make_command(
         {snapshot.self.position_m[0], snapshot.self.position_m[1]},
         0.0};
     context.ball_distance = math::planar_dist(context.ball, context.self);
+    context.urgent_contest = urgent_ball_contest(
+        snapshot, context.ball_distance);
     if (snapshot.play_mode != world::PlayMode::PlayOn &&
         state_.pass_lifecycle.active() &&
         !state_.pass_lifecycle.terminal()) {
@@ -1810,6 +1906,33 @@ HighLevelCommand APBehavior::make_command(
             true);
     }
 
+    const TacticalTarget assigned_target = blackboard.get<TacticalTarget>(
+        Blackboard::kKeyTacticalTarget);
+    const bool active_kick_motion =
+        state_.active_kick_command.has_value() &&
+        snapshot.server_time < state_.kick_active_until_s;
+    if (assigned_target.duty == TacticalDuty::Cover &&
+        !context.urgent_contest && !active_kick_motion) {
+        // TeamTactics uses Cover only for an active goalkeeper smother or a
+        // configured protect-lead phase. The old AP behavior claimed to
+        // preserve that target but unconditionally executed ball pressure.
+        // Make the team-level assignment real while retaining the urgent
+        // near-ball override above it.
+        state_.pressure_push_latched = false;
+        state_.committed_local_action.reset();
+        state_.local_action_commit_until_s = 0.0;
+        if (state_.pass_lifecycle.active() &&
+            !state_.pass_lifecycle.terminal()) {
+            state_.pass_lifecycle.cancel(snapshot.server_time);
+            publish_pass_lifecycle(state_.pass_lifecycle, blackboard);
+        }
+        state_.committed_pass.reset();
+        state_.pass_commit_until_s = 0.0;
+        return make_walk_command_avoiding(
+            assigned_target.position_m, snapshot, std::nullopt,
+            true, true, RoleManager::ROLE_AP);
+    }
+
     const strategy::ActionCapabilityRegistry capabilities(enable_targeted_kick);
     if (enable_targeted_kick &&
         snapshot.play_mode == world::PlayMode::PlayOn) {
@@ -1836,6 +1959,7 @@ HighLevelCommand APBehavior::make_command(
                     kLocalActionAbortRaceMarginS <
                 tactical_state.nearest_teammate_ball_time_s;
         const bool controlled_specialist_setup =
+            !context.urgent_contest &&
             context.ball_distance <= kSpecialistSetupMaximumBallDistanceM &&
             planar_speed_mps <= kSpecialistSetupMaximumSpeedMps &&
             tactical_state.possession == strategy::PossessionOwner::Ours &&
@@ -1880,6 +2004,7 @@ HighLevelCommand APBehavior::make_command(
         // while a goal chance or defensive emergency may begin positioning
         // from the full precision-entry distance.
         const bool urgent_local_setup_available =
+            !context.urgent_contest &&
             context.ball_distance <= kDribblePrecisionEntryDistanceM &&
             planar_speed_mps <= kSpecialistSetupMaximumSpeedMps &&
             (snapshot.ball.visible || snapshot.ball.position_age_s <= 0.75) &&
@@ -1940,7 +2065,8 @@ HighLevelCommand APBehavior::make_command(
               state_.committed_local_action->category ==
                   strategy::ActionCategory::Dribble) ||
              committed_static_setup_lost ||
-             opponent_clearly_wins_ball)) {
+             opponent_clearly_wins_ball ||
+             context.urgent_contest)) {
             state_.committed_local_action.reset();
             state_.local_action_commit_until_s = 0.0;
         }
@@ -1981,6 +2107,7 @@ HighLevelCommand APBehavior::make_command(
             (snapshot.server_time >= state_.pass_commit_until_s ||
              !retained_pass_setup ||
              force_continuous_cut_in ||
+             context.urgent_contest ||
              !pass_commit_is_valid(
                  snapshot, *state_.committed_pass, capabilities))) {
             state_.pass_lifecycle.cancel(snapshot.server_time);
@@ -2126,13 +2253,15 @@ HighLevelCommand APBehavior::make_command(
             // continuous pressure controller below.
         }
         if (plan.selected.has_value() &&
-            plan.selected->category == strategy::ActionCategory::Move) {
+            plan.selected->category == strategy::ActionCategory::Move &&
+            !context.urgent_contest) {
             blackboard.set(
                 Blackboard::kKeySelectedCooperativeAction,
                 *plan.selected);
-            return make_walk_command_avoiding(
-                plan.selected->target_point_m, snapshot, std::nullopt,
-                true, true, RoleManager::ROLE_AP);
+            // Move is useful planner telemetry, but walking *to* the ball stops
+            // at the navigation radius and can strand the only pressure player
+            // beside it.  Let the AP's motion-level approach/push controller
+            // own translation so its target continues through the ball.
         }
         // No calm, self-owned release opportunity exists. Keep the action
         // proposal in telemetry, but execute the original Apollo contact path
@@ -2152,6 +2281,21 @@ HighLevelCommand APBehavior::make_command(
         return make_walk_command_avoiding(
             role_position_from_blackboard(blackboard), snapshot, std::nullopt,
             true, true, RoleManager::ROLE_AP);
+    }
+
+    if (snapshot.play_mode == world::PlayMode::PlayOn &&
+        snapshot.ball.position_valid &&
+        (assigned_target.duty == TacticalDuty::Formation ||
+         context.urgent_contest)) {
+        blackboard.set(
+            Blackboard::kKeyTacticalTarget,
+            TacticalTarget{
+                TacticalDuty::Pressure,
+                field_geometry::keep_field_player_outside_our_goalie_area(
+                    context.ball),
+                context.ball,
+                0,
+                1.0});
     }
 
     const double previous_ball_distance = state_.previous_ball_distance;

@@ -36,5 +36,21 @@ int main() {
         return 1;
     }
 
+    const geometry::Position2 illegal_open_play_target{-26.8, 0.4};
+    const auto legal_open_play_target =
+        geometry::keep_field_player_outside_our_goalie_area(
+            illegal_open_play_target);
+    if (geometry::is_in_our_goalie_area(legal_open_play_target) ||
+        std::abs(
+            legal_open_play_target[0] -
+            (-geometry::kActualHalfLengthM +
+             geometry::kGoalieAreaDepthM +
+             geometry::kFieldPlayerGoalieAreaClearanceM)) > 1.0e-9 ||
+        std::abs(legal_open_play_target[1] -
+                 illegal_open_play_target[1]) > 1.0e-9) {
+        std::cerr << "open-play field target was not projected outside our goalkeeper area\n";
+        return 1;
+    }
+
     return 0;
 }

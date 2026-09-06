@@ -187,10 +187,15 @@ Use `APOLLO_LEARNED_KICK_MODE=shadow` for inference-only evidence. Stable walk
 is already the default; set `APOLLO_ENABLE_PARAMETERIZED_KICK=0` to disable
 experimental contact as well, in which case learned kick defaults to off.
 
-Set `APOLLO_ENABLE_TEAM_TACTICS=0` to remove only the developed open-play duty
-layer while retaining role assignment, formation, and restart legality. This
-is the preferred strategy ablation because it does not also change the action
-stack. Summarize any retained comparison directory with:
+The developed-versus-base launcher now defaults to the motion-first
+collaboration configuration. The broad open-play orchestrator is off, while
+support/unmark, unique centre-back marking, pass communication/receiving,
+ball search and goalkeeper safety remain active. AP pressure and the local
+walk/turn/contact controllers take priority over team-level retasking. Set
+`APOLLO_ENABLE_TEAM_TACTICS=1` only to inspect the experimental full dynamic
+duty layer. Set `MATCH_CURRENT_SIDE=right` to launch pristine Apollo first and
+place the developed team on the right; the launcher preserves the developed
+team as the kickoff side. Summarize any retained comparison directory with:
 
 ```bash
 scripts/analyze_apollo_vs_base_match.py /home/win98/rl_runs/RUN_DIRECTORY

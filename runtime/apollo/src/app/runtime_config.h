@@ -26,10 +26,11 @@ struct RuntimeConfig {
     std::size_t status_interval_cycles{0U};
     /// Enables the bounded one-step pass planner and pass-intent protocol.
     bool enable_pass_strategy{true};
-    /// Enables coordinated open-play TeamTactics duties.  Disabling this is
-    /// an ablation/debug surface; role assignment, formations and restart
-    /// legality remain active.
-    bool enable_team_tactics{true};
+    /// Enables the experimental broad open-play TeamTactics orchestrator.
+    /// The default motion-first path still retains support/unmark, unique
+    /// marking, pass communication/receiving and goalkeeper safety, while
+    /// suppressing whole-team Cover/Block/Intercept/Outlet retasking.
+    bool enable_team_tactics{false};
     /// Enables the experimental target/speed-conditioned contact macro.
     /// The validated fixed forward contact remains the default until server
     /// calibration passes the R1 promotion gate.

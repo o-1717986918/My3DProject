@@ -346,6 +346,9 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                     restart_decision->plan.has_value()
                     ? restart_decision->plan->taker_player_number
                     : 0)
+            << " role="
+            << decision::current_role_from_blackboard(
+                   decision_manager_.blackboard())
             << " duty="
             << (decision_manager_.blackboard().exists(
                     decision::Blackboard::kKeyTacticalTarget)

@@ -16,7 +16,9 @@ FINAL_SCORE = re.compile(
     r"Final score:\s+(?P<left>.+?)\s+(?P<left_score>\d+)\s+-\s+"
     r"(?P<right_score>\d+)\s+(?P<right>.+?)\s*$"
 )
-ILLEGAL_DEFENSE = re.compile(r"Illegal defense: penalizing (?P<side>[lr])-\d+-")
+ILLEGAL_DEFENSE = re.compile(
+    r"Illegal defense: penalizing .* from (?P<side>left|right) goalie area"
+)
 
 
 def _fields(line: str) -> dict[str, str]:
@@ -51,6 +53,28 @@ def _ball_progress(
     }
 
 
+def _step_distribution(samples: list[float]) -> dict[str, object]:
+    ordered = sorted(samples)
+    if not ordered:
+        return {
+            "samples": 0,
+            "median_m": None,
+            "p90_m": None,
+            "maximum_m": None,
+            "above_0_25_m": 0,
+            "above_1_0_m": 0,
+        }
+    p90_index = min(len(ordered) - 1, math.ceil(0.90 * len(ordered)) - 1)
+    return {
+        "samples": len(ordered),
+        "median_m": statistics.median(ordered),
+        "p90_m": ordered[p90_index],
+        "maximum_m": ordered[-1],
+        "above_0_25_m": sum(value > 0.25 for value in ordered),
+        "above_1_0_m": sum(value > 1.0 for value in ordered),
+    }
+
+
 def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
     server_path = run_dir / "server.log"
     if not server_path.is_file():
@@ -71,6 +95,7 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
 
     status_fields = {
         "motion": Counter[str](),
+        "role": Counter[str](),
         "strategy": Counter[str](),
         "duty": Counter[str](),
         "risk_mode": Counter[str](),
@@ -91,10 +116,22 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
     player_get_up_samples = Counter[str]()
     player_get_up_episodes = Counter[str]()
     get_up_entries_by_previous_motion = Counter[str]()
+    duty_switches = 0
+    plan_revision_switches = 0
+    tactical_target_steps_m: list[float] = []
+    near_ball_samples = 0
+    near_ball_formation_samples = 0
+    near_ball_pressure_samples = 0
+    near_ball_low_command_samples = 0
+    near_ball_pure_turn_samples = 0
+    near_ball_idle_samples = 0
     status_samples = 0
     for log_path in sorted(run_dir.glob(f"{current_team}-*.log")):
         player = log_path.stem.rsplit("-", 1)[-1]
         previous_status_motion: str | None = None
+        previous_duty: str | None = None
+        previous_plan_revision: str | None = None
+        previous_tactical_target: tuple[float, float] | None = None
         for line in log_path.read_text(
             encoding="utf-8", errors="replace"
         ).splitlines():
@@ -115,6 +152,39 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                         get_up_entries_by_previous_motion[
                             previous_status_motion or "Unknown"
                         ] += 1
+                duty = values.get("duty")
+                if previous_duty is not None and duty != previous_duty:
+                    duty_switches += 1
+                if duty is not None:
+                    previous_duty = duty
+                plan_revision = values.get("plan_revision")
+                if (
+                    previous_plan_revision is not None
+                    and plan_revision != previous_plan_revision
+                ):
+                    plan_revision_switches += 1
+                if plan_revision is not None:
+                    previous_plan_revision = plan_revision
+                try:
+                    tactical_target = (
+                        float(values["tactical_target_x"]),
+                        float(values["tactical_target_y"]),
+                    )
+                except (KeyError, ValueError):
+                    tactical_target = None
+                if (
+                    previous_tactical_target is not None
+                    and tactical_target is not None
+                    and all(math.isfinite(value) for value in tactical_target)
+                ):
+                    tactical_target_steps_m.append(math.dist(
+                        previous_tactical_target, tactical_target
+                    ))
+                if (
+                    tactical_target is not None
+                    and all(math.isfinite(value) for value in tactical_target)
+                ):
+                    previous_tactical_target = tactical_target
                 if values.get("ball_position_valid") == "1" and (
                     "server_time" in values or "cycle" in values
                 ) and "ball_x" in values:
@@ -151,6 +221,73 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                             ):
                                 bounded_ball_x_by_observation.setdefault(
                                     observation, []).append(ball_x)
+                try:
+                    fresh_near_ball = (
+                        values.get("play_on") == "1"
+                        and values.get("ball_position_valid") == "1"
+                        and (
+                            values.get("ball_visible") == "1"
+                            or float(values.get("ball_position_age", "inf"))
+                            <= 0.75
+                        )
+                        and math.dist(
+                            (float(values["x"]), float(values["y"])),
+                            (float(values["ball_x"]), float(values["ball_y"])),
+                        ) <= 1.10
+                    )
+                except (KeyError, ValueError):
+                    fresh_near_ball = False
+                if fresh_near_ball:
+                    near_ball_samples += 1
+                    if values.get("duty") == "Formation":
+                        near_ball_formation_samples += 1
+                    if values.get("duty") == "Pressure":
+                        near_ball_pressure_samples += 1
+                    try:
+                        if values.get("walk_target_absolute") == "1":
+                            command_norm = math.dist(
+                                (float(values["x"]), float(values["y"])),
+                                (
+                                    float(values["walk_target_x"]),
+                                    float(values["walk_target_y"]),
+                                ),
+                            )
+                        else:
+                            command_norm = math.hypot(
+                                float(values["walk_target_x"]),
+                                float(values["walk_target_y"]),
+                            )
+                    except (KeyError, ValueError):
+                        command_norm = math.inf
+                    try:
+                        if values.get("walk_orientation_set") != "1":
+                            yaw_error_deg = 0.0
+                        elif values.get("walk_orientation_absolute") == "1":
+                            yaw_error_deg = abs(
+                                (
+                                    float(values["walk_orientation"])
+                                    - float(values["self_yaw"])
+                                    + 180.0
+                                ) % 360.0 - 180.0
+                            )
+                        else:
+                            yaw_error_deg = abs(
+                                float(values["walk_orientation"])
+                            )
+                    except (KeyError, ValueError):
+                        yaw_error_deg = 0.0
+                    if (
+                        values.get("motion") in {"Neutral", "GetUpRL"}
+                        or command_norm <= 0.10
+                    ):
+                        near_ball_low_command_samples += 1
+                    if command_norm <= 0.10 and yaw_error_deg > 5.0:
+                        near_ball_pure_turn_samples += 1
+                    if (
+                        values.get("motion") == "Neutral"
+                        or (command_norm <= 0.10 and yaw_error_deg <= 5.0)
+                    ):
+                        near_ball_idle_samples += 1
                 previous_status_motion = values.get("motion")
             elif line.startswith("MY3D_KICK_SETUP"):
                 values = _fields(line)
@@ -176,16 +313,27 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
     fallback_kick_samples = sum(
         count for name, count in motions.items() if name.startswith("FallbackKick")
     )
+    developed_illegal_defense: int | None = None
+    opponent_illegal_defense: int | None = None
+    if score is not None:
+        if score["left_team"] == current_team:
+            developed_illegal_defense = illegal_defense["left"]
+            opponent_illegal_defense = illegal_defense["right"]
+        elif score["right_team"] == current_team:
+            developed_illegal_defense = illegal_defense["right"]
+            opponent_illegal_defense = illegal_defense["left"]
     return {
-        "schema_version": 3,
+        "schema_version": 5,
         "run_dir": str(run_dir.resolve()),
         "score": score,
         "server": {
-            "illegal_defense_left": illegal_defense["l"],
-            "illegal_defense_right": illegal_defense["r"],
+            "illegal_defense_left": illegal_defense["left"],
+            "illegal_defense_right": illegal_defense["right"],
         },
         "developed_team": {
             "name": current_team,
+            "illegal_defense_events": developed_illegal_defense,
+            "opponent_illegal_defense_events": opponent_illegal_defense,
             "status_samples": status_samples,
             **{
                 name: dict(counter.most_common())
@@ -216,10 +364,26 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
             "get_up_entries_by_previous_motion": dict(
                 get_up_entries_by_previous_motion.most_common()
             ),
+            "tactical_churn": {
+                "duty_switches": duty_switches,
+                "plan_revision_switches": plan_revision_switches,
+                "target_step": _step_distribution(tactical_target_steps_m),
+            },
+            "near_ball_response": {
+                "samples": near_ball_samples,
+                "formation_samples": near_ball_formation_samples,
+                "pressure_samples": near_ball_pressure_samples,
+                "neutral_or_low_translation_command_samples": (
+                    near_ball_low_command_samples
+                ),
+                "pure_turn_samples": near_ball_pure_turn_samples,
+                "neutral_or_idle_command_samples": near_ball_idle_samples,
+            },
         },
         "interpretation_limits": [
             "pristine Apollo is silent, so its internal decisions are not inferred",
             "status counts are samples, not independent physical events",
+            "tactical churn is computed between adjacent periodic status samples per player and therefore omits switches between samples",
             "ball progress uses 100 ms server-time buckets when telemetry provides server_time, otherwise legacy local-cycle buckets",
             "fresh-ball progress accepts visible or at-most-0.75 s old estimates; bounded-track progress additionally accepts at-most-3.5 s near-contact tracks",
             "all ball progress is developed-team perception, not server ground truth",

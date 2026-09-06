@@ -30,16 +30,13 @@ struct KnownOpponent {
 
 Position2 clamp_field_player(Position2 point) {
     constexpr double margin = field_geometry::kFormationFieldMarginM;
-    point[0] = std::clamp(
-        point[0],
-        -field_geometry::kActualHalfLengthM +
-            field_geometry::kGoalieAreaDepthM + 0.8,
-        field_geometry::kActualHalfLengthM - margin);
+    point[0] = std::min(
+        point[0], field_geometry::kActualHalfLengthM - margin);
     point[1] = std::clamp(
         point[1],
         -field_geometry::kActualHalfWidthM + margin,
         field_geometry::kActualHalfWidthM - margin);
-    return point;
+    return field_geometry::keep_field_player_outside_our_goalie_area(point);
 }
 
 Position2 clamp_goalkeeper(Position2 point) {
@@ -916,7 +913,11 @@ TeamPlan TeamTactics::plan_all(
                     latch = {};
                 } else {
                     latch.target = support;
-                    latch.until_s = snapshot.server_time + 0.5;
+                    // The deployed walking stack needs materially longer than
+                    // one camera gap to settle onto a support lane.  This is a
+                    // target-stability hold, not action ownership: goalkeeper,
+                    // AP pressure and reachable intercepts bypass it below.
+                    latch.until_s = snapshot.server_time + 0.9;
                     latch.role_id = support_role;
                 }
             }
@@ -1006,6 +1007,13 @@ TeamPlan TeamTactics::plan_all(
                     0.9)};
             continue;
         }
+        if (state.phase != strategy::TacticalPhase::Defend) {
+            // Contested/Unknown perception is not enough evidence to send all
+            // five off-ball players into new marking, cover and outlet paths.
+            // Preserve the phase-aware formation, while the reachable moving-
+            // ball intercept above remains an immediate safety exception.
+            continue;
+        }
         if (role_id == RoleManager::ROLE_CBL ||
             role_id == RoleManager::ROLE_CBR) {
             assignment.target = plan_mark(
@@ -1039,6 +1047,79 @@ TeamPlan TeamTactics::plan_all(
     if (state.phase != strategy::TacticalPhase::Attack) {
         clear_support_latches();
     }
+    finalize_team_plan(result, snapshot);
+    return result;
+}
+
+TeamPlan TeamTactics::plan_collaboration(
+    const world::WorldSnapshot& snapshot,
+    const std::vector<RoleAssignment>& role_assignments) const {
+    TeamPlan result = plan_all(snapshot, role_assignments);
+
+    const auto formation_for = [&](const TeamTacticalAssignment& tactical) {
+        const auto role = std::find_if(
+            role_assignments.begin(), role_assignments.end(),
+            [&](const RoleAssignment& candidate) {
+                return candidate.player_number == tactical.player_number;
+            });
+        const Position2 formation = role == role_assignments.end()
+            ? tactical.target.position_m
+            : role->role_position_m;
+        return tactical.role_id == RoleManager::ROLE_GK
+            ? clamp_goalkeeper(formation)
+            : clamp_field_player(formation);
+    };
+
+    for (auto& assignment : result.assignments) {
+        if (assignment.role_id == RoleManager::ROLE_GK) {
+            // Goal-line hold, reachable intercept and smother are safety
+            // controllers backed by concrete motions, not optional team shape.
+            continue;
+        }
+
+        if (assignment.role_id == RoleManager::ROLE_AP) {
+            if (assignment.target.duty == TacticalDuty::SearchBall) continue;
+            const bool actionable_ball =
+                snapshot.play_mode == world::PlayMode::PlayOn &&
+                snapshot.ball.position_valid &&
+                (snapshot.ball.visible || snapshot.ball.position_age_s <= 0.75);
+            assignment.target = actionable_ball
+                ? TacticalTarget{
+                      TacticalDuty::Pressure,
+                      field_geometry::keep_field_player_outside_our_goalie_area({
+                          snapshot.ball.position_m[0],
+                          snapshot.ball.position_m[1]}),
+                      Position2{
+                          snapshot.ball.position_m[0],
+                          snapshot.ball.position_m[1]},
+                      0,
+                      1.0}
+                : TacticalTarget{
+                      TacticalDuty::Formation,
+                      formation_for(assignment),
+                      std::nullopt,
+                      0,
+                      0.25};
+            continue;
+        }
+
+        const bool retained_collaboration =
+            assignment.target.duty == TacticalDuty::Support ||
+            assignment.target.duty == TacticalDuty::Unmark ||
+            assignment.target.duty == TacticalDuty::Mark ||
+            assignment.target.duty == TacticalDuty::Receive;
+        if (!retained_collaboration) {
+            assignment.target = {
+                TacticalDuty::Formation,
+                formation_for(assignment),
+                std::nullopt,
+                0,
+                0.25};
+        }
+    }
+
+    // Filtering changes the effective command plan, so expose a revision for
+    // the filtered assignments rather than the discarded broad orchestrator.
     finalize_team_plan(result, snapshot);
     return result;
 }

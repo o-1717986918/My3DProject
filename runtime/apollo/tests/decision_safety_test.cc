@@ -23,6 +23,16 @@ world::PlayerObservation teammate(int number, double x, double y) {
     return player;
 }
 
+world::PlayerObservation opponent(int number, double x, double y) {
+    world::PlayerObservation player;
+    player.player_number = number;
+    player.is_teammate = false;
+    player.seen = true;
+    player.last_seen_time = 10.0;
+    player.position_m = {x, y, 0.8};
+    return player;
+}
+
 world::WorldSnapshot full_team_snapshot() {
     world::WorldSnapshot snapshot;
     snapshot.player_number = 7;
@@ -131,17 +141,28 @@ int main() {
         return 1;
     }
 
-    // A precision ball action gets a rolling AP lease so a slightly or even
-    // materially closer teammate cannot tear down its setup on the next
-    // locally inconsistent observation. The lease expires quickly and never
-    // overrides a fall.
+    // A precision ball action gets a rolling AP lease only inside the same
+    // near-equal ball race. A clearly closer teammate must pre-empt it rather
+    // than walking back to formation beside the ball. The lease also expires
+    // quickly and never overrides a fall.
     world::WorldSnapshot leased = snapshot;
     leased.server_time = 10.0;
+    leased.teammates[2].position_m = {0.95, 0.0, 0.8};
+    leased.teammates[6].position_m = {1.05, 0.0, 0.8};
+    leased.self.position_m = leased.teammates[6].position_m;
     decision::RoleManager leased_roles;
     leased_roles.retain_self_as_ap_for_action(7, leased, 0.35);
     const auto during_lease = leased_roles.assign(leased);
     if (player_for_role(during_lease, decision::RoleManager::ROLE_AP) != 7) {
         std::cerr << "committed action did not retain its AP actor\n";
+        return 1;
+    }
+    world::WorldSnapshot clear_challenger = leased;
+    clear_challenger.server_time = 10.10;
+    clear_challenger.teammates[2].position_m = {0.25, 0.0, 0.8};
+    const auto preempted_lease = leased_roles.assign(clear_challenger);
+    if (player_for_role(preempted_lease, decision::RoleManager::ROLE_AP) != 3) {
+        std::cerr << "action lease blocked a clearly closer ball challenger\n";
         return 1;
     }
     leased.server_time = 10.36;
@@ -159,6 +180,66 @@ int main() {
         return 1;
     }
 
+    // A sideways AP 0.8 m from the ball used to select a side-relocation
+    // waypoint equal to its current position, then stand still facing the
+    // goal while an opponent arrived. An urgent contest must instead turn on
+    // the shortest through-ball line, and the tactics-off baseline must still
+    // report the live AP as Pressure rather than Formation.
+    world::WorldSnapshot urgent = full_team_snapshot();
+    urgent.player_number = 3;
+    urgent.self.position_m = {0.0, 0.8, 0.8};
+    urgent.teammates[2].position_m = urgent.self.position_m;
+    urgent.opponents = {opponent(1, 0.4, 0.0)};
+    decision::BehaviorTree urgent_tree;
+    decision::Blackboard urgent_blackboard;
+    decision::RoleManager urgent_roles;
+    const auto urgent_command = urgent_tree.evaluate(
+        urgent, urgent_blackboard, urgent_roles,
+        true, false, std::nullopt, false);
+    const auto* urgent_walk = std::get_if<decision::WalkCommand>(
+        &urgent_command);
+    const auto& urgent_target = urgent_blackboard.get<
+        decision::TacticalTarget>(
+            decision::Blackboard::kKeyTacticalTarget);
+    if (urgent_blackboard.get<int>(
+            decision::Blackboard::kKeyCurrentRole) !=
+            decision::RoleManager::ROLE_AP ||
+        urgent_target.duty != decision::TacticalDuty::Pressure ||
+        urgent_walk == nullptr ||
+        !urgent_walk->orientation_deg.has_value() ||
+        std::abs(math::normalize_deg(
+            *urgent_walk->orientation_deg + 90.0)) > 5.0) {
+        std::cerr << "urgent ball-side AP did not take the shortest contest line\n";
+        return 1;
+    }
+
+    // Disabling experimental field-player duties must not also disable the
+    // goalkeeper's tested safety planner. That all-or-nothing coupling left
+    // the v43 keeper on Formation during both goal sequences.
+    world::WorldSnapshot keeper_safety = full_team_snapshot();
+    keeper_safety.player_number = 1;
+    keeper_safety.self.position_m = {-26.5, 0.0, 0.8};
+    keeper_safety.teammates[0].position_m = keeper_safety.self.position_m;
+    keeper_safety.ball.position_m = {-24.5, 0.2, 0.11};
+    keeper_safety.ball.velocity_valid = true;
+    keeper_safety.ball.velocity_mps = {-1.0, 0.0, 0.0};
+    decision::BehaviorTree keeper_safety_tree;
+    decision::Blackboard keeper_safety_blackboard;
+    decision::RoleManager keeper_safety_roles;
+    keeper_safety_tree.evaluate(
+        keeper_safety, keeper_safety_blackboard, keeper_safety_roles,
+        true, true, std::nullopt, false);
+    const auto keeper_safety_duty = keeper_safety_blackboard.get<
+        decision::TacticalTarget>(
+            decision::Blackboard::kKeyTacticalTarget).duty;
+    if (keeper_safety_duty != decision::TacticalDuty::GoalkeeperHold &&
+        keeper_safety_duty !=
+            decision::TacticalDuty::GoalkeeperIntercept &&
+        keeper_safety_duty != decision::TacticalDuty::GoalkeeperSmother) {
+        std::cerr << "stable field tactics disabled goalkeeper safety planning\n";
+        return 1;
+    }
+
     snapshot.play_mode = world::PlayMode::GameOver;
     decision::BehaviorTree tree;
     decision::Blackboard blackboard;
@@ -167,6 +248,46 @@ int main() {
         snapshot, blackboard, game_over_roles, true, true);
     if (!std::holds_alternative<decision::NeutralCommand>(stopped)) {
         std::cerr << "GameOver did not stop team behavior\n";
+        return 1;
+    }
+
+    // V40 side-swap regression: with dynamic duties disabled, both centre-
+    // back formation slots followed a deep ball into the goalkeeper area.
+    // The goalkeeper plus both centre-backs can exceed the server's two-player
+    // limit. CBL owns the one field-player allowance, so every other role must
+    // remain beyond the boundary even during a deep formation shift.
+    world::WorldSnapshot deep_defense = full_team_snapshot();
+    deep_defense.player_number = 6;
+    deep_defense.self.position_m = {-19.7, 2.6, 0.8};
+    deep_defense.teammates[5].position_m = deep_defense.self.position_m;
+    deep_defense.ball.position_m = {-22.8, -0.7, 0.11};
+    decision::BehaviorTree stable_shape_tree;
+    decision::Blackboard stable_shape_blackboard;
+    decision::RoleManager stable_shape_roles;
+    stable_shape_tree.evaluate(
+        deep_defense, stable_shape_blackboard, stable_shape_roles,
+        true, true, std::nullopt, false);
+    const auto& stable_shape_target = stable_shape_blackboard.get<
+        decision::TacticalTarget>(
+            decision::Blackboard::kKeyTacticalTarget);
+    const int stable_shape_role = stable_shape_blackboard.get<int>(
+        decision::Blackboard::kKeyCurrentRole);
+    const decision::TacticalDuty expected_deep_duty =
+        stable_shape_role == decision::RoleManager::ROLE_AP
+        ? decision::TacticalDuty::Pressure
+        : decision::TacticalDuty::Formation;
+    if (stable_shape_role == decision::RoleManager::ROLE_GK ||
+        stable_shape_role == decision::RoleManager::ROLE_CBL ||
+        stable_shape_target.duty != expected_deep_duty ||
+        stable_shape_target.position_m[0] <
+            -decision::field_geometry::kActualHalfLengthM +
+                decision::field_geometry::kGoalieAreaDepthM +
+                decision::field_geometry::kFieldPlayerGoalieAreaClearanceM -
+                1.0e-9) {
+        std::cerr << "stable-shape field player entered our goalkeeper area"
+                  << " role=" << stable_shape_role
+                  << " target_x=" << stable_shape_target.position_m[0]
+                  << '\n';
         return 1;
     }
 

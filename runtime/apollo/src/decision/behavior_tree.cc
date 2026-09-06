@@ -306,6 +306,12 @@ NodeResult compute_formation(BehaviorContext& context) {
     };
     auto role_assignments = context.role_manager.assign(context.snapshot);
     for (auto& assignment : role_assignments) {
+        if (assignment.role_id != RoleManager::ROLE_GK &&
+            assignment.role_id != RoleManager::ROLE_CBL) {
+            assignment.role_position_m =
+                field_geometry::keep_field_player_outside_our_goalie_area(
+                    assignment.role_position_m);
+        }
         assignment.role_position_m = field_geometry::legalize_set_play_target(
             assignment.role_position_m,
             ball_position,
@@ -380,28 +386,13 @@ NodeResult compute_formation(BehaviorContext& context) {
         team_plan = context.team_tactics.plan_all(
             context.snapshot, role_assignments);
     } else {
-        // A controlled ablation keeps the upstream role/formation and all
-        // restart legality, while removing only the new open-play duty layer.
-        // This makes current-vs-base evidence attributable instead of forcing
-        // an all-or-nothing binary comparison.
-        team_plan.tactical_state =
-            strategy::build_tactical_state(context.snapshot);
-        team_plan.source_server_time_s = context.snapshot.server_time;
-        team_plan.fresh = context.snapshot.ball.position_valid &&
-            (context.snapshot.ball.visible ||
-             context.snapshot.ball.position_age_s <= 0.75);
-        for (const auto& role_assignment : role_assignments) {
-            team_plan.assignments.push_back({
-                role_assignment.player_number,
-                role_assignment.role_id,
-                TacticalTarget{
-                    TacticalDuty::Formation,
-                    role_assignment.role_position_m,
-                    ball_position,
-                    0,
-                    0.25},
-            });
-        }
+        // Production uses a motion-first collaboration layer.  Preserve only
+        // support/unmark, unique marking, pass receiving and goalkeeper safety;
+        // broad Cover/Block/Intercept/Outlet retasking remains experimental.
+        // AP is always restored to direct ball pressure, so team shape cannot
+        // pre-empt a locally executable walk, turn or contact action.
+        team_plan = context.team_tactics.plan_collaboration(
+            context.snapshot, role_assignments);
     }
     if (restart_active) {
         const auto& restart_plan = *restart_decision.plan;

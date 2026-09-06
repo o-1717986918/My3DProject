@@ -32,6 +32,7 @@ rebuild_base=${APOLLO_REBUILD_BASE:-0}
 initial_play_time=${MATCH_INITIAL_PLAY_TIME:-}
 current_team=${MATCH_CURRENT_TEAM_NAME:-My3D-Current}
 base_team=${MATCH_BASE_TEAM_NAME:-Apollo-Base}
+current_side=${MATCH_CURRENT_SIDE:-left}
 timestamp=$(date +%Y%m%d-%H%M%S)
 run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-vs-base-web-match-$timestamp}
 
@@ -64,6 +65,10 @@ if [[ "$current_team" == "$base_team" ]]; then
     echo "MATCH_CURRENT_TEAM_NAME and MATCH_BASE_TEAM_NAME must differ" >&2
     exit 2
 fi
+case "$current_side" in
+    left|right) ;;
+    *) echo "MATCH_CURRENT_SIDE must be left or right" >&2; exit 2 ;;
+esac
 case "$stop_on_game_over" in
     0|1) ;;
     *) echo "MATCH_STOP_ON_GAME_OVER must be 0 or 1" >&2; exit 2 ;;
@@ -120,15 +125,17 @@ if [[ ! -f "$onnxruntime_root/include/onnxruntime_cxx_api.h" || \
     exit 2
 fi
 
-# The developed side uses every currently supported source-tree capability.
+# The developed side uses the motion-first collaboration path plus the explicit
+# action stack selected below. Support/mark/pass communication remain active;
+# only the broad open-play duty orchestrator is an opt-in experiment.
 case "${APOLLO_ENABLE_PASS_STRATEGY:-1}" in
     1) ;;
     0) current_args+=(--disable-pass-strategy) ;;
     *) echo "APOLLO_ENABLE_PASS_STRATEGY must be 0 or 1" >&2; exit 2 ;;
 esac
 
-case "${APOLLO_ENABLE_TEAM_TACTICS:-1}" in
-    1) ;;
+case "${APOLLO_ENABLE_TEAM_TACTICS:-0}" in
+    1) current_args+=(--enable-team-tactics) ;;
     0) current_args+=(--disable-team-tactics) ;;
     *) echo "APOLLO_ENABLE_TEAM_TACTICS must be 0 or 1" >&2; exit 2 ;;
 esac
@@ -268,43 +275,62 @@ if [[ "$ready" != 1 ]]; then
     exit 1
 fi
 
-for number in $(seq 1 7); do
-    "$current_binary" \
-        --team "$current_team" \
-        --player-number "$number" \
-        --host 127.0.0.1 \
-        --port "$agent_port" \
-        --asset-root "$current_asset_root" \
-        --max-cycles "$max_cycles" \
-        --status-interval "${APOLLO_STATUS_INTERVAL:-50}" \
-        "${current_args[@]}" \
-        >"$run_dir/${current_team}-${number}.log" 2>&1 &
-    current_pids+=("$!")
-    sleep "$launch_stagger"
-done
+launch_current_team() {
+    for number in $(seq 1 7); do
+        "$current_binary" \
+            --team "$current_team" \
+            --player-number "$number" \
+            --host 127.0.0.1 \
+            --port "$agent_port" \
+            --asset-root "$current_asset_root" \
+            --max-cycles "$max_cycles" \
+            --status-interval "${APOLLO_STATUS_INTERVAL:-50}" \
+            "${current_args[@]}" \
+            >"$run_dir/${current_team}-${number}.log" 2>&1 &
+        current_pids+=("$!")
+        sleep "$launch_stagger"
+    done
+}
 
-for number in $(seq 1 7); do
-    "$base_binary" \
-        --team "$base_team" \
-        --player-number "$number" \
-        --host 127.0.0.1 \
-        --port "$agent_port" \
-        --asset-root "$base_asset_root" \
-        >"$run_dir/${base_team}-${number}.log" 2>&1 &
-    base_pids+=("$!")
-    sleep "$launch_stagger"
-done
+launch_base_team() {
+    for number in $(seq 1 7); do
+        "$base_binary" \
+            --team "$base_team" \
+            --player-number "$number" \
+            --host 127.0.0.1 \
+            --port "$agent_port" \
+            --asset-root "$base_asset_root" \
+            >"$run_dir/${base_team}-${number}.log" 2>&1 &
+        base_pids+=("$!")
+        sleep "$launch_stagger"
+    done
+}
+
+if [[ "$current_side" == left ]]; then
+    launch_current_team
+    launch_base_team
+    kickoff_side=Left
+else
+    launch_base_team
+    launch_current_team
+    kickoff_side=Right
+fi
 
 sleep 4
 "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
     --host 127.0.0.1 \
     --port "$monitor_port" \
-    "(kickOff Left)"
+    "(kickOff $kickoff_side)"
 
 match_url="http://127.0.0.1:$web_port/"
 echo "Developed-vs-base Web 7v7 ready: $match_url"
-echo "Left/current: $current_team ($(git -C "$repo_dir" rev-parse --short HEAD))"
-echo "Right/pristine: $base_team (${base_revision:0:7})"
+if [[ "$current_side" == left ]]; then
+    echo "Left/current: $current_team ($(git -C "$repo_dir" rev-parse --short HEAD))"
+    echo "Right/pristine: $base_team (${base_revision:0:7})"
+else
+    echo "Left/pristine: $base_team (${base_revision:0:7})"
+    echo "Right/current: $current_team ($(git -C "$repo_dir" rev-parse --short HEAD))"
+fi
 echo "Logs: $run_dir"
 echo "Controls: mouse drag/wheel, Tab, K/J/B, Space, 1/2/4, F, H"
 

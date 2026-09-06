@@ -30,6 +30,11 @@ inline constexpr double kSetPlaySafetyMarginM = 0.2;
 inline constexpr double kGoalieAreaDepthM = 4.0;
 inline constexpr double kGoalieAreaWidthM = 7.3;
 inline constexpr double kGoalHalfWidthM = 1.83;
+// Keep unreserved field-player targets beyond the inclusive goalkeeper-area
+// edge. The 2026 rules allow at most two own-team players inside; the runtime
+// reserves those places for the goalkeeper and one fixed centre-back so slow
+// role handoffs cannot briefly place a third body there.
+inline constexpr double kFieldPlayerGoalieAreaClearanceM = 0.8;
 
 // Goalkeeper resting stance: the keeper stands kGkHoldDepthM in front of its
 // own goal-line center while the GK is not handling a set play.
@@ -226,6 +231,16 @@ inline bool is_in_our_goalie_area(const Position2& position) {
     const double half_width_m = kGoalieAreaWidthM * 0.5;
     return position[0] <= max_x && position[0] >= -kActualHalfLengthM &&
            std::abs(position[1]) <= half_width_m;
+}
+
+inline Position2 keep_field_player_outside_our_goalie_area(
+    Position2 position,
+    double clearance_m = kFieldPlayerGoalieAreaClearanceM) {
+    position[0] = std::max(
+        position[0],
+        -kActualHalfLengthM + kGoalieAreaDepthM +
+            std::max(0.0, clearance_m));
+    return position;
 }
 
 inline Position2 project_outside_center_circle_in_our_half(

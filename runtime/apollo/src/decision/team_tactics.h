@@ -83,6 +83,16 @@ public:
         const world::WorldSnapshot& snapshot,
         const std::vector<RoleAssignment>& role_assignments) const;
 
+    /// Builds the production, motion-first collaboration layer.  The broad
+    /// phase/risk orchestrator is deliberately not allowed to retask every
+    /// field player: only support/unmark, unique marking, ball search and
+    /// goalkeeper safety survive.  AP pressure is restored explicitly so a
+    /// team-level Cover/Outlet decision can never pull the active ball player
+    /// away from an immediately executable motion or contact.
+    TeamPlan plan_collaboration(
+        const world::WorldSnapshot& snapshot,
+        const std::vector<RoleAssignment>& role_assignments) const;
+
     /// Compatibility entry point for isolated tests and tools. Runtime code
     /// should use plan_all() so ownership decisions remain team-consistent.
     TacticalTarget plan(

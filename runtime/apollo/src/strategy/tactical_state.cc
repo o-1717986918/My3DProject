@@ -221,6 +221,8 @@ namespace {
 bool valid_tracker_parameters(const TacticalStateTracker::Parameters& parameters) {
     return std::isfinite(parameters.possession_confirmation_s) &&
         parameters.possession_confirmation_s >= 0.0 &&
+        std::isfinite(parameters.ambiguous_observation_grace_s) &&
+        parameters.ambiguous_observation_grace_s >= 0.0 &&
         std::isfinite(parameters.strong_evidence_confidence) &&
         parameters.strong_evidence_confidence >= 0.0 &&
         parameters.strong_evidence_confidence <= 1.0 &&
@@ -294,9 +296,33 @@ TacticalState TacticalStateTracker::update(
 
     const PossessionOwner observed = state.possession;
     if (!firm_possession(observed)) {
-        pending_possession_.reset();
-        state.possession = observed;
-        state.phase = phase_for(observed);
+        if (!firm_possession(stable_possession_)) {
+            pending_possession_.reset();
+            state.possession = observed;
+            state.phase = phase_for(observed);
+            return state;
+        }
+
+        if (!pending_possession_.has_value() ||
+            *pending_possession_ != observed) {
+            pending_possession_ = observed;
+            pending_since_s_ = snapshot.server_time;
+        }
+        if (snapshot.server_time - pending_since_s_ <
+            parameters_.ambiguous_observation_grace_s) {
+            state.possession = stable_possession_;
+            state.ball_owner_player_number = stable_owner_player_number_;
+            state.ball_owner_is_teammate = stable_owner_is_teammate_;
+            state.phase = phase_for(stable_possession_);
+        } else {
+            // Do not erase the last firm owner. If decisive evidence returns,
+            // the ordinary turnover confirmation still compares against that
+            // owner instead of accepting an opposite estimate immediately.
+            state.possession = observed;
+            state.phase = phase_for(observed);
+            state.ball_owner_player_number = 0;
+            state.ball_owner_is_teammate = false;
+        }
         return state;
     }
 

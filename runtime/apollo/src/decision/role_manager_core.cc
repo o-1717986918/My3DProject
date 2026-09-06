@@ -96,11 +96,17 @@ int select_goalkeeper(const std::vector<PlayerRoleCandidate>& teammates) {
     return teammates.empty() ? 1 : teammates.front().player_number;
 }
 
-// Comm-aware AP tiebreak margin. If a teammate is currently broadcasting
-// AP and is within this many meters of the locally-best candidate's distance
-// to the ball, defer to them. Prevents AP from oscillating between two
-// robots whose teammate-position observations straddle each other.
-constexpr double kAPSwitchMarginM = 0.5;
+// AP ownership may damp near-equal localization noise, but it must not make a
+// field player beside a live ball retreat to formation while the previous AP
+// is visibly farther away.  The old 0.5 m margin was larger than the useful
+// humanoid contact corridor.  Keep only a small, sub-contact-pose hysteresis.
+constexpr double kAPSelfHysteresisMarginM = 0.18;
+constexpr double kAPCommHysteresisMarginM = 0.20;
+// A precision-action lease protects one continuous setup only while its actor
+// remains in the same local race. It is not unconditional ownership of the
+// next 0.35 s: a clearly closer teammate must be allowed to challenge.
+constexpr double kAPActionLeaseRaceMarginM = 0.20;
+constexpr double kAPActionLeaseMaximumBallDistanceM = 1.10;
 
 std::optional<int> select_ap(
     const std::vector<PlayerRoleCandidate>& teammates,
@@ -131,6 +137,12 @@ std::optional<int> select_ap(
         }
     }
 
+    if (best_player <= 0) {
+        return std::nullopt;
+    }
+
+    const double best_linear_distance = std::sqrt(best_distance);
+
     if (leased_player_number > 0 &&
         leased_player_number != goalkeeper_player_number &&
         leased_player_number != excluded_player_number) {
@@ -140,14 +152,16 @@ std::optional<int> select_ap(
                 return player.player_number == leased_player_number &&
                     !player.fallen;
             });
-        if (leased != teammates.end()) return leased_player_number;
+        if (leased != teammates.end()) {
+            const double leased_distance = math::planar_dist(
+                leased->position_m, ball_position_m);
+            if (leased_distance <= kAPActionLeaseMaximumBallDistanceM &&
+                leased_distance <=
+                    best_linear_distance + kAPActionLeaseRaceMarginM) {
+                return leased_player_number;
+            }
+        }
     }
-
-    if (best_player <= 0) {
-        return std::nullopt;
-    }
-
-    const double best_linear_distance = std::sqrt(best_distance);
 
     // Self-hysteresis: if I was AP last tick and I am still within margin of
     // the locally-best candidate, retain AP. Prevents one-tick flapping when
@@ -156,7 +170,8 @@ std::optional<int> select_ap(
         self_player_number != goalkeeper_player_number &&
         std::isfinite(self_distance)) {
         const double self_linear_distance = std::sqrt(self_distance);
-        if (self_linear_distance <= best_linear_distance + kAPSwitchMarginM) {
+        if (self_linear_distance <=
+            best_linear_distance + kAPSelfHysteresisMarginM) {
             return self_player_number;
         }
     }
@@ -183,7 +198,8 @@ std::optional<int> select_ap(
     }
     if (comm_ap_player > 0 && comm_ap_player != best_player) {
         const double comm_linear_distance = std::sqrt(comm_ap_distance);
-        if (comm_linear_distance <= best_linear_distance + kAPSwitchMarginM) {
+        if (comm_linear_distance <=
+            best_linear_distance + kAPCommHysteresisMarginM) {
             return comm_ap_player;
         }
     }

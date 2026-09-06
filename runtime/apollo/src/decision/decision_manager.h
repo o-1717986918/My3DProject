@@ -22,7 +22,7 @@ public:
     explicit DecisionManager(
         bool enable_pass_strategy = true,
         bool enable_targeted_kick = false,
-        bool enable_team_tactics = true,
+        bool enable_team_tactics = false,
         bool enable_learned_kick = false);
 
     HighLevelCommand decide(
@@ -40,7 +40,7 @@ private:
     BehaviorTree behavior_tree_;
     bool enable_pass_strategy_{true};
     bool enable_targeted_kick_{false};
-    bool enable_team_tactics_{true};
+    bool enable_team_tactics_{false};
     bool enable_learned_kick_{false};
 };
 

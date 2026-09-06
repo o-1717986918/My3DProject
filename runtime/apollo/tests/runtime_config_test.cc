@@ -74,8 +74,8 @@ int main() {
 
     const app::RuntimeConfig safe_default = parse({"ApolloCodeBase"});
     if (safe_default.enable_parameterized_kick ||
-        !safe_default.enable_team_tactics) {
-        std::cerr << "experimental parameterized kick was enabled by default\n";
+        safe_default.enable_team_tactics) {
+        std::cerr << "unpromoted match capability was enabled by default\n";
         return 1;
     }
     if (safe_default.enable_fast_walk || !safe_default.fast_walk_model.empty() ||
