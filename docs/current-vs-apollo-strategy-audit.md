@@ -707,6 +707,27 @@ avoids transient overlap when the ball changes side. Unit and decision-level
 tests cover the v40 deep-defense geometry; the two-player version still needs a
 right-side natural replay before promotion evidence is updated.
 
+### 4.16 First motion-first collaboration match
+
+The first full match from commit `763ef64` reached `GameOver` without a server
+or client failure. My3D-Current played left and lost `0:1` to pristine Apollo.
+This one result is diagnostic rather than a promotion gate. It does verify that
+the filtered production plan is live: telemetry recorded 304 Support, 364
+Unmark, 555 Mark and 1,052 Pressure samples, while all 342 near-ball samples had
+zero Formation duty. Only five near-ball samples were truly neutral/idle;
+another 125 were pure turns, so slow orientation remains an action-layer cost
+rather than a formation override.
+
+The action stack executed 129 FastWalkV2, 744 RapidTurnV1 and 17 fallback-contact
+samples, but still produced zero exact kick samples. Twelve Pass planning
+samples reached Proposed and then Cancelled without Ready/Committed/Executed.
+Sixteen independent GetUp entries followed ordinary Walk. Fresh-ball median x
+was approximately midfield (`-0.014 m`) with 45.7% of buckets in the opponent
+half. My3D-Current committed zero illegal-defense events; pristine Apollo
+committed 31. The next implementation priority is therefore contact acquisition,
+turn/walk stability and receiver readiness, not restoration of the discarded
+broad orchestrator.
+
 ## 5. What is actually better, and what is not yet proven
 
 The following improvements are supported by code invariants and tests rather
