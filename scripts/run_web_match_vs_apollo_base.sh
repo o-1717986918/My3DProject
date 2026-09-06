@@ -8,6 +8,7 @@
 set -euo pipefail
 
 max_cycles=${1:-120000}
+match_duration_seconds=${MATCH_DURATION_SECONDS:-1200}
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 workspace_dir=$(cd "$repo_dir/.." && pwd -P)
 runtime_dir="$repo_dir/runtime/apollo"
@@ -55,6 +56,10 @@ trap cleanup EXIT INT TERM
 
 if ! [[ "$max_cycles" =~ ^[1-9][0-9]*$ ]]; then
     echo "usage: $0 [positive-cycle-count]" >&2
+    exit 2
+fi
+if ! [[ "$match_duration_seconds" =~ ^[1-9][0-9]*$ ]]; then
+    echo "MATCH_DURATION_SECONDS must be a positive integer" >&2
     exit 2
 fi
 if ! [[ "$web_port" =~ ^[1-9][0-9]{0,4}$ ]] || (( web_port > 65535 )); then
@@ -249,6 +254,7 @@ mkdir -p "$run_dir"
         --web-port "$web_port" \
         --field fifa7vs7 \
         --rules ssim26 \
+        --match-duration-seconds "$match_duration_seconds" \
         --render-interval "${MATCH_RENDER_INTERVAL:-4}" \
         --width "${MATCH_RENDER_WIDTH:-1280}" \
         --height "${MATCH_RENDER_HEIGHT:-720}" \
@@ -332,6 +338,7 @@ else
     echo "Right/current: $current_team ($(git -C "$repo_dir" rev-parse --short HEAD))"
 fi
 echo "Logs: $run_dir"
+echo "Match duration: ${match_duration_seconds}s of simulation time"
 echo "Controls: mouse drag/wheel, Tab, K/J/B, Space, 1/2/4, F, H"
 
 if [[ "$open_windows_browser" == 1 ]]; then

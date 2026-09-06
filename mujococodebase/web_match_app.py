@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import signal
+from dataclasses import fields
 from pathlib import Path
 from types import FrameType
 
@@ -24,6 +25,7 @@ from rcsssmj.games.soccer.soccer_fields import (  # noqa: E402
     create_soccer_field,
 )
 from rcsssmj.games.soccer.soccer_rules import (  # noqa: E402
+    SoccerRules,
     SoccerRuleBooks,
     create_soccer_rule_book,
 )
@@ -62,6 +64,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--rules", default="ssim26")
     parser.add_argument("--phase", type=int, default=0)
     parser.add_argument("--time", type=float)
+    parser.add_argument("--match-duration-seconds", type=int)
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--render-interval", type=int, default=4)
@@ -70,10 +73,10 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--sync", action="store_true")
     args = parser.parse_args()
 
-    fields = {str(version.value) for version in SoccerFieldVersions}
+    field_names = {str(version.value) for version in SoccerFieldVersions}
     rules = {str(book.value) for book in SoccerRuleBooks}
     phases = {phase.value for phase in GamePhase}
-    if args.field not in fields:
+    if args.field not in field_names:
         parser.error(f"unknown field: {args.field}")
     if args.rules not in rules:
         parser.error(f"unknown rules: {args.rules}")
@@ -87,7 +90,26 @@ def _arguments() -> argparse.Namespace:
         parser.error("render interval must be between 1 and 20 cycles")
     if not 50 <= args.jpeg_quality <= 95:
         parser.error("JPEG quality must be between 50 and 95")
+    if (args.match_duration_seconds is not None and
+            args.match_duration_seconds <= 0):
+        parser.error("match duration must be a positive number of seconds")
     return args
+
+
+def _with_match_duration(
+    rules: SoccerRules,
+    duration_seconds: int | None,
+) -> SoccerRules:
+    """Copy a rule book with a custom first-period end time."""
+
+    if duration_seconds is None:
+        return rules
+    values = {
+        field.name: getattr(rules, field.name)
+        for field in fields(SoccerRules)
+    }
+    values["half_time"] = duration_seconds
+    return SoccerRules(**values)
 
 
 def main() -> int:
@@ -100,7 +122,10 @@ def main() -> int:
     index_path = Path(__file__).with_name("web_match_index.html")
     console = WebMatchConsole(hub, args.web_host, args.web_port, index_path)
 
-    rule_book = create_soccer_rule_book(args.rules)
+    rule_book = _with_match_duration(
+        create_soccer_rule_book(args.rules),
+        args.match_duration_seconds,
+    )
     field = create_soccer_field(args.field)
     simulation = SoccerSimulation(
         field=field,

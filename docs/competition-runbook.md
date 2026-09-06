@@ -171,6 +171,11 @@ uses the same color mapping.
 scripts/run_web_match_vs_apollo_base.sh 120000
 ```
 
+This developed-versus-pristine launcher defaults to `1200` seconds (20
+minutes) of referee play time. The positional argument is the agent cycle
+budget, not the match clock. Override the clock only when required, for
+example `MATCH_DURATION_SECONDS=300` for the original five-minute diagnostic.
+
 Set `MATCH_OPEN_WINDOWS_BROWSER=0` for a server-only launch and open the printed
 URL manually. Override `APOLLO_BASE_REPO` or
 `APOLLO_BASE_EXPECTED_REVISION` only when intentionally comparing another clean
