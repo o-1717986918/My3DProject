@@ -449,14 +449,9 @@ int main() {
     goal_kick.ball.position_valid = false;
     const auto aligned_hold = goal_kick_tree.evaluate(
         goal_kick, goal_kick_blackboard, goal_kick_roles, true, false);
-    if (std::holds_alternative<decision::KickCommand>(aligned_hold)) {
-        std::cerr << "goal kick skipped the aligned stable hold\n";
-        return 1;
-    }
-    goal_kick.server_time += 0.30;
-    const auto clearance = goal_kick_tree.evaluate(
-        goal_kick, goal_kick_blackboard, goal_kick_roles, true, false);
-    const auto* kick = std::get_if<decision::KickCommand>(&clearance);
+    // Once the restart plan is authorized and alignment is valid, match mode
+    // releases immediately instead of imposing a fixed dwell.
+    const auto* kick = std::get_if<decision::KickCommand>(&aligned_hold);
     if (kick == nullptr || kick->mode != decision::KickMode::ForwardContact ||
         !kick->restart_epoch.has_value() ||
         !kick->restart_revision.has_value()) {

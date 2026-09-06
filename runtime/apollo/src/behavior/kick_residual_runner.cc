@@ -19,12 +19,12 @@ namespace behavior {
 namespace {
 
 constexpr double kNominalBallLocalXM = 0.32;
-constexpr double kDistanceToleranceM = 0.75;
-constexpr double kAngleToleranceDeg = 2.0;
-constexpr double kSpeedToleranceMps = 0.20;
-constexpr double kBallXMinimumM = -0.02;
-constexpr double kBallXMaximumM = 0.09;
-constexpr double kBallYMaximumAbsM = 0.09;
+constexpr double kDistanceToleranceM = 1.00;
+constexpr double kAngleToleranceDeg = 15.0;
+constexpr double kSpeedToleranceMps = 0.35;
+constexpr double kBallXMinimumM = -0.12;
+constexpr double kBallXMaximumM = 0.16;
+constexpr double kBallYMaximumAbsM = 0.18;
 
 constexpr std::array<double, 23> kActionScaleRad{
     0.10, 0.10, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20,

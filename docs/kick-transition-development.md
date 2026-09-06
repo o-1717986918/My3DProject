@@ -544,6 +544,42 @@ That result keeps both next tasks explicit: train a phase-conditioned
 approach/release that can turn natural near-ball states into contact, and audit
 the baseline gait instead of attributing every fall to optional FastWalk.
 
+### Availability-first release mode (2026-09-06)
+
+The match runtime now deliberately prioritizes contact frequency over the
+original exact-physics evaluation slice. This is a fallback policy decision,
+not a new robustness claim for the fixed trajectories. Decision, procedural
+runner and residual runner now agree on the same broad static acceptance:
+
+- static start speed up to `1.20 m/s`, tilt rate up to `90 deg/s`, leg
+  position magnitude up to `100 deg`, and leg velocity up to `360 deg/s`;
+- Dribble/Shot/Clear and deterministic range-pass direction up to `15 deg`;
+- Dribble ball pose `x=0.32 +/- 0.12 m`, `y=0.04 +/- 0.15 m`; Shot/Clear use
+  their nominal contact pose with `+/-0.12 m` longitudinal and `+/-0.15 m`
+  lateral tolerance; range pass uses a `+/-0.15 m` setup tolerance;
+- no fixed release dwell after a complete legal sample; only approaches above
+  `1.05 m/s` enter the retained controlled-brake branch;
+- an unreached precision pose can request the explicit forward-contact
+  fallback after `0.45 s`, with a `0.80 s` ordinary hard bound and `1.00 s`
+  strong-kick bound.
+
+The finite-state, upright, fresh-ball, legal-play and receiver-Ready checks
+remain. The fixed-2 m ONNX actor also remains inside its recorded model domain:
+widening inference inputs cannot manufacture learned transition competence.
+This creates two honest baselines for the next training stage: a frequently
+triggered but potentially inaccurate/fall-prone deterministic fallback, and a
+narrow learned actor whose domain can expand only after new data.
+
+The next dedicated transition dataset must therefore sample the complete
+approach-to-contact interval, including walking entries up to `1.20 m/s`, yaw
+bins through `+/-15 deg`, the widened body-frame contact corridor, moving-ball
+states, support-foot phase and failed broad-fallback outcomes. Train a
+phase-conditioned BC/DAgger student to choose when and how to transition, then
+refine contact range/direction under fall and support-foot constraints. Promote
+it by measured contact, direction, distance, recovery and fall rates; do not
+turn the broad deterministic limits into labels claiming all admitted states
+are successful.
+
 ### K1. Version the transition contract
 
 - Add a `kick_policy_v3` contract rather than silently changing v2.

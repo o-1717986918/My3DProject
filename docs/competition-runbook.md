@@ -187,6 +187,17 @@ Use `APOLLO_LEARNED_KICK_MODE=shadow` for inference-only evidence. Stable walk
 is already the default; set `APOLLO_ENABLE_PARAMETERIZED_KICK=0` to disable
 experimental contact as well, in which case learned kick defaults to off.
 
+Parameterized contact currently runs in availability-first mode. Its static
+Dribble/Pass/Shot/Clear trigger accepts normal gait speed (up to `1.20 m/s`),
+up to `15 deg` target yaw, broad body-frame ball corridors and the first
+complete legal release sample. If precision acquisition still stalls, the
+named forward-contact fallback becomes eligible after `0.45 s`. This mode is
+intended to make the team act during matches; it is not evidence that every
+admitted pose preserves the nominal range or direction, so compare contact,
+fall and target-error telemetry together. The ONNX kick transition keeps its
+separate trained-domain limits until the next approach-to-contact training
+cycle is complete.
+
 The developed-versus-base launcher now defaults to the motion-first
 collaboration configuration. The broad open-play orchestrator is off, while
 support/unmark, unique centre-back marking, pass communication/receiving,

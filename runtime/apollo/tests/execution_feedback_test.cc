@@ -74,13 +74,6 @@ bool establish_targeted_pass(
     add_ready_intent(snapshot, *selected);
 
     snapshot.server_time = 1.01;
-    const auto stabilizing = manager.decide(snapshot);
-    if (std::holds_alternative<decision::KickCommand>(stabilizing)) {
-        std::cerr << "pass released before the contact pose debounce elapsed\n";
-        return false;
-    }
-
-    snapshot.server_time = 1.30;
     const auto released = manager.decide(snapshot);
     const auto* released_kick = std::get_if<decision::KickCommand>(&released);
     if (released_kick == nullptr ||

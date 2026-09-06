@@ -1,25 +1,22 @@
 schema_version: 1
 description: >-
-  Model-independent T1 kick anchors. Only anchors with recorded exact-physics
-  evidence are published; any missing mode or out-of-envelope request fails
-  closed.
+  Model-independent T1 kick anchors. Trajectory parameters retain their
+  exact-physics evidence, while the match runtime deliberately uses a broad
+  contact corridor until a phase-conditioned transition policy replaces the
+  static capture.
 anchors:
   - name: right_dribble_055m_v1
     mode: dribble
     target_distance_m: 0.55
-    target_distance_tolerance_m: 0.10
+    target_distance_tolerance_m: 0.30
     target_angle_deg: 0.0
-    # Dribble-only release envelope: at 0.55 m, 6 deg is about 5.8 cm of
-    # directional error. Pass, shot, and clear anchors remain stricter.
-    target_angle_tolerance_deg: 6.0
+    target_angle_tolerance_deg: 15.0
     requested_speed_mps: 0.90
-    requested_speed_tolerance_mps: 0.05
+    requested_speed_tolerance_mps: 0.20
     ball_local_x_m: 0.32
     ball_local_y_m: 0.04
-    ball_x_tolerance_m: 0.02
-    # The decision layer still releases inside +/-0.020 m.  The extra 5 mm is
-    # a measured one-frame dispatch margin between decision and motion.
-    ball_y_tolerance_m: 0.025
+    ball_x_tolerance_m: 0.12
+    ball_y_tolerance_m: 0.15
     kp: 150.0
     kd: 1.0
     base_pose: neutral
@@ -56,17 +53,15 @@ anchors:
   - name: right_shot_4m_v1
     mode: shot
     target_distance_m: 4.0
-    target_distance_tolerance_m: 0.50
+    target_distance_tolerance_m: 1.00
     target_angle_deg: 0.0
-    # Live server setup reached 1.486 deg with all remaining release guards
-    # satisfied. At the 4.5 m contract edge, 2 deg is under 0.16 m laterally.
-    target_angle_tolerance_deg: 2.0
+    target_angle_tolerance_deg: 15.0
     requested_speed_mps: 2.50
-    requested_speed_tolerance_mps: 0.05
+    requested_speed_tolerance_mps: 0.35
     ball_local_x_m: 0.3260
     ball_local_y_m: 0.0400
-    ball_x_tolerance_m: 0.0140
-    ball_y_tolerance_m: 0.0120
+    ball_x_tolerance_m: 0.1200
+    ball_y_tolerance_m: 0.1500
     kp: 150.0
     kd: 1.0
     base_pose: neutral
@@ -109,15 +104,15 @@ anchors:
   - name: right_clear_6m_v1
     mode: clear
     target_distance_m: 6.0
-    target_distance_tolerance_m: 0.50
+    target_distance_tolerance_m: 1.00
     target_angle_deg: 0.0
-    target_angle_tolerance_deg: 1.0
+    target_angle_tolerance_deg: 15.0
     requested_speed_mps: 3.50
-    requested_speed_tolerance_mps: 0.05
+    requested_speed_tolerance_mps: 0.35
     ball_local_x_m: 0.3260
     ball_local_y_m: 0.0400
-    ball_x_tolerance_m: 0.0140
-    ball_y_tolerance_m: 0.0120
+    ball_x_tolerance_m: 0.1200
+    ball_y_tolerance_m: 0.1500
     kp: 150.0
     kd: 1.0
     base_pose: neutral
@@ -164,15 +159,15 @@ anchors:
   - name: right_pass_3p5m_experimental_v1
     mode: pass
     target_distance_m: 3.5
-    target_distance_tolerance_m: 0.75
+    target_distance_tolerance_m: 1.00
     target_angle_deg: 0.0
-    target_angle_tolerance_deg: 2.0
+    target_angle_tolerance_deg: 15.0
     requested_speed_mps: 2.20
-    requested_speed_tolerance_mps: 0.20
+    requested_speed_tolerance_mps: 0.35
     ball_local_x_m: 0.31
     ball_local_y_m: -0.04
-    ball_x_tolerance_m: 0.02
-    ball_y_tolerance_m: 0.02
+    ball_x_tolerance_m: 0.15
+    ball_y_tolerance_m: 0.15
     kp: 150.0
     kd: 1.0
     base_pose: neutral
@@ -206,15 +201,15 @@ anchors:
   - name: right_pass_5m_experimental_v1
     mode: pass
     target_distance_m: 5.0
-    target_distance_tolerance_m: 0.75
+    target_distance_tolerance_m: 1.00
     target_angle_deg: 0.0
-    target_angle_tolerance_deg: 2.0
+    target_angle_tolerance_deg: 15.0
     requested_speed_mps: 3.00
-    requested_speed_tolerance_mps: 0.20
+    requested_speed_tolerance_mps: 0.35
     ball_local_x_m: 0.31
     ball_local_y_m: -0.04
-    ball_x_tolerance_m: 0.02
-    ball_y_tolerance_m: 0.02
+    ball_x_tolerance_m: 0.15
+    ball_y_tolerance_m: 0.15
     kp: 150.0
     kd: 1.0
     base_pose: neutral

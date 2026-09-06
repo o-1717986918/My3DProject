@@ -791,6 +791,24 @@ matched seeds remain applicable to deterministic single-action evaluation.
 No single score, training reward, or status-sample count is sufficient by
 itself.
 
+### 6.1 Permissive action-release experiment (2026-09-06)
+
+The current production experiment reverses the earlier static-release bias:
+the team now accepts a wide contact corridor, normal walking phase, up to
+`15 deg` directional mismatch and immediate release after one complete legal
+sample. Deterministic fallback begins much earlier when exact acquisition does
+not converge. The aim is to test whether action starvation, rather than
+trajectory precision, is the dominant match weakness.
+
+This change supersedes earlier passages in this audit that describe the
+centimetre-scale static envelope as the current default. Those passages remain
+historical evidence for why the old path was precise but rarely triggered.
+The widened mode must be judged by attributed contacts, ball progress,
+direction/range error, independent falls and opponent dispossessions. If it
+acts frequently but loses control, the correct successor is the documented
+phase-conditioned transition training—not restoration of an action-starving
+one-degree release gate.
+
 ## 7. Immediate development order
 
 1. Complete the motion-owned ball path: direct pressure must reach and cross

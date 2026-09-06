@@ -13,24 +13,26 @@ inline constexpr double kMaximumTargetAngleDeg = 15.0;
 inline constexpr double kMinimumRequestedSpeedMps = 0.8;
 inline constexpr double kMaximumRequestedSpeedMps = 3.5;
 
-// Shared transition envelope for every static-base procedural trajectory.
-// Decision must not announce a releasable kick that the motion runner will
-// reject one cycle later. Keep these limits here rather than duplicating them
-// across the two layers.
-inline constexpr double kProceduralMaximumStartPlanarSpeedMps = 0.50;
-inline constexpr double kProceduralMaximumStartTiltRateDegS = 30.0;
-inline constexpr double kProceduralMaximumStartLegPositionDeg = 45.0;
-inline constexpr double kProceduralMaximumStartLegVelocityDegS = 70.0;
+// Permissive match fallback envelope for every static-base procedural
+// trajectory.  These values deliberately admit normal gait phases instead of
+// waiting for an almost motionless neutral pose.  The runner still requires a
+// finite complete joint state, an upright robot and a usable ball track.  A
+// phase-conditioned learned transition should eventually replace this broad
+// capture rather than tightening the match trigger again.
+inline constexpr double kProceduralMaximumStartPlanarSpeedMps = 1.20;
+inline constexpr double kProceduralMaximumStartTiltRateDegS = 90.0;
+inline constexpr double kProceduralMaximumStartLegPositionDeg = 100.0;
+inline constexpr double kProceduralMaximumStartLegVelocityDegS = 360.0;
 
 // Shared release slot for the model-independent forward-contact macro.  The
 // restart coordinator, setup controller, and final release gate must agree on
 // this pose; otherwise coordination can wait forever at a pose the action
 // layer already considers executable (or authorize a pose it will reject).
 inline constexpr double kForwardContactBallLocalXM = 0.34;
-inline constexpr double kForwardContactBallLocalXToleranceM = 0.04;
+inline constexpr double kForwardContactBallLocalXToleranceM = 0.14;
 inline constexpr double kForwardContactBallLocalYM = 0.0;
-inline constexpr double kForwardContactBallLocalYToleranceM = 0.03;
-inline constexpr double kForwardContactMaximumTargetAngleDeg = 3.0;
+inline constexpr double kForwardContactBallLocalYToleranceM = 0.18;
+inline constexpr double kForwardContactMaximumTargetAngleDeg = 25.0;
 
 struct ParameterizedPassAnchorContract {
     double target_distance_m;
@@ -40,18 +42,17 @@ struct ParameterizedPassAnchorContract {
 };
 
 // The 2 m anchor is backed by the dense residual table. The 3.5 m and 5 m
-// anchors are narrow deterministic trajectories and remain experimental; all
-// three are selected discretely instead of pretending that one trajectory can
-// continuously scale across the complete range.
+// anchors remain experimental. The broad overlap below is a match-availability
+// policy, not evidence that one trajectory continuously scales across it.
 inline constexpr std::array<ParameterizedPassAnchorContract, 3>
 kParameterizedPassAnchors{{
-    {2.0, 0.75, 1.43, 0.20},
-    {3.5, 0.75, 2.20, 0.20},
-    {5.0, 0.75, 3.00, 0.20},
+    {2.0, 1.00, 1.43, 0.35},
+    {3.5, 1.00, 2.20, 0.35},
+    {5.0, 1.00, 3.00, 0.35},
 }};
-inline constexpr double kParameterizedPassMinimumTargetDistanceM = 1.45;
-inline constexpr double kParameterizedPassMaximumTargetDistanceM = 5.75;
-inline constexpr double kParameterizedPassMaximumTargetAngleDeg = 2.0;
+inline constexpr double kParameterizedPassMinimumTargetDistanceM = 1.00;
+inline constexpr double kParameterizedPassMaximumTargetDistanceM = 6.00;
+inline constexpr double kParameterizedPassMaximumTargetAngleDeg = 15.0;
 inline constexpr double kParameterizedPassRequestedSpeedMps = 1.43;
 inline constexpr double kParameterizedPassMinimumRequestedSpeedMps = 1.43;
 inline constexpr double kParameterizedPassMaximumRequestedSpeedMps = 3.00;
@@ -124,52 +125,42 @@ inline bool parameterized_pass_request_supported(
     return false;
 }
 
-// First model-independent anchor. This is intentionally a narrow short-touch
-// contract: widening it to pass or shot distances requires new physical
-// anchors and the same held-out/server promotion gates.
-inline constexpr double kProceduralDribbleMinimumTargetDistanceM = 0.45;
-inline constexpr double kProceduralDribbleMaximumTargetDistanceM = 0.65;
-// At 0.55 m, a six-degree body/target mismatch is about 5.8 cm laterally: it
-// is acceptable for a recovery dribble touch, but not for a pass or shot.
-// Keeping this a dribble-only contract avoids starving contact while the
-// stricter directional actions retain their measured release envelopes.
-inline constexpr double kProceduralDribbleMaximumTargetAngleDeg = 6.0;
+// First model-independent anchor. Its trajectory remains a fixed short touch;
+// the widened request and release envelope is an availability-first fallback.
+inline constexpr double kProceduralDribbleMinimumTargetDistanceM = 0.25;
+inline constexpr double kProceduralDribbleMaximumTargetDistanceM = 0.90;
+inline constexpr double kProceduralDribbleMaximumTargetAngleDeg = 15.0;
 inline constexpr double kProceduralDribbleRequestedSpeedMps = 0.90;
-// These are the live ball-pose limits encoded by right_dribble_055m_v1.
-// Decision and motion must use the same envelope: a decision-layer release
-// outside it is guaranteed to be rejected before the first trajectory frame.
+// Decision and motion share this deliberately broad contact corridor so a
+// decision-layer release is not rejected one cycle later.
 inline constexpr double kProceduralDribbleBallLocalXM = 0.32;
-inline constexpr double kProceduralDribbleBallLocalXToleranceM = 0.02;
+inline constexpr double kProceduralDribbleBallLocalXToleranceM = 0.12;
 inline constexpr double kProceduralDribbleBallLocalYM = 0.04;
-inline constexpr double kProceduralDribbleBallLocalYToleranceM = 0.025;
-inline constexpr double kProceduralDribbleMinimumBallLocalYM = 0.02;
-inline constexpr double kProceduralDribbleMaximumBallLocalYM = 0.06;
+inline constexpr double kProceduralDribbleBallLocalYToleranceM = 0.15;
+inline constexpr double kProceduralDribbleMinimumBallLocalYM = -0.11;
+inline constexpr double kProceduralDribbleMaximumBallLocalYM = 0.19;
 
-// Exact-physics 4 m shot teacher. The trajectory passed 100/100 independently
-// seeded held-out ball-pose trials inside this narrow release slot. The 2 deg
-// heading envelope is additionally bounded by live server setup evidence: at
-// the 4.5 m contract edge it contributes less than 0.16 m of lateral miss,
-// while avoiding a fixed-contact fallback for a measured 1.486 deg setup.
-// Distance, speed, and ball-position limits remain unchanged.
-inline constexpr double kProceduralShotMinimumTargetDistanceM = 3.50;
-inline constexpr double kProceduralShotMaximumTargetDistanceM = 4.50;
-inline constexpr double kProceduralShotMaximumTargetAngleDeg = 2.0;
+// Exact-physics 4 m shot teacher. Its evidence remains attached to the asset;
+// the wider match envelope below intentionally exceeds that validated slice.
+inline constexpr double kProceduralShotMinimumTargetDistanceM = 3.00;
+inline constexpr double kProceduralShotMaximumTargetDistanceM = 5.00;
+inline constexpr double kProceduralShotMaximumTargetAngleDeg = 15.0;
 inline constexpr double kProceduralShotRequestedSpeedMps = 2.50;
 inline constexpr double kProceduralShotBallLocalXM = 0.3260;
-inline constexpr double kProceduralShotBallLocalXRangeM = 0.0140;
+inline constexpr double kProceduralShotBallLocalXRangeM = 0.1200;
 inline constexpr double kProceduralShotBallLocalYM = 0.0400;
-inline constexpr double kProceduralShotBallLocalYRangeM = 0.0120;
+inline constexpr double kProceduralShotBallLocalYRangeM = 0.1500;
 
 // Safety-clearance teacher. Success means at least 4.5 m of forward progress
 // inside a 1.5 m half-corridor while the robot remains controllable; unlike a
 // pass or shot, exact landing range and arrival speed are not claimed.
-inline constexpr double kProceduralClearMinimumTargetDistanceM = 5.50;
-inline constexpr double kProceduralClearMaximumTargetDistanceM = 6.50;
-inline constexpr double kProceduralClearMaximumTargetAngleDeg = 1.0;
+inline constexpr double kProceduralClearMinimumTargetDistanceM = 5.00;
+inline constexpr double kProceduralClearMaximumTargetDistanceM = 7.00;
+inline constexpr double kProceduralClearMaximumTargetAngleDeg = 15.0;
 inline constexpr double kProceduralClearRequestedSpeedMps = 3.50;
 inline constexpr double kProceduralClearBallLocalXM = 0.3260;
-inline constexpr double kProceduralClearBallLocalXRangeM = 0.0140;
+inline constexpr double kProceduralClearBallLocalXRangeM = 0.1200;
 inline constexpr double kProceduralClearBallLocalYM = 0.0400;
-inline constexpr double kProceduralClearBallLocalYRangeM = 0.0120;
+inline constexpr double kProceduralClearBallLocalYRangeM = 0.1500;
 
 }  // namespace decision::kick_contract

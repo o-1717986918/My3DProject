@@ -40,10 +40,10 @@ constexpr double kEmergencyChallengePushPastBallM = 0.70;
 // around the ball strictly lower priority than immediate physical pressure.
 constexpr double kUrgentOpponentBallDistanceM = 1.40;
 constexpr double kUrgentSelfBallDistanceM = 1.10;
-// The exact-physics kick table was validated with the ball 0.31--0.40 m in
-// front and at most 0.08 m to either side.  Keep the decision release gate in
-// the same domain instead of starting the one-second macro from the former
-// coarse dribble distance (up to 0.85 m).
+// Enter precision control close enough to keep the ball track actionable. The
+// final match release corridor is intentionally much wider than the original
+// exact-physics evaluation slice; transition training is expected to recover
+// precision later without starving contact now.
 // The walk controller brakes inside a 0.15 m target radius. Aim slightly past
 // the desired setup slot so that braking converges near 0.35 m behind the ball.
 constexpr double kDribbleApproachDistanceM = 0.22;
@@ -55,7 +55,7 @@ constexpr double kDribblePrecisionEntryDistanceM = 1.25;
 constexpr double kDribbleCommandBehindM = 0.34;
 constexpr double kProceduralPassBallLocalXM = 0.31;
 constexpr double kProceduralPassBallLocalYM = -0.04;
-constexpr double kProceduralPassBallPositionToleranceM = 0.02;
+constexpr double kProceduralPassBallPositionToleranceM = 0.15;
 // The server walk controller brakes about 2.3 cm long and 2.2 cm low in the
 // narrow strong-kick slot. These are approach set-points only; release is
 // still checked against each anchor's independently validated physical slot.
@@ -83,16 +83,9 @@ constexpr double kRestartMaxPrecisionReverseSpeedMps = 0.20;
 // large precision error. First face and walk toward the canonical setup point;
 // only the final bounded correction retains fixed kick orientation. This is
 // the same turn-then-forward composition used by ordinary navigation.
-constexpr double kKickCoarseRelocateLateralErrorM = 0.08;
-constexpr double kKickCoarseTravelTurnThresholdDeg = 20.0;
-constexpr double kKickFinalTurnThresholdDeg = 12.0;
-// Procedural anchors describe the ball in the robot body frame. Their wider
-// target-angle fields are admission envelopes, not permission to release a
-// body-fixed trajectory while still several degrees away from the requested
-// direction. At 5.6 deg, a ball that is perfectly centred in the target frame
-// shifts by about 3.1 cm in the body frame and is rejected by the runner. Keep
-// strategy admission broad, but finish static-trajectory alignment to 1 deg.
-constexpr double kProceduralStaticReleaseYawToleranceDeg = 1.0;
+constexpr double kKickCoarseRelocateLateralErrorM = 0.20;
+constexpr double kKickCoarseTravelTurnThresholdDeg = 35.0;
+constexpr double kKickFinalTurnThresholdDeg = 25.0;
 constexpr double kDribbleSideDistanceM = 0.8;
 constexpr double kDribbleSideClearanceM = 0.55;
 constexpr double kDribbleSideStepBehindThresholdM = 0.1;
@@ -111,87 +104,56 @@ constexpr int kPressurePushSetupModeKey = 100;
 // KickCommand variant for the complete one-second macro.
 constexpr double kKickDurationS = 1.25;
 constexpr double kKickCooldownS = 0.5;
-// Debounce the release pose for several decision cycles.  This is a safety
-// guard for the accepted fallback action, not a claim that zero-command walk
-// converges to a phase-independent joint state; the transition policy owns
-// that problem.  A longer 0.60 s hold starved valid passes because normal
-// server yaw sway repeatedly reset the timer.
-constexpr double kKickSetupStableHoldS = 0.25;
-// Two neutral cycles remove the dynamic walk phase before a static-base kick
-// trajectory starts.  Dribble uses a separately validated 5 mm latch margin
-// so this short hold cannot be lost to ordinary one-frame localization sway.
-// A moving dribble touch gets one decision cycle: natural-match telemetry
-// showed that a two-cycle wait lets residual walk momentum carry an otherwise
-// valid contact pose back out of the release slot.  Shot/clear remain static
-// strong contacts and keep their calibrated two-cycle hold.  Range-pass keeps
-// immediate release until its expanded pose envelope is independently
-// evaluated.
-constexpr double kProceduralDribbleSetupStableHoldS = 0.02;
-constexpr double kProceduralKickSetupStableHoldS = 0.04;
-// The fixed-2 m residual/learned executor was trained from captured gait
-// phases.  It must see that phase instead of first being filtered through the
-// static procedural trajectory's leg-velocity gate and long neutral hold.
-// Keep one decision-cycle pose confirmation so a single noisy ball sample
-// cannot release the action; the runner still checks its own ball/yaw domain.
-constexpr double kPhaseConditionedKickSetupStableHoldS = 0.02;
-// The deployed walk commonly retains 0.22--0.35 m/s of measured torso motion
-// after entering its neutral command. Requiring less than 0.20 m/s starved
-// every contact in a complete comparison match. The procedural runner repeats
-// this same bound before it captures the current pose.
-constexpr double kKickMinBallDistanceM = 0.30;
-constexpr double kKickMaxBallDistanceM = 0.41;
-// Server zero-command sway is about two centimetres peak-to-peak. A 3 cm
-// release band remains well inside the residual runner's 9 cm contact
-// envelope while allowing the stable-hold timer to survive one gait cycle.
-// The zero-command policy oscillates around roughly two degrees on the server.
-// Three degrees remains comfortably below the ten-degree action promotion gate
-// while admitting a continuous debounce window for the stable fallback.
+// Availability-first match mode uses the first complete, legal release sample.
+// A future transition policy owns temporal phase selection.
+constexpr double kKickSetupStableHoldS = 0.0;
+// All deterministic contacts use immediate confirmation in match mode. The
+// runner still validates complete finite state and upright posture.
+constexpr double kProceduralDribbleSetupStableHoldS = 0.0;
+constexpr double kProceduralKickSetupStableHoldS = 0.0;
+// The fixed-2 m learned executor sees the live phase and keeps its independent
+// trained-domain checks. Match mode does not add an extra decision-layer dwell.
+constexpr double kPhaseConditionedKickSetupStableHoldS = 0.0;
+// Shared broad distance guard. Action-specific body-frame corridors remain the
+// authoritative contact check.
+constexpr double kKickMinBallDistanceM = 0.18;
+constexpr double kKickMaxBallDistanceM = 0.55;
+// Retain a high orientation-control gain for poses that are still outside the
+// widened directional release corridor.
 constexpr double kKickSetupOrientationGain = 3.0;
-// Brake before the exact release slot rather than waiting until the body has
-// already crossed it.  This wider corridor does not authorize contact; it only
-// switches from the walking actor to neutral while residual momentum decays.
-constexpr double kKickPreSettleLongitudinalToleranceM = 0.08;
-constexpr double kKickPreSettleLateralToleranceM = 0.08;
-constexpr double kKickPreSettleMaximumYawErrorDeg = 8.0;
-// Runtime traces show that the walk policy may accelerate for one or two
-// frames after a zero-command switch.  Use a conservative measured stopping
-// envelope to start neutral capture before that residual gait phase carries
-// the torso through the centimetre-scale contact slot.
+// Brake only near the top of the broad dynamic envelope. Ordinary gait phases
+// can release directly; the branch remains for unusually fast approaches.
+constexpr double kKickPreSettleLongitudinalToleranceM = 0.18;
+constexpr double kKickPreSettleLateralToleranceM = 0.22;
+constexpr double kKickPreSettleMaximumYawErrorDeg = 25.0;
+// Retain a bounded stopping estimate for the top of the admitted speed range.
 constexpr double kKickPreSettleEffectiveDecelMps2 = 0.35;
 constexpr double kKickPreSettlePaddingM = 0.055;
-constexpr double kKickPreSettleMaximumDistanceM = 0.45;
-constexpr double kKickPreSettleEntrySpeedMps = 0.25;
-constexpr double kKickPreSettleExitSpeedMps = 0.20;
-constexpr double kKickPreSettleStableHoldS = 0.10;
+constexpr double kKickPreSettleMaximumDistanceM = 0.65;
+constexpr double kKickPreSettleEntrySpeedMps = 1.05;
+constexpr double kKickPreSettleExitSpeedMps = 0.90;
+constexpr double kKickPreSettleStableHoldS = 0.0;
 // Preserve the original Apollo walk-through-ball behavior as an explicit,
 // observable last resort. It is available only after a sustained near-ball
 // setup attempt and inside this wider contact corridor.
-// The original Apollo contact path keeps a short recovery window under
-// pressure. A selected precision action receives enough time to finish its
-// bounded longitudinal/lateral correction; otherwise the fallback would win
-// before the walking actor could cover the observed 10--22 cm lateral error.
-// A targeted pass uses the same longer window because a fixed forward contact
-// is not semantically equivalent to the agreed pass.
-constexpr double kForwardContactFastFallbackDelayS = 0.45;
-constexpr double kPrecisionActionFallbackDelayS = 1.20;
-constexpr double kPrecisionActionProgressGraceS = 0.50;
-constexpr double kPrecisionActionHardFallbackDelayS = 1.80;
-// A strong kick often has to compose turn -> walk -> final turn in the lateral
-// edge of the penalty area. Preserve a genuinely improving attempt for one
-// additional gait phase; the ordinary stalled-progress fallback above remains
-// unchanged and still prevents waiting on a dead setup.
-constexpr double kStrongKickHardFallbackDelayS = 2.60;
+// Keep only a short acquisition window before asking the explicit original
+// Apollo contact fallback to act.
+constexpr double kForwardContactFastFallbackDelayS = 0.15;
+constexpr double kPrecisionActionFallbackDelayS = 0.45;
+constexpr double kPrecisionActionProgressGraceS = 0.20;
+constexpr double kPrecisionActionHardFallbackDelayS = 0.80;
+// Strong contacts receive a slightly longer but still availability-first hard
+// bound.
+constexpr double kStrongKickHardFallbackDelayS = 1.00;
 constexpr double kKickSetupMeaningfulProgressM = 0.01;
-constexpr double kForwardContactFallbackMinimumBehindM = 0.20;
-constexpr double kForwardContactFallbackMaximumBehindM = 0.60;
-constexpr double kForwardContactFallbackMaximumLateralM = 0.18;
-constexpr double kForwardContactFallbackMaximumYawErrorDeg = 15.0;
-constexpr double kForwardContactFallbackMaximumPlanarSpeedMps = 0.65;
-// Longer than the largest sparse replay-test interval while still shorter
-// than the fallback delay, so a genuinely abandoned attempt cannot inherit a
-// completed timeout on re-entry.
-constexpr double kKickSetupContinuityTimeoutS = 1.00;
-constexpr double kKickSetupDirectionResetDeg = 20.0;
+constexpr double kForwardContactFallbackMinimumBehindM = 0.15;
+constexpr double kForwardContactFallbackMaximumBehindM = 0.75;
+constexpr double kForwardContactFallbackMaximumLateralM = 0.35;
+constexpr double kForwardContactFallbackMaximumYawErrorDeg = 35.0;
+constexpr double kForwardContactFallbackMaximumPlanarSpeedMps = 1.20;
+// A short observation interruption should not reset a live action identity.
+constexpr double kKickSetupContinuityTimeoutS = 2.00;
+constexpr double kKickSetupDirectionResetDeg = 45.0;
 constexpr double kRejectedPassRetryDelayS = 2.0;
 // A straight goal-line aim from a wide late attack repeatedly carried the ball
 // out beside the post.  Inside this zone, first spend forward progress on a
@@ -202,25 +164,19 @@ constexpr double kFinalThirdCutInLateralMarginM = 1.0;
 constexpr double kFinalThirdCutInAdvanceM = 1.5;
 constexpr double kFinalThirdCutInTargetYM = 1.0;
 
-// A static strong shot is useful only when the current approach can finish
-// before the ball or an opponent removes the opportunity.  This is an
-// admission estimate, deliberately separate from the centimetre-scale release
-// contract below.  The learned fixed-distance pass consumes live gait phase
-// and never goes through this static-action estimate.
-constexpr double kStaticShotMaximumObservedBallSpeedMps = 0.60;
-constexpr double kStaticShotMaximumInitialLateralErrorM = 0.35;
-constexpr double kStaticShotMaximumInitialYawErrorDeg = 60.0;
-constexpr double kStaticShotEstimatedSetupSpeedMps = 0.75;
-constexpr double kStaticShotEstimatedTurnRateDegS = 120.0;
-constexpr double kStaticShotFixedAcquisitionTimeS = 0.18;
-constexpr double kStaticShotOpponentReserveS = 0.10;
-// The deterministic short-touch trajectory assumes an almost stationary ball.
-// Natural v28 play admitted several touches just as the ball accelerated to
-// roughly 1.9--2.4 m/s; the actor then spent its whole commitment chasing a
-// release pose that no longer existed.  Reject only that static action and
-// immediately retain the continuous pressure path.
-constexpr double kStaticDribbleMaximumObservedBallSpeedMps = 0.45;
-constexpr double kStaticDribbleMaximumBallDisplacementM = 0.12;
+// Availability-first coarse admission for a static strong shot. The learned
+// fixed-distance pass consumes live gait phase and remains a separate path.
+constexpr double kStaticShotMaximumObservedBallSpeedMps = 1.50;
+constexpr double kStaticShotMaximumInitialLateralErrorM = 0.75;
+constexpr double kStaticShotMaximumInitialYawErrorDeg = 120.0;
+constexpr double kStaticShotEstimatedSetupSpeedMps = 2.00;
+constexpr double kStaticShotEstimatedTurnRateDegS = 360.0;
+constexpr double kStaticShotFixedAcquisitionTimeS = 0.0;
+constexpr double kStaticShotOpponentReserveS = 0.0;
+// Broad match-admission limits. These improve action availability but are not
+// new physical validation of the fixed short-touch trajectory.
+constexpr double kStaticDribbleMaximumObservedBallSpeedMps = 1.50;
+constexpr double kStaticDribbleMaximumBallDisplacementM = 0.75;
 
 bool needs_final_third_cut_in(const std::array<double, 2>& ball) {
     return field_geometry::kActualHalfLengthM - ball[0] <=
@@ -1012,13 +968,8 @@ HighLevelCommand make_dribble_command(
         : use_procedural_kick
             ? procedural_max_orientation_error_deg
             : decision::kick_contract::kForwardContactMaximumTargetAngleDeg;
-    const double release_orientation_tolerance_deg = use_learned_transition
-        ? required_orientation_error_deg
-        : use_procedural_kick
-            ? std::min(
-                  required_orientation_error_deg,
-                  kProceduralStaticReleaseYawToleranceDeg)
-            : required_orientation_error_deg;
+    const double release_orientation_tolerance_deg =
+        required_orientation_error_deg;
     const double planar_speed_mps = math::norm2({
         context.snapshot.self.lin_vel_b[0],
         context.snapshot.self.lin_vel_b[1],
@@ -1945,13 +1896,14 @@ HighLevelCommand APBehavior::make_command(
             snapshot, capabilities, enable_pass_strategy, tactical_state);
         const double planar_speed_mps = math::norm2({
             snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]});
-        constexpr double kSpecialistSetupMaximumBallDistanceM = 0.65;
-        // Admit the full motion-layer transition envelope. Speeds above the
-        // neutral-release band enter the explicit pre-settle branch; rejecting
-        // them here prevented that branch from doing the braking it owns.
+        constexpr double kSpecialistSetupMaximumBallDistanceM =
+            kDribblePrecisionEntryDistanceM;
+        // Match admission now spans the broad static fallback envelope. The
+        // learned transition remains separately restricted to its recorded
+        // training distribution.
         constexpr double kSpecialistSetupMaximumSpeedMps =
             decision::kick_contract::kProceduralMaximumStartPlanarSpeedMps;
-        constexpr double kSpecialistMinimumOpponentEtaS = 1.0;
+        constexpr double kSpecialistMinimumOpponentEtaS = 0.0;
         constexpr double kLocalActionAbortRaceMarginS = 0.25;
         const bool opponent_clearly_wins_ball =
             tactical_state.possession == strategy::PossessionOwner::Theirs &&
@@ -2004,7 +1956,6 @@ HighLevelCommand APBehavior::make_command(
         // while a goal chance or defensive emergency may begin positioning
         // from the full precision-entry distance.
         const bool urgent_local_setup_available =
-            !context.urgent_contest &&
             context.ball_distance <= kDribblePrecisionEntryDistanceM &&
             planar_speed_mps <= kSpecialistSetupMaximumSpeedMps &&
             (snapshot.ball.visible || snapshot.ball.position_age_s <= 0.75) &&
@@ -2030,10 +1981,7 @@ HighLevelCommand APBehavior::make_command(
                 const double self_yaw_deg =
                     world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
                         snapshot.self.orientation_wxyz);
-                // Setup-aware dribble generation asks for at most 30 degrees.
-                // Keep a small perception margin here, but do not admit the
-                // retained direct-goal proposal of a backwards-facing player.
-                constexpr double kDribbleAdmissionMaximumTurnDeg = 35.0;
+                constexpr double kDribbleAdmissionMaximumTurnDeg = 120.0;
                 return controlled_specialist_setup &&
                     static_dribble_setup_feasible(snapshot, action) &&
                     std::abs(math::normalize_deg(

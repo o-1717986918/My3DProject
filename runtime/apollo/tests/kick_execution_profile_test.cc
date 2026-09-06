@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "src/behavior/kick_execution_profile.h"
+#include "src/decision/kick_contract.h"
 
 #include <cmath>
 #include <iostream>
@@ -102,16 +103,17 @@ int main() {
 
     const auto learned_overlap = behavior::make_kick_execution_profile(
         snapshot, make_targeted(1.43, 1.5), true, true);
-    const auto learned_only = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(1.43, 8.0), true, true);
+    const auto broad_static = behavior::make_kick_execution_profile(
+        snapshot, make_targeted(1.43, 14.0), true, true);
     const auto shadow_only = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(1.43, 8.0), true, false, true);
+        snapshot, make_targeted(1.43, 14.0), true, false, true);
     if (!learned_overlap.static_executor_eligible ||
         !learned_overlap.learned_transition_eligible ||
-        learned_only.kind != behavior::KickProfileKind::ParameterizedContact ||
-        learned_only.static_executor_eligible ||
-        !learned_only.learned_transition_eligible ||
-        shadow_only.kind != behavior::KickProfileKind::StableFallback) {
+        broad_static.kind != behavior::KickProfileKind::ParameterizedContact ||
+        !broad_static.static_executor_eligible ||
+        broad_static.learned_transition_eligible ||
+        shadow_only.kind != behavior::KickProfileKind::ParameterizedContact ||
+        !shadow_only.static_executor_eligible) {
         std::cerr << "learned and static pass envelopes were not separated\n";
         return 1;
     }
@@ -142,7 +144,11 @@ int main() {
     const auto shot = behavior::make_kick_execution_profile(
         snapshot, make_shot(), true);
     const auto boundary_shot = behavior::make_kick_execution_profile(
-        snapshot, make_shot(4.0, 2.0), true);
+        snapshot,
+        make_shot(
+            4.0,
+            decision::kick_contract::kProceduralShotMaximumTargetAngleDeg),
+        true);
     if (shot.kind != behavior::KickProfileKind::ProceduralContact ||
         boundary_shot.kind != behavior::KickProfileKind::ProceduralContact ||
         !near(shot.target_distance_m, 4.0) ||
@@ -181,19 +187,43 @@ int main() {
     const auto outside_angle = behavior::make_kick_execution_profile(
         snapshot, make_targeted(1.43, 16.0), true);
     const auto outside_speed = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(3.01, 0.0), true);
+        snapshot, make_targeted(3.36, 0.0), true);
     const auto unsupported_pass_speed = behavior::make_kick_execution_profile(
-        snapshot, make_targeted(1.22, 0.0), true);
+        snapshot, make_targeted(1.07, 0.0), true);
     const auto outside_dribble_angle = behavior::make_kick_execution_profile(
-        snapshot, make_dribble(6.01), true);
+        snapshot,
+        make_dribble(
+            decision::kick_contract::kProceduralDribbleMaximumTargetAngleDeg +
+            0.01),
+        true);
     const auto outside_shot_angle = behavior::make_kick_execution_profile(
-        snapshot, make_shot(4.0, 2.01), true);
+        snapshot,
+        make_shot(
+            4.0,
+            decision::kick_contract::kProceduralShotMaximumTargetAngleDeg +
+            0.01),
+        true);
     const auto outside_shot_distance = behavior::make_kick_execution_profile(
-        snapshot, make_shot(4.51, 0.0), true);
+        snapshot,
+        make_shot(
+            decision::kick_contract::kProceduralShotMaximumTargetDistanceM +
+            0.01,
+            0.0),
+        true);
     const auto outside_clear_angle = behavior::make_kick_execution_profile(
-        snapshot, make_clear(6.0, 1.01), true);
+        snapshot,
+        make_clear(
+            6.0,
+            decision::kick_contract::kProceduralClearMaximumTargetAngleDeg +
+            0.01),
+        true);
     const auto outside_clear_distance = behavior::make_kick_execution_profile(
-        snapshot, make_clear(6.51, 0.0), true);
+        snapshot,
+        make_clear(
+            decision::kick_contract::kProceduralClearMaximumTargetDistanceM +
+            0.01,
+            0.0),
+        true);
     if (invalid_profile.kind != behavior::KickProfileKind::StableFallback ||
         outside_angle.kind != behavior::KickProfileKind::StableFallback ||
         outside_speed.kind != behavior::KickProfileKind::StableFallback ||

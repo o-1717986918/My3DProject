@@ -65,12 +65,16 @@ int main() {
         return 1;
     }
 
-    profile.relative_target_angle_deg = 5.99;
+    profile.relative_target_angle_deg =
+        decision::kick_contract::kProceduralDribbleMaximumTargetAngleDeg -
+        0.01;
     if (!runner.begin(snapshot, profile)) {
         std::cerr << "relaxed short-touch angle was not accepted\n";
         return 1;
     }
-    profile.relative_target_angle_deg = 6.01;
+    profile.relative_target_angle_deg =
+        decision::kick_contract::kProceduralDribbleMaximumTargetAngleDeg +
+        0.01;
     if (runner.begin(snapshot, profile)) {
         std::cerr << "out-of-envelope short-touch angle was accepted\n";
         return 1;
@@ -81,12 +85,15 @@ int main() {
         return 1;
     }
 
-    snapshot.ball.position_m[1] = 0.0649;
+    snapshot.ball.position_m[1] =
+        decision::kick_contract::kProceduralDribbleBallLocalYM +
+        decision::kick_contract::kProceduralDribbleBallLocalYToleranceM -
+        1.0e-4;
     if (!runner.begin(snapshot, profile)) {
         std::cerr << "validated dispatch-margin short-touch was rejected\n";
         return 1;
     }
-    snapshot.ball.position_m[1] = 0.0651;
+    snapshot.ball.position_m[1] += 2.0e-4;
     if (runner.begin(snapshot, profile)) {
         std::cerr << "short-touch outside the dispatch margin was accepted\n";
         return 1;
@@ -143,12 +150,14 @@ int main() {
         std::cerr << "validated 4 m shot anchor was not selected\n";
         return 1;
     }
-    profile.relative_target_angle_deg = 2.0;
+    profile.relative_target_angle_deg =
+        decision::kick_contract::kProceduralShotMaximumTargetAngleDeg;
     if (!runner.begin(snapshot, profile)) {
         std::cerr << "live-evidence shot angle boundary was rejected\n";
         return 1;
     }
-    profile.relative_target_angle_deg = 2.01;
+    profile.relative_target_angle_deg =
+        decision::kick_contract::kProceduralShotMaximumTargetAngleDeg + 0.01;
     if (runner.begin(snapshot, profile)) {
         std::cerr << "shot outside the live-evidence angle was accepted\n";
         return 1;
@@ -184,24 +193,27 @@ int main() {
         return 1;
     }
 
-    snapshot.ball.position_m[1] = 0.0;
+    snapshot.ball.position_m[1] = 0.30;
     if (runner.begin(snapshot, profile)) {
         std::cerr << "unvalidated ball slot selected a procedural anchor\n";
         return 1;
     }
     snapshot = make_snapshot();
+    profile = make_profile();
     profile.mode = decision::KickMode::TargetedPass;
     if (runner.begin(snapshot, profile)) {
         std::cerr << "short-touch anchor was misreported as a pass\n";
         return 1;
     }
     profile = make_profile();
-    snapshot.self.lin_vel_b[0] = 0.49;
+    snapshot.self.lin_vel_b[0] =
+        decision::kick_contract::kProceduralMaximumStartPlanarSpeedMps - 0.01;
     if (!runner.begin(snapshot, profile)) {
         std::cerr << "bounded moving release was not accepted\n";
         return 1;
     }
-    snapshot.self.lin_vel_b[0] = 0.51;
+    snapshot.self.lin_vel_b[0] =
+        decision::kick_contract::kProceduralMaximumStartPlanarSpeedMps + 0.01;
     if (runner.begin(snapshot, profile)) {
         std::cerr << "excessive start speed bypassed the procedural release guard\n";
         return 1;
