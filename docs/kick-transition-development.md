@@ -422,6 +422,34 @@ are in `training/locks/paid_k2b_2026_09_02.yaml`.
 
 ## Implementation route
 
+### Current runtime-contract audit (2026-09-06)
+
+The official ICRA 2026 T1 striker implementation routes a dynamic chase state
+into a DAgger striker student before constrained-P3O refinement. Auditing our
+actual call graph found a narrower but real integration defect. Fixed-2 m
+TargetedPass never used the procedural trajectory's tilt/leg-velocity gate;
+however, decision code still imposed the same 250 ms neutral dwell used by a
+static keyframe. That removed most of the gait phase represented in the
+transition corpus before `LearnedKickRunner::begin()` could observe it.
+
+The contracts are now split:
+
+- fixed-2 m residual/learned transition receives the live phase after one
+  20 ms pose-confirmation cycle, then applies its own ball, target, posture,
+  tensor and finite-output checks;
+- static Dribble, range Pass, Shot and Clear retain active gait braking,
+  neutral capture, tilt and leg-velocity checks before their body-fixed
+  trajectories start;
+- strategy admission angle and static-trajectory release angle are separate.
+  The strategy may retain a recoverable candidate while the setup controller
+  finishes body alignment; it cannot announce a release in the target frame
+  when the runner's body-frame ball slot is still outside evidence.
+
+This preserves the ONNX route and the deterministic procedural bank as
+different executors rather than widening one shared threshold. The retained
+transition ONNX remains shadow-only because its frozen evaluation has not yet
+beaten the deterministic 2 m action.
+
 ### K1. Version the transition contract
 
 - Add a `kick_policy_v3` contract rather than silently changing v2.
@@ -507,7 +535,8 @@ Only then expand to 3.5/5 m, angle bins, shot/clear, and moving-ball entries.
 - [x] add a ball/target-conditioned K2 contract and losslessly bootstrap it
       from K1-D;
 - [ ] train range/direction above the retained contact-and-recovery baseline;
-- [ ] add the guarded C++ kick-policy runner and same-cycle fallback tests;
+- [x] add the guarded C++ kick-policy runner, shadow/active modes, tensor and
+      finite-output checks, plus same-cycle fallback tests;
 - [ ] rerun the central 2 m CPU and 7v7 server gates;
 - [x] update this record and the R1 checkpoint with immutable K2-B bootstrap
       artifact hashes;

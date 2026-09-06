@@ -390,7 +390,60 @@ now has its own one-cycle pose confirmation while retaining its measured
 0.50 m/s and ball/yaw limits. Static range pass, Shot, Clear, and procedural
 Dribble retain the stricter static-trajectory transition contract.
 
-### 4.12 External-reference status
+### 4.12 Static-release integration and danger-memory evidence
+
+The first retained 4 m shot replay,
+`procedural-shot-post-relocate-s20261242-v1`, selected Shoot and reached the
+centimetre-scale contact slot, but then switched directly from a
+`0.28--0.62 m/s` gait into the Neutral keyframe. The torso continued through
+the ball and fell; no kick command was emitted. A zero-demand Walk command now
+owns the high-speed braking phase, preserving the learned walk's balance and
+gait phase. Neutral takes over only after measured planar speed falls below
+the static handoff threshold. The release latch is also evaluated after this
+pre-settle phase rather than before it.
+
+The intermediate replay `procedural-shot-controlled-brake-s20261242-v2`
+reduced GetUp samples from 261 to 106 and made one attributable Shot contact,
+but only through the timed forward-contact fallback. After moving the latch
+behind controlled braking, `procedural-shot-latch-after-brake-s20261242-v3`
+passed with 62 `ProceduralKickExecute/Hold` samples, zero fallback samples,
+and one physical Shot contact. Release occurred at 7.59 s with ball-local
+position `(0.321, 0.040) m`, essentially zero yaw error, zero planar speed,
+`0.08 deg/s` tilt rate, and `0.3 deg/s` maximum leg rate. The ball then crossed
+the target goal line inside the posts near `y=-0.78 m`. This validates one
+static strong-shot execution, not a dynamic striker policy.
+
+`apollo-vs-base-static-release-fix-s20261242-v22` lost `0:1`. It exposed a
+separate frame-contract defect: the only exact Dribble release was centred in
+the requested-target frame, but the torso still differed by 5.6 degrees. The
+procedural runner correctly rejected the resulting body-frame ball position,
+which was about 3.3 cm away from its measured lateral anchor. Procedural action
+admission remains broad, but body-fixed static trajectories now finish to a
+1 degree release alignment before dispatch. The corresponding isolated
+dribble replay passed with three physical contacts and no decision-to-runner
+frame rejection.
+
+The v22 concession also disproved the former 1.5 s lost-ball search bound in a
+specific defensive state. Player 7 was already at `x=-23 m` outside the
+goalkeeper area when its last local ball observation in the final eight metres
+expired; it then retreated toward the default `x=-7 m` formation while the
+opponent carried through the vacated second line. A genuine open-play
+coordinate in this danger region is now retained for at most 12 s strictly for
+movement, never contact. Exactly one AP stays at the legal goalkeeper-area
+boundary and its remembered lateral target decays toward goal centre as
+uncertainty grows. Ordinary midfield search still expires after 1.5 s and all
+memories reset across play-mode transitions.
+
+`apollo-vs-base-bodyframe-danger-memory-s20261242-v23` then won `1:0`, with
+fresh-ball median x `+14.65 m`, `74.85%` opponent-half occupancy, maximum x
+`+28.18 m`, and zero developed-team illegal-defense penalties versus seven for
+pristine Apollo. The goal at 170.91 s was a continuous pressure/body-contact
+carry across the line, not an exact Shot; the 11 Shoot samples remained in
+setup. Fourteen independent GetUp entries still followed ordinary Walk. The
+paired v22 loss and v23 win therefore support the repaired integration paths
+but still do not establish stable superiority.
+
+### 4.13 External-reference status
 
 Apollo is a qualified and useful 2026 baseline, but no official result
 currently supports calling it the 2026 champion. The official awards page
@@ -466,13 +519,15 @@ itself.
 
 ## 7. Immediate development order
 
-1. Close the observed exact-action relocation chain and verify that natural
-   final-third Shot choices reach physical release rather than timing out.
-2. Preserve continuous pressure, wide finishing cut-in, and low-turn
+1. Convert the now-validated static strong-shot release into a dynamic
+   approach-to-shot path; natural final-third Shoot choices still stop in
+   setup even though the isolated physical trajectory succeeds.
+2. Preserve continuous pressure, wide finishing cut-in, danger-memory guard,
+   and low-turn
    goal-mouth aim over repeated natural runs; one `1:0` result is insufficient.
-3. Make procedural dribble start from a real walking gait phase. The next
-   data task is phase-conditioned approach-to-contact BC/DAgger, not a wider
-   static pose gate.
+3. Make procedural dribble and fixed-distance pass start from a real walking
+   gait phase. The next data task is phase-conditioned approach-to-contact
+   BC/DAgger, not another wider static-trajectory pose gate.
 4. Build a phase-conditioned BC/DAgger striker student from successful complete
    approach-release trajectories; do not repeat unsupervised residual PPO.
 5. Train and promote stable long-forward, rapid-turn, and later lateral skills

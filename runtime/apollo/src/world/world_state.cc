@@ -602,24 +602,30 @@ void WorldState::set_team_comm_snapshot(const comm::TeamCommSnapshot& comm_snaps
             // Refresh instead: prefer a real observation while it is still fresh
             // (the ball may already have been kicked and moved off the drop point),
             // otherwise seed the server's deterministic restart drop point for the
-            // current mode. That point is mode-specific: on OUR goal kick the ball
+            // current mode. In open play, retain a genuine last-known point
+            // longer for non-executable search/shape decisions; position_valid
+            // remains false, so this cannot authorize contact. That point is
+            // mode-specific: on OUR goal kick the ball
             // sits at our goalie-area center next to our own goal, ~25 m from
             // midfield, so a plain field-center seed would point the keeper the
             // wrong way -- exactly the "keeper loses the ball on our goal kick"
             // failure. Keep ball.visible = false so downstream treats this as a
-            // best-effort guess, not a sighting. The 2 s window matches kRecentBallS
-            // / kCornerAnchorRecentS; last_known_ball_time_ is reset to -1 on every
-            // mode change, so right after a teleport this deliberately uses the
-            // mode drop point rather than the stale last-known spot. Corner kicks
-            // never reach here: their Locked anchor keeps ball.visible = true.
-            constexpr double kFallbackFreshnessS = 2.0;
+            // best-effort guess, not a sighting. last_known_ball_time_ is reset
+            // to -1 on every mode change, so right after a teleport this
+            // deliberately uses the mode drop point rather than the stale
+            // last-known spot. Corner kicks never reach here: their Locked
+            // anchor keeps ball.visible = true.
+            const double fallback_freshness_s =
+                snapshot_.play_mode == PlayMode::PlayOn
+                    ? kLostBallPositionMemoryLifetimeS
+                    : 2.0;
             const bool have_near_contact_track =
                 last_known_ball_time_ > 0.0 &&
                 snapshot_.server_time <= near_contact_ball_track_until_s_;
             const bool have_recent_last =
                 last_known_ball_time_ > 0.0 &&
                 ((snapshot_.server_time - last_known_ball_time_) <=
-                     kFallbackFreshnessS ||
+                     fallback_freshness_s ||
                  have_near_contact_track);
             snapshot_.ball.position_m = have_recent_last
                 ? last_known_ball_position_m_

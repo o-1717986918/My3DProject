@@ -36,9 +36,15 @@ enum class TacticalDuty {
 // for contact, pass, and shot decisions.  Movement may use the last observed
 // point for a little longer: this preserves pressure across a short occlusion
 // without promoting the estimate back to an executable ball state.  The world
-// state retains a genuine last-known point for two seconds, so this bound must
-// remain below that retention lifetime.
+// state retains a genuine last-known point for longer, so this bound remains a
+// deliberately short ordinary-search policy rather than a storage limit.
 inline constexpr double kLostBallSearchLifetimeS = 1.5;
+// When the last genuine observation was inside our final eight metres, losing
+// all vision is itself defensive evidence. Keep exactly one field player at
+// the legal goalkeeper-area boundary while uncertainty grows; no stale-ball
+// action is authorized by this longer movement-only lifetime.
+inline constexpr double kDefensiveLostBallSearchLifetimeS =
+    world::kLostBallPositionMemoryLifetimeS;
 
 struct TacticalTarget {
     TacticalDuty duty{TacticalDuty::Formation};

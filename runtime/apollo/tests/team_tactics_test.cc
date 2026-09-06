@@ -497,6 +497,44 @@ int main() {
         return 1;
     }
 
+    // A lost ball in our final eight metres is different from an ordinary
+    // midfield occlusion. Keep one legal boundary defender, but decay the old
+    // lateral coordinate toward the goal centre as uncertainty grows.
+    decision::TeamTactics defensive_memory_tactics;
+    world::WorldSnapshot defensive_memory = stale_ball;
+    defensive_memory.server_time += 5.0;
+    defensive_memory.ball.position_m = {-24.0, 4.0, 0.11};
+    defensive_memory.ball.position_age_s = 6.0;
+    const auto defensive_memory_plan =
+        defensive_memory_tactics.plan_all(defensive_memory, roles);
+    const auto* defensive_memory_attacker = defensive_memory_plan.for_role(
+        decision::RoleManager::ROLE_AP);
+    if (defensive_memory_attacker == nullptr ||
+        defensive_memory_attacker->target.duty !=
+            decision::TacticalDuty::SearchBall ||
+        std::abs(
+            defensive_memory_attacker->target.position_m[0] -
+            (-decision::field_geometry::kActualHalfLengthM +
+             decision::field_geometry::kGoalieAreaDepthM + 0.8)) > 1.0e-9 ||
+        defensive_memory_attacker->target.position_m[1] <= 0.0 ||
+        defensive_memory_attacker->target.position_m[1] >= 4.0) {
+        std::cerr << "dangerous lost ball did not retain a centralizing guard\n";
+        return 1;
+    }
+    defensive_memory.server_time += 7.0;
+    defensive_memory.ball.position_age_s =
+        decision::kDefensiveLostBallSearchLifetimeS + 0.01;
+    const auto defensive_memory_expired =
+        defensive_memory_tactics.plan_all(defensive_memory, roles);
+    const auto* defensive_memory_expired_attacker =
+        defensive_memory_expired.for_role(decision::RoleManager::ROLE_AP);
+    if (defensive_memory_expired_attacker == nullptr ||
+        defensive_memory_expired_attacker->target.duty !=
+            decision::TacticalDuty::Formation) {
+        std::cerr << "defensive lost-ball memory did not remain bounded\n";
+        return 1;
+    }
+
     world::WorldSnapshot set_play_stale = stale_ball;
     set_play_stale.server_time += 2.0;
     set_play_stale.play_mode = world::PlayMode::TheirFreeKick;

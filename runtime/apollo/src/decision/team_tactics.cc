@@ -717,13 +717,20 @@ TeamPlan TeamTactics::plan_all(
             // single AP moves to the recent last-known point while the other
             // field players keep the team shape.  TeamPlan::fresh stays false,
             // so this target cannot authorize a pass, shot, or ball contact.
+            const bool defensive_last_ball =
+                std::isfinite(snapshot.ball.position_m[0]) &&
+                snapshot.ball.position_m[0] <=
+                    -field_geometry::kActualHalfLengthM + 8.0;
+            const double search_lifetime_s = defensive_last_ball
+                ? kDefensiveLostBallSearchLifetimeS
+                : kLostBallSearchLifetimeS;
             const bool searchable_last_ball =
                 !snapshot.ball.visible &&
                 !snapshot.ball.near_contact_track &&
                 std::isfinite(snapshot.ball.position_age_s) &&
                 snapshot.ball.position_age_s >
                     world::kBallPositionFreshLifetimeS &&
-                snapshot.ball.position_age_s <= kLostBallSearchLifetimeS &&
+                snapshot.ball.position_age_s <= search_lifetime_s &&
                 std::isfinite(snapshot.ball.position_m[0]) &&
                 std::isfinite(snapshot.ball.position_m[1]) &&
                 std::abs(snapshot.ball.position_m[0]) <=
@@ -737,19 +744,28 @@ TeamPlan TeamTactics::plan_all(
                         return assignment.role_id == RoleManager::ROLE_AP;
                     });
                 if (attacker_assignment != result.assignments.end()) {
-                    const Position2 last_ball{
+                    Position2 search_target{
                         snapshot.ball.position_m[0],
                         snapshot.ball.position_m[1]};
                     const double age_fraction = std::clamp(
                         (snapshot.ball.position_age_s -
                          world::kBallPositionFreshLifetimeS) /
-                            (kLostBallSearchLifetimeS -
+                            (search_lifetime_s -
                              world::kBallPositionFreshLifetimeS),
                         0.0,
                         1.0);
+                    if (defensive_last_ball) {
+                        // v22: the AP abandoned x=-23 after 1.5 s and ran to
+                        // its x=-7 formation while the opponent carried the
+                        // unseen ball across our goal mouth. Stay outside the
+                        // goalkeeper area and gradually cover the centre as
+                        // the remembered lateral coordinate becomes less
+                        // trustworthy.
+                        search_target[1] *= 1.0 - 0.85 * age_fraction;
+                    }
                     attacker_assignment->target = {
                         TacticalDuty::SearchBall,
-                        clamp_field_player(last_ball),
+                        clamp_field_player(search_target),
                         std::nullopt,
                         0,
                         0.55 - 0.30 * age_fraction};

@@ -21,6 +21,12 @@ inline constexpr double kBallPositionFreshLifetimeS = 0.20;
 // approach. A track established by the robot's own near-field vision gets this
 // larger, still bounded lifetime; ordinary global estimates do not.
 inline constexpr double kNearContactBallTrackLifetimeS = 3.5;
+// Preserve the coordinate of a genuinely observed open-play ball after it is
+// no longer executable. Decision code must still honor position_valid=false;
+// this longer memory exists only for bounded search and defensive shape. A
+// play-mode transition clears the observation clock, so server teleports do
+// not inherit the prior open-play coordinate.
+inline constexpr double kLostBallPositionMemoryLifetimeS = 12.0;
 
 /// Estimated state of the controlled robot in the canonical team frame.
 struct SelfState {

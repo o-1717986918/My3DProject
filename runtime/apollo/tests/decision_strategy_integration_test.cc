@@ -538,8 +538,14 @@ int main() {
     decision::Blackboard braking_blackboard;
     const auto braking_command = braking_behavior.make_command(
         braking_snapshot, braking_blackboard, role_manager, false, true);
-    if (!std::holds_alternative<decision::NeutralCommand>(braking_command)) {
-        std::cerr << "speed-aware kick setup did not brake before the release slot\n";
+    const auto* active_brake =
+        std::get_if<decision::WalkCommand>(&braking_command);
+    if (active_brake == nullptr || active_brake->target_absolute ||
+        std::hypot(
+            active_brake->target_2d_m[0], active_brake->target_2d_m[1]) >
+            1.0e-9 ||
+        active_brake->orientation_deg.has_value()) {
+        std::cerr << "speed-aware kick setup did not request a controlled gait brake\n";
         return 1;
     }
     braking_snapshot.server_time += 0.05;
@@ -572,7 +578,13 @@ int main() {
     const auto committed_next = committed_behavior.make_command(
         committed_snapshot, committed_next_blackboard, role_manager,
         false, true);
-    if (!std::holds_alternative<decision::NeutralCommand>(committed_next) ||
+    const auto* committed_brake =
+        std::get_if<decision::WalkCommand>(&committed_next);
+    if (committed_brake == nullptr || committed_brake->target_absolute ||
+        std::hypot(
+            committed_brake->target_2d_m[0],
+            committed_brake->target_2d_m[1]) > 1.0e-9 ||
+        committed_brake->orientation_deg.has_value() ||
         !committed_next_blackboard.exists(
             decision::Blackboard::kKeySelectedCooperativeAction) ||
         committed_next_blackboard.get<strategy::CooperativeAction>(
@@ -623,6 +635,48 @@ int main() {
         !procedural_kick->target_point_m.has_value() ||
         std::abs(procedural_kick->requested_ball_speed_mps - 0.90) > 1.0e-9) {
         std::cerr << "enabled procedural dribble did not emit its exact contract\n";
+        return 1;
+    }
+
+    // The procedural anchor's ball slot is body-relative. A pose may be exact
+    // in the requested target frame while a still-misaligned torso moves that
+    // same ball outside the runner's measured lateral envelope. Preserve the
+    // action, finish turning, and only then release it.
+    world::WorldSnapshot body_frame_snapshot = make_open_pass_snapshot();
+    body_frame_snapshot.teammates.clear();
+    body_frame_snapshot.self.position_m = {-0.32, -0.04, 0.8};
+    constexpr double kYawFivePointFiveHalfRadians =
+        5.5 * 3.14159265358979323846 / 360.0;
+    body_frame_snapshot.self.orientation_wxyz = {
+        std::cos(kYawFivePointFiveHalfRadians), 0.0, 0.0,
+        std::sin(kYawFivePointFiveHalfRadians)};
+    decision::APBehavior body_frame_behavior;
+    decision::Blackboard body_frame_blackboard;
+    const auto body_frame_align = body_frame_behavior.make_command(
+        body_frame_snapshot, body_frame_blackboard, role_manager, false, true);
+    const auto* body_frame_turn =
+        std::get_if<decision::WalkCommand>(&body_frame_align);
+    if (body_frame_turn == nullptr ||
+        !body_frame_turn->orientation_deg.has_value() ||
+        std::abs(*body_frame_turn->orientation_deg) > 1.0e-6) {
+        std::cerr << "procedural action released before body-frame alignment\n";
+        return 1;
+    }
+    body_frame_snapshot.server_time += 0.02;
+    body_frame_snapshot.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
+    const auto body_frame_settle = body_frame_behavior.make_command(
+        body_frame_snapshot, body_frame_blackboard, role_manager, false, true);
+    if (!std::holds_alternative<decision::NeutralCommand>(body_frame_settle)) {
+        std::cerr << "body-frame aligned action skipped release debounce\n";
+        return 1;
+    }
+    body_frame_snapshot.server_time += 0.02;
+    const auto body_frame_release = body_frame_behavior.make_command(
+        body_frame_snapshot, body_frame_blackboard, role_manager, false, true);
+    if (const auto* kick =
+            std::get_if<decision::KickCommand>(&body_frame_release);
+        kick == nullptr || kick->mode != decision::KickMode::DribbleTouch) {
+        std::cerr << "body-frame aligned action did not release\n";
         return 1;
     }
 

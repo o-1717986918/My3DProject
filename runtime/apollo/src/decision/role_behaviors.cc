@@ -80,6 +80,13 @@ constexpr double kRestartMaxPrecisionReverseSpeedMps = 0.20;
 constexpr double kKickCoarseRelocateLateralErrorM = 0.08;
 constexpr double kKickCoarseTravelTurnThresholdDeg = 20.0;
 constexpr double kKickFinalTurnThresholdDeg = 12.0;
+// Procedural anchors describe the ball in the robot body frame. Their wider
+// target-angle fields are admission envelopes, not permission to release a
+// body-fixed trajectory while still several degrees away from the requested
+// direction. At 5.6 deg, a ball that is perfectly centred in the target frame
+// shifts by about 3.1 cm in the body frame and is rejected by the runner. Keep
+// strategy admission broad, but finish static-trajectory alignment to 1 deg.
+constexpr double kProceduralStaticReleaseYawToleranceDeg = 1.0;
 constexpr double kDribbleSideDistanceM = 0.8;
 constexpr double kDribbleSideClearanceM = 0.55;
 constexpr double kDribbleSideStepBehindThresholdM = 0.1;
@@ -776,6 +783,11 @@ HighLevelCommand make_dribble_command(
     const double required_orientation_error_deg = use_procedural_kick
         ? procedural_max_orientation_error_deg
         : decision::kick_contract::kForwardContactMaximumTargetAngleDeg;
+    const double release_orientation_tolerance_deg = use_procedural_kick
+        ? std::min(
+              required_orientation_error_deg,
+              kProceduralStaticReleaseYawToleranceDeg)
+        : required_orientation_error_deg;
     const double planar_speed_mps = math::norm2({
         context.snapshot.self.lin_vel_b[0],
         context.snapshot.self.lin_vel_b[1],
@@ -860,6 +872,24 @@ HighLevelCommand make_dribble_command(
         allow_kick && fallback_due && fallback_contact_pose &&
         !(use_procedural_kick && latched_position_ready) &&
         now >= context.state.next_kick_allowed_s;
+    const auto make_controlled_brake_command = [&]() {
+        // Keep the learned walk actor in control while removing translational
+        // demand.  Jumping directly from a 0.5--0.7 m/s gait into the neutral
+        // keyframe does not dissipate momentum: the v1 shot replay coasted
+        // roughly half a metre through the ball and fell while every decision
+        // cycle was already commanding Neutral.  A zero-velocity Walk keeps
+        // phase-continuous balance until the measured torso speed is low
+        // enough for the static neutral/kick actor to take over.  Do not add a
+        // final-yaw target here; braking and turning at the same time caused
+        // the same replay to overshoot from 17 to 24 degrees.
+        WalkCommand brake_command;
+        brake_command.target_2d_m = {0.0, 0.0};
+        brake_command.target_absolute = false;
+        brake_command.orientation_deg = std::nullopt;
+        brake_command.orientation_absolute = false;
+        brake_command.role_id = motion_role_id;
+        return brake_command;
+    };
     const auto make_fallback_command = [&]() {
         trace_setup_gate(8, "fallback-forward-contact");
         context.state.kick_active_until_s = now + kKickDurationS;
@@ -896,10 +926,6 @@ HighLevelCommand make_dribble_command(
         return fallback_command;
     };
 
-    if (!context.state.dribble_ready && position_ready) {
-        context.state.dribble_ready = true;
-    }
-
     const bool push_position_valid =
         along_direction <= kDribbleMaxAheadM &&
         lateral_offset <= kDribbleMaxLateralOffsetM &&
@@ -910,6 +936,21 @@ HighLevelCommand make_dribble_command(
         context.state.kick_setup_stable_since_s = 0.0;
     }
 
+    const double speed_aware_stopping_distance_m = std::clamp(
+        planar_speed_mps * planar_speed_mps /
+                (2.0 * kKickPreSettleEffectiveDecelMps2) +
+            kKickPreSettlePaddingM,
+        kKickPreSettleLongitudinalToleranceM,
+        kKickPreSettleMaximumDistanceM);
+    const bool near_release_slot =
+        behind_distance - contact_behind_m >=
+            -kKickPreSettleLongitudinalToleranceM &&
+        behind_distance - contact_behind_m <=
+            speed_aware_stopping_distance_m &&
+        std::abs(command_lateral_error) <=
+            kKickPreSettleLateralToleranceM &&
+        orientation_error_deg <= kKickPreSettleMaximumYawErrorDeg;
+
     if (!context.state.dribble_ready) {
         if (fallback_allowed) {
             return make_fallback_command();
@@ -918,7 +959,7 @@ HighLevelCommand make_dribble_command(
             if (planar_speed_mps > kKickPreSettleExitSpeedMps) {
                 context.state.kick_pre_settle_stable_since_s = 0.0;
                 trace_setup_gate(9, "pre-settle");
-                return NeutralCommand{};
+                return make_controlled_brake_command();
             }
             if (context.state.kick_pre_settle_stable_since_s <= 0.0) {
                 context.state.kick_pre_settle_stable_since_s = now;
@@ -931,32 +972,29 @@ HighLevelCommand make_dribble_command(
             context.state.kick_pre_settling = false;
             context.state.kick_pre_settle_stable_since_s = 0.0;
         }
-        const double speed_aware_stopping_distance_m = std::clamp(
-            planar_speed_mps * planar_speed_mps /
-                    (2.0 * kKickPreSettleEffectiveDecelMps2) +
-                kKickPreSettlePaddingM,
-            kKickPreSettleLongitudinalToleranceM,
-            kKickPreSettleMaximumDistanceM);
-        const bool near_release_slot =
-            behind_distance - contact_behind_m >=
-                -kKickPreSettleLongitudinalToleranceM &&
-            behind_distance - contact_behind_m <=
-                speed_aware_stopping_distance_m &&
-            std::abs(command_lateral_error) <=
-                kKickPreSettleLateralToleranceM &&
-            orientation_error_deg <= kKickPreSettleMaximumYawErrorDeg;
         if (use_static_release_setup && near_release_slot &&
             planar_speed_mps > kKickPreSettleEntrySpeedMps) {
             // The previous controller waited for the centimetre-scale slot
             // before braking.  Natural play then crossed the slot at roughly
-            // 0.7--0.8 m/s and never satisfied the release debounce.  Start
-            // neutral capture in a bounded pre-slot corridor, then resume
-            // precision positioning once the body is slow enough.
+            // 0.7--0.8 m/s and never satisfied the release debounce. Start a
+            // phase-continuous gait brake in a bounded pre-slot corridor,
+            // then enter neutral capture once the body is slow enough.
             context.state.kick_pre_settling = true;
             context.state.kick_pre_settle_stable_since_s = 0.0;
             trace_setup_gate(9, "pre-settle");
-            return NeutralCommand{};
+            return make_controlled_brake_command();
         }
+        // Do not latch an exact static release before the pre-settle state
+        // above has actively removed approach momentum.  The v1/v2 shot
+        // replays reached the centimetre slot at 0.28--0.62 m/s; the old
+        // eager latch skipped braking, jumped straight to Neutral, crossed
+        // the ball and fell before the procedural runner could start.
+        if (position_ready) {
+            context.state.dribble_ready = true;
+        }
+    }
+
+    if (!context.state.dribble_ready) {
         if (needs_side_step) {
             // Exit the ball's front/side hazard region by turning toward an
             // offset waypoint and walking forward. Do not override the travel
@@ -1021,7 +1059,12 @@ HighLevelCommand make_dribble_command(
                 relocation_command.role_id = motion_role_id;
                 return relocation_command;
             }
-            if (orientation_error_deg > kKickFinalTurnThresholdDeg) {
+            const double final_turn_threshold_deg = use_procedural_kick
+                ? std::min(
+                      kKickFinalTurnThresholdDeg,
+                      release_orientation_tolerance_deg)
+                : kKickFinalTurnThresholdDeg;
+            if (orientation_error_deg > final_turn_threshold_deg) {
                 trace_setup_gate(11, "precision-face-target");
                 WalkCommand turn_command = make_walk_command(context.self);
                 turn_command.orientation_deg = absolute_direction_deg;
@@ -1077,7 +1120,7 @@ HighLevelCommand make_dribble_command(
 
     const bool contact_state_stable =
         ball_position_actionable && latched_position_ready &&
-        orientation_error_deg <= required_orientation_error_deg &&
+        orientation_error_deg <= release_orientation_tolerance_deg &&
         (!use_procedural_kick || transition_state.ready) &&
         planar_speed_mps <=
             decision::kick_contract::kProceduralMaximumStartPlanarSpeedMps;
@@ -1107,7 +1150,7 @@ HighLevelCommand make_dribble_command(
         now >= context.state.next_kick_allowed_s &&
         context.ball_distance >= kKickMinBallDistanceM &&
         context.ball_distance <= kKickMaxBallDistanceM &&
-        orientation_error_deg <= required_orientation_error_deg &&
+        orientation_error_deg <= release_orientation_tolerance_deg &&
         contact_state_confirmed;
     // Readiness is a hard release gate. Once dribble_ready is latched the
     // robot can drift slightly inside the valid contact envelope; gating only
@@ -1203,7 +1246,7 @@ HighLevelCommand make_dribble_command(
         // stance. Holding it here also removes zero-command gait sway, making
         // the 0.25 s release debounce physically achievable without relaxing
         // the validated ball-slot or body-speed contracts.
-        if (orientation_error_deg > required_orientation_error_deg) {
+        if (orientation_error_deg > release_orientation_tolerance_deg) {
             trace_setup_gate(6, "turn-in-place");
             WalkCommand align_command = make_walk_command(context.self);
             align_command.orientation_deg = absolute_direction_deg;
