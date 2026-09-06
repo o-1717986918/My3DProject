@@ -286,6 +286,7 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << " team=" << config_.team_name
             << " player=" << config_.player_number
             << " cycle=" << frame.server_cycle
+            << " server_time=" << snapshot.server_time
             << " play_on=" << (snapshot.play_mode == world::PlayMode::PlayOn ? 1 : 0)
             << " motion=" << last_active_motion_
             << " execution=" << behavior::to_string(last_execution_status_)

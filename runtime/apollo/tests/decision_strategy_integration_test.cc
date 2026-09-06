@@ -127,7 +127,11 @@ int main() {
         std::cerr << "ready pass skipped the stable setup hold\n";
         return 1;
     }
-    snapshot.server_time = 1.63;
+    // The fixed-2 m residual/learned transition consumes gait phase as an
+    // observation. It receives the command after one 50 Hz pose-confirmation
+    // cycle, without waiting for the static procedural trajectory's long
+    // neutral settle.
+    snapshot.server_time = 1.05;
     const decision::HighLevelCommand released = behavior.make_command(
         snapshot, blackboard, role_manager, true, true);
     if (!std::holds_alternative<decision::KickCommand>(released)) {
@@ -232,6 +236,94 @@ int main() {
         !near_goal_walk->orientation_deg.has_value() ||
         *near_goal_walk->orientation_deg <= 0.0) {
         std::cerr << "final-third pressure did not choose the low-turn goal lane\n";
+        return 1;
+    }
+
+    // A wide final-third carry must cut steeply infield before spending the
+    // remaining x distance to the goal line.  The experimental exact short
+    // touch may still be proposed, but it must not interrupt the continuous
+    // pressure actor in this urgent geometry.
+    world::WorldSnapshot wide_attack_snapshot = make_open_pass_snapshot();
+    wide_attack_snapshot.ball.position_m = {22.33, -8.27, 0.11};
+    wide_attack_snapshot.self.position_m = {21.75, -8.43, 0.8};
+    constexpr double kYaw55HalfRadians = 0.4799655442984406;
+    wide_attack_snapshot.self.orientation_wxyz = {
+        std::cos(kYaw55HalfRadians), 0.0, 0.0,
+        std::sin(kYaw55HalfRadians)};
+    wide_attack_snapshot.teammates.clear();
+    wide_attack_snapshot.opponents.clear();
+    decision::APBehavior wide_attack_behavior;
+    decision::Blackboard wide_attack_blackboard;
+    const auto wide_attack_command = wide_attack_behavior.make_command(
+        wide_attack_snapshot, wide_attack_blackboard, role_manager,
+        false, true);
+    const auto* wide_attack_walk =
+        std::get_if<decision::WalkCommand>(&wide_attack_command);
+    if (wide_attack_walk == nullptr ||
+        !wide_attack_walk->orientation_absolute ||
+        !wide_attack_walk->orientation_deg.has_value() ||
+        *wide_attack_walk->orientation_deg < 65.0 ||
+        *wide_attack_walk->orientation_deg > 90.0 ||
+        !wide_attack_blackboard.exists(
+            decision::Blackboard::kKeyStrategyPlan) ||
+        !wide_attack_blackboard.get<strategy::PlanningResult>(
+            decision::Blackboard::kKeyStrategyPlan).selected.has_value() ||
+        wide_attack_blackboard.get<strategy::PlanningResult>(
+            decision::Blackboard::kKeyStrategyPlan).selected->category !=
+            strategy::ActionCategory::Dribble) {
+        std::cerr << "wide final-third carry did not retain a continuous cut-in"
+                  << " walk=" << (wide_attack_walk != nullptr)
+                  << " orientation="
+                  << (wide_attack_walk != nullptr &&
+                              wide_attack_walk->orientation_deg.has_value()
+                          ? *wide_attack_walk->orientation_deg
+                          : -999.0)
+                  << " selected="
+                  << (wide_attack_blackboard.exists(
+                              decision::Blackboard::kKeyStrategyPlan) &&
+                              wide_attack_blackboard.get<
+                                  strategy::PlanningResult>(
+                                  decision::Blackboard::kKeyStrategyPlan)
+                                  .selected.has_value()
+                          ? static_cast<int>(wide_attack_blackboard.get<
+                                strategy::PlanningResult>(
+                                decision::Blackboard::kKeyStrategyPlan)
+                                .selected->category)
+                          : -1)
+                  << '\n';
+        return 1;
+    }
+
+    // Reproduce the v19 finishing pose. The generic navigator used to treat
+    // the canonical shot stance as already reached because it was within its
+    // 0.30 m formation stop radius. Precision relocation must instead keep a
+    // forward crawl active until the lateral error enters the fine controller.
+    world::WorldSnapshot shot_relocate_snapshot = make_open_pass_snapshot();
+    shot_relocate_snapshot.ball.position_m = {26.4619, 4.73225, 0.11};
+    shot_relocate_snapshot.self.position_m = {26.156, 5.243, 0.8};
+    constexpr double kYawMinus58HalfRadians = -0.5061454830783556;
+    shot_relocate_snapshot.self.orientation_wxyz = {
+        std::cos(kYawMinus58HalfRadians), 0.0, 0.0,
+        std::sin(kYawMinus58HalfRadians)};
+    shot_relocate_snapshot.teammates.clear();
+    shot_relocate_snapshot.opponents.clear();
+    decision::APBehavior shot_relocate_behavior;
+    decision::Blackboard shot_relocate_blackboard;
+    const auto shot_relocate_command = shot_relocate_behavior.make_command(
+        shot_relocate_snapshot, shot_relocate_blackboard, role_manager,
+        false, true);
+    const auto* shot_relocate_walk =
+        std::get_if<decision::WalkCommand>(&shot_relocate_command);
+    if (shot_relocate_walk == nullptr ||
+        shot_relocate_walk->target_absolute ||
+        shot_relocate_walk->target_2d_m[0] < 0.12 - 1.0e-9 ||
+        std::abs(shot_relocate_walk->target_2d_m[1]) > 1.0e-9 ||
+        !shot_relocate_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction) ||
+        shot_relocate_blackboard.get<strategy::CooperativeAction>(
+            decision::Blackboard::kKeySelectedCooperativeAction).category !=
+            strategy::ActionCategory::Shoot) {
+        std::cerr << "shot coarse relocation stopped outside its release slot\n";
         return 1;
     }
 

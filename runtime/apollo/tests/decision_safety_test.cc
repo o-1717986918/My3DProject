@@ -225,6 +225,36 @@ int main() {
         }
     }
 
+    // Reproduce the v20 goal-kick approach: the ball is mostly lateral to a
+    // keeper facing downfield.  Long-range setup must first face the actual
+    // approach waypoint, not demand final kick yaw while translating sideways.
+    world::WorldSnapshot lateral_goal_kick = full_team_snapshot();
+    lateral_goal_kick.player_number = 1;
+    lateral_goal_kick.play_mode = world::PlayMode::OurGoalKick;
+    lateral_goal_kick.play_mode_group = world::PlayModeGroup::OurKick;
+    lateral_goal_kick.ball.position_m = {-27.5043, -3.20417, 0.11};
+    lateral_goal_kick.self.position_m = {-27.005, -1.11, 0.8};
+    constexpr double kYawMinus86HalfRadians = -0.7504915783575616;
+    lateral_goal_kick.self.orientation_wxyz = {
+        std::cos(kYawMinus86HalfRadians), 0.0, 0.0,
+        std::sin(kYawMinus86HalfRadians)};
+    lateral_goal_kick.teammates[0].position_m =
+        lateral_goal_kick.self.position_m;
+    decision::BehaviorTree lateral_goal_kick_tree;
+    decision::Blackboard lateral_goal_kick_blackboard;
+    decision::RoleManager lateral_goal_kick_roles;
+    const auto lateral_goal_kick_command = lateral_goal_kick_tree.evaluate(
+        lateral_goal_kick, lateral_goal_kick_blackboard,
+        lateral_goal_kick_roles, true, true);
+    const auto* lateral_goal_kick_walk =
+        std::get_if<decision::WalkCommand>(&lateral_goal_kick_command);
+    if (lateral_goal_kick_walk == nullptr ||
+        !lateral_goal_kick_walk->orientation_deg.has_value() ||
+        *lateral_goal_kick_walk->orientation_deg > -70.0) {
+        std::cerr << "lateral goal-kick approach did not face its travel waypoint\n";
+        return 1;
+    }
+
     world::WorldSnapshot goal_kick = full_team_snapshot();
     goal_kick.player_number = 1;
     goal_kick.play_mode = world::PlayMode::OurGoalKick;

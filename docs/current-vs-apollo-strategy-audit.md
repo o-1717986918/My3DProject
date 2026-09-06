@@ -324,6 +324,87 @@ had zero illegal-defense penalties versus one for pristine Apollo, but logged
 score record is therefore one loss, two draws and one win; action stability,
 not another unmeasured tactical weight, remains the leading performance gap.
 
+### 4.11 Tactics ablation, corrected territory evidence and finishing control
+
+`apollo-vs-base-tactics-off-s20261242-v17` lost `0:1`; the two retained
+tactics-off runs are now losses of `0:2` and `0:1`. The corresponding
+tactics-on `apollo-vs-base-tactics-on-s20261242-v18` drew `0:0`. This supports
+retaining the coordinated duty layer, but does not isolate support, marking,
+or goalkeeper logic individually because the switch removes all of them.
+
+The old analyzer then understated v18. It grouped staggered clients by local
+cycle and counted only direct visual ball observations. Direct vision ended
+near server time 80 s, while fresh/near-contact estimates continued to follow
+the same attack. Schema v3 now groups by 100 ms server-time buckets and reports
+visible, fresh (visible or at most 0.75 s old), and bounded near-contact tracks
+separately. Under the fresh definition, v18 had median ball x `+17.92 m`,
+`60.99%` opponent-half occupancy, and maximum x `+27.30 m`: it was a wide
+goal-line attack that failed to convert, not a match trapped in the own half.
+
+The v18 terminal sequence carried the ball around `(22.3,-8.3)` toward the
+goal line, repeatedly interrupting continuous pressure with uncompleted exact
+Dribble/Pass setup before the ball went out wide. Open play now uses an
+explicit finishing cut-in whenever the ball is inside the final 8 m but more
+than 1 m outside the post. It aims only 1.5 m farther forward and toward
+`y=+/-1 m`; experimental short-touch/pass setup cannot interrupt that urgent
+carry. Once inside the goal corridor, the existing low-turn goal-mouth aim and
+exact Shot selection resume.
+
+`apollo-vs-base-cutin-s20261242-v19` drew `0:0`, with zero developed-team
+illegal-defense penalties, fresh median x `+17.61 m`, `66.78%` opponent-half
+occupancy, maximum x `+27.49 m`, and seven independent get-up episodes. The
+important new evidence is 60 sampled Shoot selections after the cut-in, but
+zero releases. The first live shot exposed a shared controller bug: exact
+coarse relocation reused the formation navigator, whose 0.30 m stop radius
+declared the canonical stance reached while the strong-kick release slot was
+only 1--2 cm wide. Exact actions now use a dedicated turn-first forward crawl
+until lateral error enters the fine controller. A regression reproduces the
+v19 pose.
+
+`apollo-vs-base-precision-relocate-s20261242-v20` also drew `0:0`. Its random
+trajectory stayed entirely in the developed half, so it did not naturally
+repeat a Shot. A strong Clear nevertheless progressed from coarse relocation
+through `precision-position` to `pre-settle`, confirming that the former
+0.30 m dead stop was crossed. The run exposed a second shared composition bug
+during OurGoalKick: with a mostly lateral ball, the far approach overwrote its
+travel heading with the eventual kick heading and asked the forward-dominant
+walk to strafe for 15 seconds. Long-range exact-action approach now faces the
+actual waypoint; only the near-field controller restores final contact yaw.
+The observed v20 goalkeeper pose is retained as a restart regression.
+
+`apollo-vs-base-action-chain-s20261242-v21` drew `0:0`. Goal-kick approach
+samples fell from 751 to 285 and the restart reached later precision phases;
+the developed side completed one explicit Clear fallback and one DribbleTouch
+fallback, with zero illegal-defense penalties versus two for pristine Apollo.
+Fresh opponent-half occupancy was `43.0%` and maximum x `+11.50 m`; twelve
+independent get-up episodes and zero exact releases remain material blockers.
+This is evidence that the composition fixes shorten stalls and preserve
+fallback execution, not evidence of match superiority.
+
+The learned-transition integration hypothesis was also checked against the
+actual call graph. Fixed-2 m TargetedPass never used the procedural
+leg-velocity/tilt gate, so that gate was not the claimed blocker. It did,
+however, inherit a 250 ms neutral pose dwell that removes most of the gait
+phase represented in the transition corpus. Fixed-2 m residual/learned entry
+now has its own one-cycle pose confirmation while retaining its measured
+0.50 m/s and ball/yaw limits. Static range pass, Shot, Clear, and procedural
+Dribble retain the stricter static-trajectory transition contract.
+
+### 4.12 External-reference status
+
+Apollo is a qualified and useful 2026 baseline, but no official result
+currently supports calling it the 2026 champion. The official awards page
+lists FC Portugal as 2025 champion and Apollo3D third in 2024; the official
+2026 page presently provides qualification status. The 2026 league also moves
+to MuJoCo and Booster T1, making the official ICRA 2026 T1 striker repository's
+four-stage chase-teacher, kick-teacher, DAgger student, and constrained-P3O
+route directly relevant to the remaining action work. Sources:
+
+- <https://ssim.robocup.org/3d-simulation/3d-awards/>
+- <https://ssim.robocup.org/2026/02/16/robocup-2026-soccer-simulation-3d-qualification-results/>
+- <https://ssim.robocup.org/2025/12/16/robocup-2026-soccer-simulation-3d-call-for-participation/>
+- <https://github.com/Daffan/humanoid-soccer>
+
 ## 5. What is actually better, and what is not yet proven
 
 The following improvements are supported by code invariants and tests rather
@@ -385,19 +466,21 @@ itself.
 
 ## 7. Immediate development order
 
-1. Preserve the separated pressure-push path and evaluate the low-turn
+1. Close the observed exact-action relocation chain and verify that natural
+   final-third Shot choices reach physical release rather than timing out.
+2. Preserve continuous pressure, wide finishing cut-in, and low-turn
    goal-mouth aim over repeated natural runs; one `1:0` result is insufficient.
-2. Make procedural dribble start from a real walking gait phase. The next
+3. Make procedural dribble start from a real walking gait phase. The next
    data task is phase-conditioned approach-to-contact BC/DAgger, not a wider
    static pose gate.
-3. Build a phase-conditioned BC/DAgger striker student from successful complete
+4. Build a phase-conditioned BC/DAgger striker student from successful complete
    approach-release trajectories; do not repeat unsupervised residual PPO.
-4. Train and promote stable long-forward, rapid-turn, and later lateral skills
+5. Train and promote stable long-forward, rapid-turn, and later lateral skills
    with explicit fall, drift, speed and transition tests; ordinary Walk is also
    implicated in current falls and must remain in the audit.
-5. Keep the 2/3.5/5 m deterministic bank and original forward contact as
+6. Keep the 2/3.5/5 m deterministic bank and original forward contact as
    explicit fallbacks while collecting server outcome traces.
-6. Calibrate reach time and action utility from deployed FastWalk/turn logs,
+7. Calibrate reach time and action utility from deployed FastWalk/turn logs,
    then repeat tactics-on/tactics-off and side-swapped comparisons.
-7. Decide superiority only from repeated full matches; retain every loss and
+8. Decide superiority only from repeated full matches; retain every loss and
    draw instead of selecting favourable scores.

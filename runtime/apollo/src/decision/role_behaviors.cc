@@ -115,6 +115,12 @@ constexpr double kKickSetupStableHoldS = 0.25;
 // evaluated.
 constexpr double kProceduralDribbleSetupStableHoldS = 0.02;
 constexpr double kProceduralKickSetupStableHoldS = 0.04;
+// The fixed-2 m residual/learned executor was trained from captured gait
+// phases.  It must see that phase instead of first being filtered through the
+// static procedural trajectory's leg-velocity gate and long neutral hold.
+// Keep one decision-cycle pose confirmation so a single noisy ball sample
+// cannot release the action; the runner still checks its own ball/yaw domain.
+constexpr double kPhaseConditionedKickSetupStableHoldS = 0.02;
 // The deployed walk commonly retains 0.22--0.35 m/s of measured torso motion
 // after entering its neutral command. Requiring less than 0.20 m/s starved
 // every contact in a complete comparison match. The procedural runner repeats
@@ -174,6 +180,22 @@ constexpr double kForwardContactFallbackMaximumPlanarSpeedMps = 0.65;
 constexpr double kKickSetupContinuityTimeoutS = 1.00;
 constexpr double kKickSetupDirectionResetDeg = 20.0;
 constexpr double kRejectedPassRetryDelayS = 2.0;
+// A straight goal-line aim from a wide late attack repeatedly carried the ball
+// out beside the post.  Inside this zone, first spend forward progress on a
+// steep inward carry.  Once the ball reaches the goal corridor, the ordinary
+// low-turn goal-mouth selector takes over.
+constexpr double kFinalThirdCutInDepthM = 8.0;
+constexpr double kFinalThirdCutInLateralMarginM = 1.0;
+constexpr double kFinalThirdCutInAdvanceM = 1.5;
+constexpr double kFinalThirdCutInTargetYM = 1.0;
+
+bool needs_final_third_cut_in(const std::array<double, 2>& ball) {
+    return field_geometry::kActualHalfLengthM - ball[0] <=
+               kFinalThirdCutInDepthM &&
+        std::abs(ball[1]) >
+            field_geometry::kGoalHalfWidthM +
+                kFinalThirdCutInLateralMarginM;
+}
 
 struct ProceduralTransitionState {
     bool ready{false};
@@ -796,6 +818,8 @@ HighLevelCommand make_dribble_command(
     const bool is_targeted_pass =
         cooperative_action != nullptr &&
         cooperative_action->category == strategy::ActionCategory::Pass;
+    const bool use_phase_conditioned_transition =
+        is_targeted_pass && !use_procedural_range_pass;
     const bool precision_action = is_targeted_pass || use_procedural_kick;
     const bool strong_kick_action = use_procedural_shot || use_procedural_clear;
     // Treat a centimetre of combined translation/yaw-equivalent reduction as
@@ -970,9 +994,32 @@ HighLevelCommand make_dribble_command(
                     turn_command.role_id = motion_role_id;
                     return turn_command;
                 }
-                return make_walk_command_avoiding(
-                    canonical_setup_target, context.snapshot, std::nullopt,
-                    true, false, motion_role_id, false, true);
+                // Do not reuse generic point navigation here. Its 0.30 m
+                // near-target stop is appropriate for formation movement but
+                // stranded the v19 shot roughly ten times farther from the
+                // centimetre-scale release slot than the action permits.
+                // Once facing the setup point, keep a bounded forward crawl
+                // until lateral error enters the independent fine controller.
+                const double relocation_distance_m = math::planar_dist(
+                    context.self, canonical_setup_target);
+                const double maximum_relocation_speed_mps =
+                    restart_plan != nullptr
+                        ? kRestartMaxPrecisionForwardSpeedMps
+                        : kDribbleMaxForwardSetupSpeedMps;
+                const double relocation_speed_mps = std::clamp(
+                    2.5 * relocation_distance_m,
+                    0.12,
+                    maximum_relocation_speed_mps);
+                WalkCommand relocation_command;
+                relocation_command.target_2d_m = {
+                    relocation_speed_mps, 0.0};
+                relocation_command.target_absolute = false;
+                relocation_command.orientation_deg = travel_heading_deg;
+                relocation_command.orientation_absolute = true;
+                relocation_command.orientation_gain =
+                    kKickSetupOrientationGain;
+                relocation_command.role_id = motion_role_id;
+                return relocation_command;
             }
             if (orientation_error_deg > kKickFinalTurnThresholdDeg) {
                 trace_setup_gate(11, "precision-face-target");
@@ -1017,14 +1064,16 @@ HighLevelCommand make_dribble_command(
             precision_command.role_id = motion_role_id;
             return precision_command;
         }
-        trace_setup_gate(3, "approach");
-        WalkCommand approach_command = make_walk_command_avoiding(
-            approach_target, context.snapshot, std::nullopt, true, false,
-            motion_role_id, false, false);
-        approach_command.orientation_deg = absolute_direction_deg;
-        approach_command.orientation_absolute = true;
-        return approach_command;
-    }
+    trace_setup_gate(3, "approach");
+    // Face the actual approach waypoint while it is still more than the
+    // precision-entry distance away. Overwriting this with the eventual kick
+    // heading asked the forward-dominant walk to strafe: the v20 goalkeeper
+    // spent 15 seconds moving around, rather than toward, its goal-kick ball.
+    // Final kick orientation is restored by the near-field controller above.
+    return make_walk_command_avoiding(
+        approach_target, context.snapshot, std::nullopt, true, false,
+        motion_role_id, false, false);
+}
 
     const bool contact_state_stable =
         ball_position_actionable && latched_position_ready &&
@@ -1044,6 +1093,8 @@ HighLevelCommand make_dribble_command(
         now - context.state.kick_setup_stable_since_s >=
             (use_procedural_range_pass
                 ? 0.0
+                : use_phase_conditioned_transition
+                    ? kPhaseConditionedKickSetupStableHoldS
                 : use_procedural_dribble
                     ? kProceduralDribbleSetupStableHoldS
                     : use_procedural_kick
@@ -1196,6 +1247,20 @@ HighLevelCommand make_ap_push_ball_to_goal(APDecisionContext& context) {
     } else {
         std::array<double, 2> their_goal =
             field_geometry::actual_their_goal_center_target();
+        if (needs_final_third_cut_in(context.ball)) {
+            // A direct line to even the near post still spends too much of a
+            // one-metre pressure push in +x when the ball is several metres
+            // outside the goal mouth.  Aim only 1.5 m farther forward and
+            // well inside the post, producing a steep but still advancing
+            // cut-in.  This is deliberately the continuous pressure actor:
+            // the current exact short touch has not earned the right to stop
+            // a live wide attack for a centimetre-scale setup.
+            their_goal = {
+                std::min(
+                    field_geometry::kActualHalfLengthM,
+                    context.ball[0] + kFinalThirdCutInAdvanceM),
+                std::copysign(kFinalThirdCutInTargetYM, context.ball[1])};
+        } else {
         // In the final six metres, driving every ball back toward the goal
         // centre creates a large and unnecessary turn near either post.  A
         // natural 7v7 goal-line sequence had the ball at y=0.67 m and the
@@ -1225,6 +1290,7 @@ HighLevelCommand make_ap_push_ball_to_goal(APDecisionContext& context) {
                     their_goal = candidate;
                 }
             }
+        }
         }
         goal_direction = math::vec2_sub(their_goal, context.ball);
     }
@@ -1587,6 +1653,8 @@ HighLevelCommand APBehavior::make_command(
             tactical_state.ball_owner_player_number == snapshot.player_number &&
             tactical_state.nearest_opponent_ball_time_s >=
                 kSpecialistMinimumOpponentEtaS;
+        const bool force_continuous_cut_in =
+            needs_final_third_cut_in(context.ball);
         // FCP's released competition baseline starts its complete kick
         // behavior unless an opponent is clearly closer to the ball. Apply
         // that evidence only to urgent Shoot/Clear actions: a static short
@@ -1608,6 +1676,7 @@ HighLevelCommand APBehavior::make_command(
                 if (action.category != strategy::ActionCategory::Dribble) {
                     return controlled_specialist_setup;
                 }
+                if (force_continuous_cut_in) return false;
                 const auto direction = math::vec2_sub(
                     action.target_point_m, context.ball);
                 if (math::norm2(direction) <= 1.0e-6) return false;
@@ -1634,6 +1703,9 @@ HighLevelCommand APBehavior::make_command(
             (snapshot.server_time >= state_.local_action_commit_until_s ||
              !snapshot.ball.position_valid ||
              context.ball_distance > kDribblePrecisionEntryDistanceM ||
+             (force_continuous_cut_in &&
+              state_.committed_local_action->category ==
+                  strategy::ActionCategory::Dribble) ||
              opponent_clearly_wins_ball)) {
             state_.committed_local_action.reset();
             state_.local_action_commit_until_s = 0.0;
@@ -1674,6 +1746,7 @@ HighLevelCommand APBehavior::make_command(
         if (state_.committed_pass.has_value() && awaiting_release &&
             (snapshot.server_time >= state_.pass_commit_until_s ||
              !controlled_specialist_setup ||
+             force_continuous_cut_in ||
              !pass_commit_is_valid(
                  snapshot, *state_.committed_pass, capabilities))) {
             state_.pass_lifecycle.cancel(snapshot.server_time);
@@ -1754,6 +1827,7 @@ HighLevelCommand APBehavior::make_command(
         if (!state_.committed_pass.has_value() && plan.selected.has_value() &&
             plan.selected->category == strategy::ActionCategory::Pass &&
             snapshot.server_time >= state_.pass_retry_after_s &&
+            !force_continuous_cut_in &&
             controlled_specialist_setup &&
             capabilities.supported(*plan.selected) &&
             context.ball_distance <= kSpecialistSetupMaximumBallDistanceM) {

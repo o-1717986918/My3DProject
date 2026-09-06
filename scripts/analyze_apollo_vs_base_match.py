@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import json
+import math
 from pathlib import Path
 import re
 import statistics
@@ -26,6 +27,28 @@ def _fields(line: str) -> dict[str, str]:
         key, value = token.split("=", 1)
         result[key] = value
     return result
+
+
+def _ball_progress(
+    ball_x_by_observation: dict[int, list[float]],
+) -> dict[str, object]:
+    observations = [
+        statistics.median(samples)
+        for _, samples in sorted(ball_x_by_observation.items())
+        if samples
+    ]
+    return {
+        "observation_buckets": len(observations),
+        "minimum_x_m": min(observations) if observations else None,
+        "maximum_x_m": max(observations) if observations else None,
+        "median_x_m": statistics.median(observations) if observations else None,
+        "opponent_half_buckets": sum(x > 0.0 for x in observations),
+        "opponent_half_fraction": (
+            sum(x > 0.0 for x in observations) / len(observations)
+            if observations
+            else None
+        ),
+    }
 
 
 def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
@@ -62,7 +85,9 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
     execution_event_motion = Counter[str]()
     execution_event_status = Counter[str]()
     execution_event_kick_mode = Counter[str]()
-    visible_ball_x_by_cycle: dict[int, list[float]] = {}
+    visible_ball_x_by_observation: dict[int, list[float]] = {}
+    fresh_ball_x_by_observation: dict[int, list[float]] = {}
+    bounded_ball_x_by_observation: dict[int, list[float]] = {}
     player_get_up_samples = Counter[str]()
     player_get_up_episodes = Counter[str]()
     get_up_entries_by_previous_motion = Counter[str]()
@@ -90,19 +115,42 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                         get_up_entries_by_previous_motion[
                             previous_status_motion or "Unknown"
                         ] += 1
-                if (
-                    values.get("ball_visible") == "1"
-                    and values.get("ball_position_valid") == "1"
-                    and "cycle" in values
-                    and "ball_x" in values
-                ):
+                if values.get("ball_position_valid") == "1" and (
+                    "server_time" in values or "cycle" in values
+                ) and "ball_x" in values:
                     try:
-                        cycle = int(values["cycle"])
                         ball_x = float(values["ball_x"])
+                        ball_age_s = float(values.get("ball_position_age", "inf"))
+                        if "server_time" in values:
+                            # Clients start on staggered cycles.  A 100 ms
+                            # server-time bucket merges near-simultaneous team
+                            # observations without pretending local cycle ids
+                            # describe the same world instant.
+                            observation = int(round(
+                                float(values["server_time"]) * 10.0))
+                        else:
+                            observation = int(values["cycle"])
                     except ValueError:
                         pass
                     else:
-                        visible_ball_x_by_cycle.setdefault(cycle, []).append(ball_x)
+                        if math.isfinite(ball_x):
+                            visible = values.get("ball_visible") == "1"
+                            near_contact = (
+                                values.get("ball_near_contact_track") == "1"
+                            )
+                            if visible:
+                                visible_ball_x_by_observation.setdefault(
+                                    observation, []).append(ball_x)
+                            if visible or ball_age_s <= 0.75:
+                                fresh_ball_x_by_observation.setdefault(
+                                    observation, []).append(ball_x)
+                            if (
+                                visible
+                                or ball_age_s <= 0.75
+                                or (near_contact and ball_age_s <= 3.5)
+                            ):
+                                bounded_ball_x_by_observation.setdefault(
+                                    observation, []).append(ball_x)
                 previous_status_motion = values.get("motion")
             elif line.startswith("MY3D_KICK_SETUP"):
                 values = _fields(line)
@@ -128,25 +176,8 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
     fallback_kick_samples = sum(
         count for name, count in motions.items() if name.startswith("FallbackKick")
     )
-    cycle_ball_x = [
-        statistics.median(samples)
-        for _, samples in sorted(visible_ball_x_by_cycle.items())
-        if samples
-    ]
-    ball_progress = {
-        "visible_cycles": len(cycle_ball_x),
-        "minimum_x_m": min(cycle_ball_x) if cycle_ball_x else None,
-        "maximum_x_m": max(cycle_ball_x) if cycle_ball_x else None,
-        "median_x_m": statistics.median(cycle_ball_x) if cycle_ball_x else None,
-        "opponent_half_cycles": sum(x > 0.0 for x in cycle_ball_x),
-        "opponent_half_fraction": (
-            sum(x > 0.0 for x in cycle_ball_x) / len(cycle_ball_x)
-            if cycle_ball_x
-            else None
-        ),
-    }
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "run_dir": str(run_dir.resolve()),
         "score": score,
         "server": {
@@ -171,7 +202,12 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                 "kick_mode": dict(execution_event_kick_mode.most_common()),
             },
             "strategy_motion": dict(strategy_motion.most_common()),
-            "visible_ball_progress": ball_progress,
+            "visible_ball_progress": _ball_progress(
+                visible_ball_x_by_observation),
+            "fresh_ball_progress": _ball_progress(
+                fresh_ball_x_by_observation),
+            "bounded_ball_track_progress": _ball_progress(
+                bounded_ball_x_by_observation),
             "exact_kick_samples": exact_kick_samples,
             "fallback_kick_samples": fallback_kick_samples,
             "players_with_get_up_samples": sorted(player_get_up_samples),
@@ -184,7 +220,9 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
         "interpretation_limits": [
             "pristine Apollo is silent, so its internal decisions are not inferred",
             "status counts are samples, not independent physical events",
-            "visible-ball progress is the per-cycle median of developed-team observers, not server ground truth",
+            "ball progress uses 100 ms server-time buckets when telemetry provides server_time, otherwise legacy local-cycle buckets",
+            "fresh-ball progress accepts visible or at-most-0.75 s old estimates; bounded-track progress additionally accepts at-most-3.5 s near-contact tracks",
+            "all ball progress is developed-team perception, not server ground truth",
             "score and referee events come from the authoritative server log",
         ],
     }
