@@ -4,6 +4,7 @@
 #include "src/decision/behavior_tree.h"
 
 #include "src/decision/behavior_nodes.h"
+#include "src/decision/kick_contract.h"
 #include "src/decision/field_geometry.h"
 #include "src/decision/role_behaviors.h"
 #include "src/math/math_utils.h"
@@ -211,21 +212,16 @@ bool restart_taker_aligned(
     const std::optional<RestartPlan>& plan) {
     if (!plan.has_value() ||
         plan->taker_player_number != snapshot.player_number ||
-        !snapshot.ball.position_valid) {
+        !plan->ball_anchor_valid) {
         return false;
     }
-    constexpr double contact_behind_m = 0.33;
-    constexpr double longitudinal_tolerance_m = 0.03;
-    constexpr double lateral_tolerance_m = 0.03;
-    constexpr double orientation_tolerance_deg = 3.0;
-    constexpr double maximum_speed_mps = 0.20;
     const double direction_rad = math::deg_to_rad(plan->contact_direction_deg);
     const std::array<double, 2> direction{
         std::cos(direction_rad), std::sin(direction_rad)};
     const std::array<double, 2> lateral{-direction[1], direction[0]};
     const std::array<double, 2> self_from_ball{
-        snapshot.self.position_m[0] - snapshot.ball.position_m[0],
-        snapshot.self.position_m[1] - snapshot.ball.position_m[1]};
+        snapshot.self.position_m[0] - plan->ball_anchor_m[0],
+        snapshot.self.position_m[1] - plan->ball_anchor_m[1]};
     const double behind_m = -(
         self_from_ball[0] * direction[0] +
         self_from_ball[1] * direction[1]);
@@ -236,11 +232,15 @@ bool restart_taker_aligned(
             snapshot.self.orientation_wxyz);
     const double speed_mps = math::norm2({
         snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]});
-    return std::abs(behind_m - contact_behind_m) <= longitudinal_tolerance_m &&
-        std::abs(lateral_m) <= lateral_tolerance_m &&
+    return std::abs(
+               behind_m - kick_contract::kForwardContactBallLocalXM) <=
+            kick_contract::kForwardContactBallLocalXToleranceM &&
+        std::abs(
+            lateral_m + kick_contract::kForwardContactBallLocalYM) <=
+            kick_contract::kForwardContactBallLocalYToleranceM &&
         std::abs(math::normalize_deg(plan->contact_direction_deg - yaw_deg)) <=
-            orientation_tolerance_deg &&
-        speed_mps <= maximum_speed_mps;
+            kick_contract::kForwardContactMaximumTargetAngleDeg &&
+        speed_mps <= kick_contract::kProceduralMaximumStartPlanarSpeedMps;
 }
 
 bool another_player_controls_released_ball(

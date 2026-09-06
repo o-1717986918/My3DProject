@@ -712,6 +712,49 @@ TeamPlan TeamTactics::plan_all(
         // goal line, immediately before conceding. In open play, make the
         // information-loss fallback an explicit central goal-line hold.
         if (snapshot.play_mode == world::PlayMode::PlayOn) {
+            // Preserve the original Apollo attacker's useful persistence, but
+            // do not preserve its unbounded trust in a cached coordinate.  A
+            // single AP moves to the recent last-known point while the other
+            // field players keep the team shape.  TeamPlan::fresh stays false,
+            // so this target cannot authorize a pass, shot, or ball contact.
+            const bool searchable_last_ball =
+                !snapshot.ball.visible &&
+                !snapshot.ball.near_contact_track &&
+                std::isfinite(snapshot.ball.position_age_s) &&
+                snapshot.ball.position_age_s >
+                    world::kBallPositionFreshLifetimeS &&
+                snapshot.ball.position_age_s <= kLostBallSearchLifetimeS &&
+                std::isfinite(snapshot.ball.position_m[0]) &&
+                std::isfinite(snapshot.ball.position_m[1]) &&
+                std::abs(snapshot.ball.position_m[0]) <=
+                    field_geometry::kActualHalfLengthM &&
+                std::abs(snapshot.ball.position_m[1]) <=
+                    field_geometry::kActualHalfWidthM;
+            if (searchable_last_ball) {
+                const auto attacker_assignment = std::find_if(
+                    result.assignments.begin(), result.assignments.end(),
+                    [](const TeamTacticalAssignment& assignment) {
+                        return assignment.role_id == RoleManager::ROLE_AP;
+                    });
+                if (attacker_assignment != result.assignments.end()) {
+                    const Position2 last_ball{
+                        snapshot.ball.position_m[0],
+                        snapshot.ball.position_m[1]};
+                    const double age_fraction = std::clamp(
+                        (snapshot.ball.position_age_s -
+                         world::kBallPositionFreshLifetimeS) /
+                            (kLostBallSearchLifetimeS -
+                             world::kBallPositionFreshLifetimeS),
+                        0.0,
+                        1.0);
+                    attacker_assignment->target = {
+                        TacticalDuty::SearchBall,
+                        clamp_field_player(last_ball),
+                        std::nullopt,
+                        0,
+                        0.55 - 0.30 * age_fraction};
+                }
+            }
             const Position2 safe_keeper_hold{
                 -field_geometry::kActualHalfLengthM +
                     field_geometry::kGkHoldDepthM,
@@ -978,6 +1021,7 @@ TacticalTarget TeamTactics::plan(
 std::string_view to_string(TacticalDuty duty) {
     switch (duty) {
         case TacticalDuty::Formation: return "Formation";
+        case TacticalDuty::SearchBall: return "SearchBall";
         case TacticalDuty::Support: return "Support";
         case TacticalDuty::Unmark: return "Unmark";
         case TacticalDuty::Outlet: return "Outlet";

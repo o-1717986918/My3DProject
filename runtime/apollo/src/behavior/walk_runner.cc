@@ -337,9 +337,20 @@ std::optional<robot::JointTargets> WalkRunner::step_fast_walk(
 bool WalkRunner::rapid_turn_supported(
     const world::WorldSnapshot& snapshot,
     const std::array<float, 3>& stable_velocity_command) {
+    constexpr double kBallHandlingExclusionRadiusM = 1.50;
+    const bool near_actionable_ball = snapshot.ball.position_valid &&
+        math::planar_dist(
+            {snapshot.self.position_m[0], snapshot.self.position_m[1]},
+            {snapshot.ball.position_m[0], snapshot.ball.position_m[1]}) <=
+            kBallHandlingExclusionRadiusM;
     if (!rapid_turn_session_.has_value() || rapid_turn_disabled_ ||
-        (snapshot.play_mode != world::PlayMode::PlayOn &&
-         snapshot.play_mode_group != world::PlayModeGroup::OurKick)) {
+        snapshot.play_mode != world::PlayMode::PlayOn ||
+        near_actionable_ball) {
+        // RapidTurn remains available for open-play navigation, but its
+        // measured forward drift makes it unsafe for a frozen restart or any
+        // near-ball precision setup.  Those domains stay on the original
+        // stable walk actor until a turn policy is trained with displacement
+        // and fall constraints.
         rapid_turn_active_ = false;
         return false;
     }

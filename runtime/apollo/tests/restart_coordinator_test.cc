@@ -295,10 +295,20 @@ bool test_soft_deadline_and_single_fallback() {
     input.execution_feedback = RestartExecutionFeedback{
         71U, 2U, RestartExecutionStatus::Rejected};
     decision = coordinator.update(input);
+    if (!expect(
+            decision.phase == RestartPhase::Aligning &&
+                decision.plan->revision == 2U,
+            "a rejected fallback was falsely completed or re-revised")) {
+        return false;
+    }
+    input.execution_feedback.reset();
+    input.server_time_s = 42.4;
+    decision = coordinator.update(input);
     return expect(
-        decision.phase == RestartPhase::Complete &&
+        decision.phase == RestartPhase::Executing &&
+            decision.execution_authorized &&
             decision.plan->revision == 2U,
-        "a rejected fallback incorrectly created a second fallback");
+        "the frozen safety contact was not retryable after rejection");
 }
 
 bool test_execution_failure_and_release_timeout_fallbacks() {
@@ -396,10 +406,11 @@ bool test_hard_deadline_and_invalid_plan() {
     input.server_time_s = 73.0;
     decision = coordinator.update(input);
     if (!expect(
-        decision.phase == RestartPhase::Complete &&
+        decision.phase == RestartPhase::Positioning &&
             decision.hard_deadline_reached &&
+            decision.plan->fallback && decision.plan->revision == 2U &&
             !decision.execution_authorized,
-        "hard deadline did not terminate invalid coordination")) {
+        "hard deadline falsely completed an untouched invalid restart")) {
         return false;
     }
 

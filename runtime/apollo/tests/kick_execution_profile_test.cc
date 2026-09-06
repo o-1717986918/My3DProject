@@ -123,7 +123,10 @@ int main() {
     }
     const auto shot = behavior::make_kick_execution_profile(
         snapshot, make_shot(), true);
+    const auto boundary_shot = behavior::make_kick_execution_profile(
+        snapshot, make_shot(4.0, 2.0), true);
     if (shot.kind != behavior::KickProfileKind::ProceduralContact ||
+        boundary_shot.kind != behavior::KickProfileKind::ProceduralContact ||
         !near(shot.target_distance_m, 4.0) ||
         !near(shot.requested_speed_mps, 2.50) ||
         shot.mode != decision::KickMode::Shot) {
@@ -166,7 +169,7 @@ int main() {
     const auto outside_dribble_angle = behavior::make_kick_execution_profile(
         snapshot, make_dribble(6.01), true);
     const auto outside_shot_angle = behavior::make_kick_execution_profile(
-        snapshot, make_shot(4.0, 1.01), true);
+        snapshot, make_shot(4.0, 2.01), true);
     const auto outside_shot_distance = behavior::make_kick_execution_profile(
         snapshot, make_shot(4.51, 0.0), true);
     const auto outside_clear_angle = behavior::make_kick_execution_profile(

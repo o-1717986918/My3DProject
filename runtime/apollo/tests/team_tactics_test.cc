@@ -448,18 +448,30 @@ int main() {
 
     world::WorldSnapshot stale_ball = team_defense;
     stale_ball.ball.visible = false;
+    stale_ball.ball.position_valid = false;
     stale_ball.ball.position_age_s = 0.76;
     const auto stale_plan = tactics.plan_all(stale_ball, roles);
     const auto* stale_keeper = stale_plan.for_role(
         decision::RoleManager::ROLE_GK);
+    const auto* stale_attacker = stale_plan.for_role(
+        decision::RoleManager::ROLE_AP);
     const bool field_player_left_shape = std::any_of(
         stale_plan.assignments.begin(), stale_plan.assignments.end(),
         [](const decision::TeamTacticalAssignment& assignment) {
             return assignment.role_id != decision::RoleManager::ROLE_GK &&
+                assignment.role_id != decision::RoleManager::ROLE_AP &&
                 assignment.target.duty != decision::TacticalDuty::Formation;
         });
     if (stale_plan.fresh || stale_plan.revision == 0U ||
-        field_player_left_shape || stale_keeper == nullptr ||
+        field_player_left_shape || stale_attacker == nullptr ||
+        stale_attacker->target.duty !=
+            decision::TacticalDuty::SearchBall ||
+        std::hypot(
+            stale_attacker->target.position_m[0] -
+                stale_ball.ball.position_m[0],
+            stale_attacker->target.position_m[1] -
+                stale_ball.ball.position_m[1]) > 1.0e-9 ||
+        stale_keeper == nullptr ||
         stale_keeper->target.duty !=
             decision::TacticalDuty::GoalkeeperHold ||
         std::abs(
@@ -467,7 +479,35 @@ int main() {
             (-decision::field_geometry::kActualHalfLengthM +
              decision::field_geometry::kGkHoldDepthM)) > 1.0e-9 ||
         std::abs(stale_keeper->target.position_m[1]) > 1.0e-9) {
-        std::cerr << "stale ball did not produce the safe goalkeeper hold\n";
+        std::cerr << "recent stale ball did not assign one bounded searcher\n";
+        return 1;
+    }
+
+    world::WorldSnapshot expired_ball = stale_ball;
+    expired_ball.server_time += 1.0;
+    expired_ball.ball.position_age_s =
+        decision::kLostBallSearchLifetimeS + 0.01;
+    const auto expired_plan = tactics.plan_all(expired_ball, roles);
+    const auto* expired_attacker = expired_plan.for_role(
+        decision::RoleManager::ROLE_AP);
+    if (expired_plan.fresh || expired_attacker == nullptr ||
+        expired_attacker->target.duty !=
+            decision::TacticalDuty::Formation) {
+        std::cerr << "expired last-known ball kept an attacker searching\n";
+        return 1;
+    }
+
+    world::WorldSnapshot set_play_stale = stale_ball;
+    set_play_stale.server_time += 2.0;
+    set_play_stale.play_mode = world::PlayMode::TheirFreeKick;
+    set_play_stale.play_mode_group = world::PlayModeGroup::TheirKick;
+    const auto set_play_plan = tactics.plan_all(set_play_stale, roles);
+    const auto* set_play_attacker = set_play_plan.for_role(
+        decision::RoleManager::ROLE_AP);
+    if (set_play_attacker == nullptr ||
+        set_play_attacker->target.duty !=
+            decision::TacticalDuty::Formation) {
+        std::cerr << "lost-ball search leaked into an opponent restart\n";
         return 1;
     }
 
@@ -479,6 +519,7 @@ int main() {
     occluded_keeper.self.position_m = {-25.65, 0.94, 0.8};
     occluded_keeper.self.orientation_wxyz = {1.0, 0.0, 0.0, 0.0};
     occluded_keeper.ball.position_m = {-25.32, 0.94, 0.11};
+    occluded_keeper.ball.position_valid = true;
     occluded_keeper.ball.position_age_s = 1.0;
     occluded_keeper.ball.near_contact_track = true;
     occluded_keeper.ball.velocity_valid = false;

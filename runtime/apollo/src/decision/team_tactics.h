@@ -17,6 +17,7 @@ namespace decision {
 
 enum class TacticalDuty {
     Formation,
+    SearchBall,
     Support,
     Unmark,
     Outlet,
@@ -30,6 +31,14 @@ enum class TacticalDuty {
     GoalkeeperSmother,
     Receive,
 };
+
+// The world model deliberately expires ordinary ball coordinates after 0.20 s
+// for contact, pass, and shot decisions.  Movement may use the last observed
+// point for a little longer: this preserves pressure across a short occlusion
+// without promoting the estimate back to an executable ball state.  The world
+// state retains a genuine last-known point for two seconds, so this bound must
+// remain below that retention lifetime.
+inline constexpr double kLostBallSearchLifetimeS = 1.5;
 
 struct TacticalTarget {
     TacticalDuty duty{TacticalDuty::Formation};

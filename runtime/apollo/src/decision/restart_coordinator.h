@@ -37,6 +37,7 @@ enum class RestartExecutionStatus : std::uint8_t {
 enum class RestartFallbackReason : std::uint8_t {
     None,
     SoftDeadline,
+    HardDeadline,
     ExecutionRejected,
     ExecutionTimedOut,
     ReleaseNotObserved,
@@ -117,8 +118,12 @@ struct RestartCoordinationDecision {
 class RestartCoordinator {
 public:
     struct Parameters {
-        double soft_deadline_s{6.0};
-        double hard_deadline_s{10.0};
+        // Receiver/team coordination gets a short opportunity, then the taker
+        // must use the frozen safety contact while the restart ball anchor is
+        // still actionable.  The hard deadline changes urgency only; it is
+        // never permission to claim that an untouched ball was released.
+        double soft_deadline_s{2.5};
+        double hard_deadline_s{8.0};
         double release_verification_timeout_s{1.0};
         double release_distance_m{0.35};
         double release_speed_mps{0.30};

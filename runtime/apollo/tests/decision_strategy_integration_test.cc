@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "src/decision/role_behaviors.h"
+#include "src/strategy/action_planner.h"
 
 #include <cmath>
 #include <iostream>
@@ -211,6 +212,162 @@ int main() {
         return 1;
     }
 
+    // Near the opponent goal, pressure possession should use the reachable
+    // side of the goal mouth instead of turning back toward the centre. This
+    // preserves forward contact when the ball is already beside a post.
+    world::WorldSnapshot near_goal_snapshot = make_open_pass_snapshot();
+    near_goal_snapshot.ball.position_m = {27.0, 0.67, 0.11};
+    near_goal_snapshot.self.position_m = {26.45, 0.65, 0.8};
+    constexpr double kYaw20HalfRadians = 0.17453292519943295;
+    near_goal_snapshot.self.orientation_wxyz = {
+        std::cos(kYaw20HalfRadians), 0.0, 0.0,
+        std::sin(kYaw20HalfRadians)};
+    decision::APBehavior near_goal_behavior;
+    decision::Blackboard near_goal_blackboard;
+    const auto near_goal_command = near_goal_behavior.make_command(
+        near_goal_snapshot, near_goal_blackboard, role_manager, false, false);
+    const auto* near_goal_walk =
+        std::get_if<decision::WalkCommand>(&near_goal_command);
+    if (near_goal_walk == nullptr || !near_goal_walk->orientation_absolute ||
+        !near_goal_walk->orientation_deg.has_value() ||
+        *near_goal_walk->orientation_deg <= 0.0) {
+        std::cerr << "final-third pressure did not choose the low-turn goal lane\n";
+        return 1;
+    }
+
+    // Hold remains a useful evaluator baseline and telemetry outcome, but it
+    // must never stop the active player during open play. Near a touchline the
+    // boundary penalty can intentionally rank Hold above Dribble; with an
+    // opponent on the ball, execution must still fall through to the proven
+    // pressure walk/contact controller.
+    world::WorldSnapshot contested_hold_snapshot = make_open_pass_snapshot();
+    contested_hold_snapshot.self.position_m = {-4.35, 0.0, 0.8};
+    contested_hold_snapshot.ball.position_m = {-4.0, 0.0, 0.11};
+    constexpr double kYawMinus100HalfRadians = -0.8726646259971648;
+    contested_hold_snapshot.self.orientation_wxyz = {
+        std::cos(kYawMinus100HalfRadians), 0.0, 0.0,
+        std::sin(kYawMinus100HalfRadians)};
+    contested_hold_snapshot.teammates.clear();
+    contested_hold_snapshot.opponents.resize(1);
+    contested_hold_snapshot.opponents[0].player_number = 4;
+    contested_hold_snapshot.opponents[0].seen = true;
+    contested_hold_snapshot.opponents[0].last_seen_time =
+        contested_hold_snapshot.server_time;
+    contested_hold_snapshot.opponents[0].position_m = {-4.0, 0.0, 0.8};
+    decision::APBehavior contested_hold_behavior;
+    decision::Blackboard contested_hold_blackboard;
+    const auto contested_hold_command = contested_hold_behavior.make_command(
+        contested_hold_snapshot, contested_hold_blackboard, role_manager,
+        true, true);
+    if (!contested_hold_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction) ||
+        contested_hold_blackboard.get<strategy::CooperativeAction>(
+            decision::Blackboard::kKeySelectedCooperativeAction).category !=
+            strategy::ActionCategory::Hold ||
+        !std::holds_alternative<decision::WalkCommand>(
+            contested_hold_command)) {
+        const auto diagnostic_plan = strategy::ActionPlanner{}.plan(
+            contested_hold_snapshot,
+            strategy::ActionCapabilityRegistry{true}, false);
+        std::cerr << "selected Hold stopped open-play pressure execution"
+                  << " selected="
+                  << (contested_hold_blackboard.exists(
+                          decision::Blackboard::kKeySelectedCooperativeAction)
+                          ? static_cast<int>(contested_hold_blackboard.get<
+                                strategy::CooperativeAction>(
+                                decision::Blackboard::kKeySelectedCooperativeAction)
+                                .category)
+                          : -1)
+                  << " command_index=" << contested_hold_command.index()
+                  << " planner_selected="
+                  << (diagnostic_plan.selected.has_value()
+                          ? static_cast<int>(diagnostic_plan.selected->category)
+                          : -1)
+                  << " candidates=" << diagnostic_plan.candidates.size();
+        for (const auto& candidate : diagnostic_plan.candidates) {
+            std::cerr << " [" << static_cast<int>(candidate.category)
+                      << ':' << candidate.utility << ']';
+        }
+        std::cerr
+                  << '\n';
+        return 1;
+    }
+
+    // A recent but no-longer-actionable ball coordinate is a movement-only
+    // search target. The AP must walk to it without allowing the stale point
+    // to enter either the action planner or the pressure contact controller.
+    world::WorldSnapshot search_snapshot = make_open_pass_snapshot();
+    search_snapshot.self.position_m = {0.0, 0.0, 0.8};
+    search_snapshot.ball.visible = false;
+    search_snapshot.ball.position_valid = false;
+    search_snapshot.ball.position_age_s = 0.8;
+    search_snapshot.ball.position_m = {4.0, 2.0, 0.11};
+    search_snapshot.teammates.clear();
+    search_snapshot.opponents.clear();
+    decision::APBehavior search_behavior;
+    decision::Blackboard search_blackboard;
+    search_blackboard.set(
+        decision::Blackboard::kKeyTacticalTarget,
+        decision::TacticalTarget{
+            decision::TacticalDuty::SearchBall,
+            {4.0, 2.0},
+            std::nullopt,
+            0,
+            0.4});
+    const auto search_command = search_behavior.make_command(
+        search_snapshot, search_blackboard, role_manager, true, true);
+    const auto* search_walk =
+        std::get_if<decision::WalkCommand>(&search_command);
+    if (search_walk == nullptr || search_walk->target_absolute ||
+        std::hypot(
+            search_walk->target_2d_m[0],
+            search_walk->target_2d_m[1]) <= 1.0e-6 ||
+        search_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "stale-ball search entered an executable ball action"
+                  << " walk=" << (search_walk != nullptr)
+                  << " absolute="
+                  << (search_walk != nullptr && search_walk->target_absolute)
+                  << " speed="
+                  << (search_walk != nullptr
+                          ? std::hypot(
+                                search_walk->target_2d_m[0],
+                                search_walk->target_2d_m[1])
+                          : -1.0)
+                  << " selected="
+                  << search_blackboard.exists(
+                         decision::Blackboard::kKeySelectedCooperativeAction)
+                  << '\n';
+        return 1;
+    }
+
+    // Once TeamTactics expires the search window it supplies formation. The
+    // same invalid-ball guard must honor that target instead of reverting to
+    // Apollo's unbounded cached-ball chase.
+    decision::Blackboard search_expired_blackboard;
+    search_expired_blackboard.set(
+        decision::Blackboard::kKeyTacticalTarget,
+        decision::TacticalTarget{
+            decision::TacticalDuty::Formation,
+            {-4.0, 0.0},
+            std::nullopt,
+            0,
+            0.25});
+    search_snapshot.server_time += 1.0;
+    search_snapshot.ball.position_age_s =
+        decision::kLostBallSearchLifetimeS + 0.01;
+    const auto search_expired_command = search_behavior.make_command(
+        search_snapshot, search_expired_blackboard, role_manager, true, true);
+    const auto* search_expired_walk =
+        std::get_if<decision::WalkCommand>(&search_expired_command);
+    if (search_expired_walk == nullptr ||
+        !search_expired_walk->orientation_deg.has_value() ||
+        std::abs(std::abs(*search_expired_walk->orientation_deg) - 180.0) >
+            1.0e-6) {
+        std::cerr << "expired-ball search did not return to formation\n";
+        return 1;
+    }
+
     // A failed Ready handshake must yield the ball to a local action for a
     // bounded interval instead of immediately proposing the same pass again.
     decision::APBehavior expired_pass_behavior;
@@ -359,7 +516,7 @@ int main() {
         std::cerr << "procedural dribble skipped the neutral-phase debounce\n";
         return 1;
     }
-    procedural_snapshot.server_time += 0.05;
+    procedural_snapshot.server_time += 0.02;
     // The first sample entered the strict +/-20 mm release gate.  Simulate
     // the 1.2 mm cross-frame drift observed on the real server; it must stay
     // latched inside the separately validated +/-25 mm dispatch boundary.
@@ -393,7 +550,7 @@ int main() {
         std::cerr << "procedural kick ignored its shared dynamic entry guard\n";
         return 1;
     }
-    transition_snapshot.server_time += 0.05;
+    transition_snapshot.server_time += 0.02;
     transition_snapshot.self.gyro_deg_s[0] = 0.0;
     transition_snapshot.self.joint_velocities_deg_s["Right_Knee_Pitch"] = 0.0;
     const auto transition_settle = transition_behavior.make_command(
@@ -402,7 +559,7 @@ int main() {
         std::cerr << "procedural transition skipped its stable-entry debounce\n";
         return 1;
     }
-    transition_snapshot.server_time += 0.05;
+    transition_snapshot.server_time += 0.02;
     const auto guarded_release = transition_behavior.make_command(
         transition_snapshot, transition_blackboard, role_manager, false, true);
     if (const auto* guarded_kick =
@@ -459,6 +616,157 @@ int main() {
     if (!std::holds_alternative<decision::WalkCommand>(
             pressured_continuation)) {
         std::cerr << "pressured AP replaced continuous contact with a kick setup\n";
+        return 1;
+    }
+
+    // A backwards-facing player has no forward-progressing exact touch inside
+    // the bounded setup-turn envelope. Keep the planner proposal observable,
+    // but execute the continuous pressure controller rather than committing
+    // several seconds to an exact dribble that initially moves backwards.
+    world::WorldSnapshot backwards_dribble_snapshot = make_open_pass_snapshot();
+    backwards_dribble_snapshot.teammates.clear();
+    backwards_dribble_snapshot.self.position_m = {-0.60, 0.0, 0.8};
+    backwards_dribble_snapshot.self.orientation_wxyz = {0.0, 0.0, 0.0, 1.0};
+    decision::APBehavior backwards_dribble_behavior;
+    decision::Blackboard backwards_dribble_blackboard;
+    const auto backwards_dribble_command =
+        backwards_dribble_behavior.make_command(
+            backwards_dribble_snapshot,
+            backwards_dribble_blackboard,
+            role_manager,
+            false,
+            true);
+    if (!std::holds_alternative<decision::WalkCommand>(
+            backwards_dribble_command) ||
+        backwards_dribble_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "backwards-facing dribble entered exact-action setup\n";
+        return 1;
+    }
+
+    // A final-third shot may start positioning from the full precision-entry
+    // range when the opponent has not clearly won the race. Dribble and pass
+    // retain the stricter calm-possession admission tested above/below.
+    world::WorldSnapshot urgent_shot_snapshot = make_open_pass_snapshot();
+    urgent_shot_snapshot.teammates.clear();
+    urgent_shot_snapshot.ball.position_m = {23.5, 0.0, 0.11};
+    urgent_shot_snapshot.self.position_m = {22.60, 0.0, 0.8};
+    decision::TeamPlan urgent_shot_plan;
+    urgent_shot_plan.tactical_state.possession =
+        strategy::PossessionOwner::Contested;
+    urgent_shot_plan.tactical_state.phase =
+        strategy::TacticalPhase::Transition;
+    urgent_shot_plan.tactical_state.nearest_teammate_ball_time_s = 0.70;
+    urgent_shot_plan.tactical_state.nearest_opponent_ball_time_s = 0.80;
+    decision::APBehavior urgent_shot_behavior;
+    decision::Blackboard urgent_shot_blackboard;
+    urgent_shot_blackboard.set(
+        decision::Blackboard::kKeyTeamPlan, urgent_shot_plan);
+    const auto urgent_shot_setup = urgent_shot_behavior.make_command(
+        urgent_shot_snapshot, urgent_shot_blackboard, role_manager,
+        false, true);
+    if (!std::holds_alternative<decision::WalkCommand>(urgent_shot_setup) ||
+        !urgent_shot_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction) ||
+        urgent_shot_blackboard.get<strategy::CooperativeAction>(
+            decision::Blackboard::kKeySelectedCooperativeAction).category !=
+            strategy::ActionCategory::Shoot) {
+        std::cerr << "contested final-third shot did not start bounded setup\n";
+        return 1;
+    }
+
+    // A strong-kick setup that has just made substantial progress at the old
+    // 1.8 s hard boundary gets one more gait phase instead of being converted
+    // to a weak fixed contact. It is still bounded: if that new pose then
+    // stalls, the unchanged progress timeout must fire.
+    // Keep every replay step inside the controller's one-second continuity
+    // window. Jumping directly from 1.00 s to 2.78 s would correctly classify
+    // the setup as abandoned and restart its timer, which would not exercise
+    // the old 1.8 s boundary at all.
+    urgent_shot_snapshot.server_time = 1.90;
+    urgent_shot_snapshot.self.position_m = {22.80, -0.05, 0.8};
+    const auto intermediate_shot = urgent_shot_behavior.make_command(
+        urgent_shot_snapshot, urgent_shot_blackboard, role_manager,
+        false, true);
+    if (std::holds_alternative<decision::KickCommand>(intermediate_shot)) {
+        std::cerr << "improving strong kick fell back before minimum timeout\n";
+        return 1;
+    }
+    urgent_shot_snapshot.server_time = 2.78;
+    urgent_shot_snapshot.self.position_m = {23.0, -0.10, 0.8};
+    const auto progressing_shot = urgent_shot_behavior.make_command(
+        urgent_shot_snapshot, urgent_shot_blackboard, role_manager,
+        false, true);
+    urgent_shot_snapshot.server_time = 2.81;
+    const auto after_old_hard_timeout = urgent_shot_behavior.make_command(
+        urgent_shot_snapshot, urgent_shot_blackboard, role_manager,
+        false, true);
+    if (std::holds_alternative<decision::KickCommand>(progressing_shot) ||
+        std::holds_alternative<decision::KickCommand>(
+            after_old_hard_timeout)) {
+        std::cerr << "improving strong kick was pre-empted at the old timeout\n";
+        return 1;
+    }
+    urgent_shot_snapshot.server_time = 3.32;
+    const auto stalled_strong_shot = urgent_shot_behavior.make_command(
+        urgent_shot_snapshot, urgent_shot_blackboard, role_manager,
+        false, true);
+    const auto* stalled_strong_contact =
+        std::get_if<decision::KickCommand>(&stalled_strong_shot);
+    if (stalled_strong_contact == nullptr ||
+        stalled_strong_contact->mode != decision::KickMode::Shot ||
+        !stalled_strong_contact->allow_forward_contact_fallback) {
+        std::cerr << "stalled strong kick lost its bounded fallback\n";
+        return 1;
+    }
+
+    // Large lateral setup error must be handled by turn-then-forward
+    // relocation, not by holding the shot heading and issuing the weak
+    // side-strafe domain of the current locomotion policy.
+    world::WorldSnapshot offset_shot_snapshot = urgent_shot_snapshot;
+    offset_shot_snapshot.self.position_m = {22.60, 0.60, 0.8};
+    decision::APBehavior offset_shot_behavior;
+    decision::Blackboard offset_shot_blackboard;
+    offset_shot_blackboard.set(
+        decision::Blackboard::kKeyTeamPlan, urgent_shot_plan);
+    const auto offset_shot_setup = offset_shot_behavior.make_command(
+        offset_shot_snapshot, offset_shot_blackboard, role_manager,
+        false, true);
+    if (!std::holds_alternative<decision::WalkCommand>(offset_shot_setup)) {
+        std::cerr << "offset shot did not issue coarse setup relocation\n";
+        return 1;
+    }
+    const auto& offset_walk =
+        std::get<decision::WalkCommand>(offset_shot_setup);
+    if (!offset_walk.orientation_deg.has_value() ||
+        std::abs(*offset_walk.orientation_deg) < 20.0 ||
+        !offset_walk.target_absolute ||
+        std::hypot(
+            offset_walk.target_2d_m[0] -
+                offset_shot_snapshot.self.position_m[0],
+            offset_walk.target_2d_m[1] -
+                offset_shot_snapshot.self.position_m[1]) > 1.0e-6) {
+        std::cerr << "offset shot still requested lateral precision strafe\n";
+        return 1;
+    }
+
+    world::WorldSnapshot lost_shot_snapshot = urgent_shot_snapshot;
+    decision::TeamPlan lost_shot_plan = urgent_shot_plan;
+    lost_shot_plan.tactical_state.possession =
+        strategy::PossessionOwner::Theirs;
+    lost_shot_plan.tactical_state.phase = strategy::TacticalPhase::Defend;
+    lost_shot_plan.tactical_state.nearest_teammate_ball_time_s = 1.00;
+    lost_shot_plan.tactical_state.nearest_opponent_ball_time_s = 0.20;
+    decision::APBehavior lost_shot_behavior;
+    decision::Blackboard lost_shot_blackboard;
+    lost_shot_blackboard.set(
+        decision::Blackboard::kKeyTeamPlan, lost_shot_plan);
+    const auto lost_shot_command = lost_shot_behavior.make_command(
+        lost_shot_snapshot, lost_shot_blackboard, role_manager, false, true);
+    if (!std::holds_alternative<decision::WalkCommand>(lost_shot_command) ||
+        lost_shot_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "clearly lost shot race was not kept on pressure recovery\n";
         return 1;
     }
 
@@ -715,6 +1023,19 @@ int main() {
     goalkeeper_snapshot.server_time += 0.02;
     goalkeeper_snapshot.ball.position_m[0] += 0.02;
     goalkeeper_snapshot.self.position_m[0] += 0.02;
+    // The tactical smother estimate may flicker back to Hold as the keeper
+    // closes the final centimetres. That must not discard the admitted clear
+    // and replace it with a newly quantized target on the next Smother tick.
+    goalkeeper_blackboard.set(
+        decision::Blackboard::kKeyTacticalTarget,
+        decision::TacticalTarget{
+            decision::TacticalDuty::GoalkeeperHold,
+            {-26.7, 0.0},
+            std::array<double, 2>{
+                goalkeeper_snapshot.ball.position_m[0],
+                goalkeeper_snapshot.ball.position_m[1]},
+            0,
+            0.9});
     const auto goalkeeper_committed = goalkeeper_behavior.make_command(
         goalkeeper_snapshot, goalkeeper_blackboard, true);
     if (std::holds_alternative<decision::KickCommand>(goalkeeper_committed) ||
@@ -734,6 +1055,46 @@ int main() {
     if (goalkeeper_clear == nullptr ||
         goalkeeper_clear->mode != decision::KickMode::Clear) {
         std::cerr << "goalkeeper smother did not release a contracted clear\n";
+        return 1;
+    }
+
+    // Match regression: the keeper was only 10 cm behind the ball, 41 cm to
+    // its side and facing about 77 degrees away from the clearing lane. The
+    // old code committed anyway, alternated relocate/turn for 3.5 s on a stale
+    // near-contact track and never touched the ball. Preserve the smother walk
+    // instead of advertising an unreachable Clear lifecycle.
+    world::WorldSnapshot misaligned_goalkeeper = make_open_pass_snapshot();
+    misaligned_goalkeeper.player_number = 1;
+    misaligned_goalkeeper.ball.visible = false;
+    misaligned_goalkeeper.ball.position_age_s = 0.06;
+    misaligned_goalkeeper.ball.near_contact_track = true;
+    misaligned_goalkeeper.ball.position_m = {-24.2942, 2.28349, 0.11};
+    misaligned_goalkeeper.self.position_m = {-24.398, 1.869, 0.8};
+    const double misaligned_goalkeeper_half_yaw_rad =
+        math::deg_to_rad(74.4584 * 0.5);
+    misaligned_goalkeeper.self.orientation_wxyz = {
+        std::cos(misaligned_goalkeeper_half_yaw_rad),
+        0.0,
+        0.0,
+        std::sin(misaligned_goalkeeper_half_yaw_rad)};
+    decision::GKBehavior misaligned_goalkeeper_behavior;
+    decision::Blackboard misaligned_goalkeeper_blackboard;
+    misaligned_goalkeeper_blackboard.set(
+        decision::Blackboard::kKeyTacticalTarget,
+        decision::TacticalTarget{
+            decision::TacticalDuty::GoalkeeperSmother,
+            {-24.2942, 2.28349},
+            std::array<double, 2>{-24.2942, 2.28349},
+            0,
+            0.9});
+    const auto misaligned_goalkeeper_command =
+        misaligned_goalkeeper_behavior.make_command(
+            misaligned_goalkeeper, misaligned_goalkeeper_blackboard, true);
+    if (!std::holds_alternative<decision::WalkCommand>(
+            misaligned_goalkeeper_command) ||
+        misaligned_goalkeeper_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "goalkeeper committed an unreachable strong clear\n";
         return 1;
     }
 

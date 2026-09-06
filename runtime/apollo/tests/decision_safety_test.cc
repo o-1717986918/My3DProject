@@ -264,6 +264,10 @@ int main() {
         std::sin(goal_kick_direction_rad * 0.5)};
     goal_kick.teammates[0].position_m = goal_kick.self.position_m;
     goal_kick.server_time += 0.10;
+    // A stationary restart ball is commonly hidden by the taker's torso.  The
+    // frozen, initially observed anchor remains actionable while the server is
+    // still in OurKick; losing live vision must not strand the restart.
+    goal_kick.ball.position_valid = false;
     const auto aligned_hold = goal_kick_tree.evaluate(
         goal_kick, goal_kick_blackboard, goal_kick_roles, true, false);
     if (std::holds_alternative<decision::KickCommand>(aligned_hold)) {

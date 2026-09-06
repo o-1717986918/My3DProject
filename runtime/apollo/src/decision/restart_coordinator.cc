@@ -286,12 +286,23 @@ void RestartCoordinator::begin_restart(const RestartCoordinatorInput& input) {
 void RestartCoordinator::enter_fallback(
     RestartFallbackReason reason,
     const RestartCoordinatorInput& input) {
-    if (!plan_.has_value() || fallback_used_) {
-        phase_ = RestartPhase::Complete;
+    if (!plan_.has_value()) {
+        phase_ = RestartPhase::Idle;
+        return;
+    }
+    fallback_reason_ = reason;
+    if (fallback_used_) {
+        // A failed safety attempt is not evidence that the ball entered play.
+        // Retain the same frozen revision and retry alignment/contact instead
+        // of manufacturing a Complete state that strands the server in OurKick.
+        phase_ = plan_->executable_coordination()
+            ? RestartPhase::Aligning
+            : RestartPhase::Positioning;
+        execution_completed_at_s_ = 0.0;
+        release_confirmation_count_ = 0U;
         return;
     }
     fallback_used_ = true;
-    fallback_reason_ = reason;
     ++plan_->revision;
     if (plan_->revision == 0U) plan_->revision = 1U;
     plan_->fallback = true;
@@ -313,7 +324,9 @@ void RestartCoordinator::enter_fallback(
     plan_->receiver_target_m = receiver_target(
         plan_->ball_anchor_m, plan_->contact_direction_deg,
         parameters_.receiver_standoff_m);
-    phase_ = RestartPhase::Aligning;
+    phase_ = plan_->executable_coordination()
+        ? RestartPhase::Aligning
+        : RestartPhase::Positioning;
     execution_completed_at_s_ = 0.0;
     release_confirmation_count_ = 0U;
 }
@@ -428,11 +441,17 @@ RestartCoordinationDecision RestartCoordinator::update(
     }
 
     const double elapsed = std::max(0.0, input.server_time_s - restart_started_at_s_);
-    if (phase_ != RestartPhase::Complete && elapsed >= parameters_.hard_deadline_s) {
-        phase_ = RestartPhase::Complete;
+    if (phase_ != RestartPhase::Complete &&
+        elapsed >= parameters_.hard_deadline_s &&
+        !hard_deadline_reached_) {
         hard_deadline_reached_ = true;
-        last_observed_mode_ = input.play_mode;
-        return decision_for(input.self_player_number);
+        // The deadline forces the one safety revision, but it cannot prove a
+        // physical release.  If that safety revision is already running, let
+        // it finish; otherwise return to its frozen alignment plan.  Completion
+        // remains evidence-driven through observed release or server mode.
+        if (!fallback_used_ || phase_ != RestartPhase::Executing) {
+            enter_fallback(RestartFallbackReason::HardDeadline, input);
+        }
     }
 
     const bool before_execution = phase_ == RestartPhase::Positioning ||
@@ -595,6 +614,7 @@ std::string_view to_string(RestartFallbackReason reason) {
     switch (reason) {
         case RestartFallbackReason::None: return "None";
         case RestartFallbackReason::SoftDeadline: return "SoftDeadline";
+        case RestartFallbackReason::HardDeadline: return "HardDeadline";
         case RestartFallbackReason::ExecutionRejected: return "ExecutionRejected";
         case RestartFallbackReason::ExecutionTimedOut: return "ExecutionTimedOut";
         case RestartFallbackReason::ReleaseNotObserved: return "ReleaseNotObserved";

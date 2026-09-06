@@ -52,10 +52,13 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
         "duty": Counter[str](),
         "risk_mode": Counter[str](),
         "execution": Counter[str](),
+        "restart_phase": Counter[str](),
         "phase": Counter[str](),
         "possession": Counter[str](),
     }
+    strategy_motion = Counter[str]()
     setup_phases = Counter[str]()
+    setup_phases_by_mode: dict[str, Counter[str]] = {}
     execution_event_motion = Counter[str]()
     execution_event_status = Counter[str]()
     execution_event_kick_mode = Counter[str]()
@@ -76,6 +79,10 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                 for name in status_fields:
                     if value := values.get(name):
                         status_fields[name][value] += 1
+                if (strategy := values.get("strategy")) and (
+                    motion := values.get("motion")
+                ):
+                    strategy_motion[f"{strategy}->{motion}"] += 1
                 if values.get("motion") == "GetUpRL":
                     player_get_up_samples[player] += 1
                     if previous_status_motion != "GetUpRL":
@@ -101,6 +108,8 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                 values = _fields(line)
                 if phase := values.get("phase"):
                     setup_phases[phase] += 1
+                    mode = values.get("mode", "Unknown")
+                    setup_phases_by_mode.setdefault(mode, Counter())[phase] += 1
             elif line.startswith("MY3D_EXECUTION_EVENT"):
                 values = _fields(line)
                 if motion := values.get("motion"):
@@ -137,7 +146,7 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
         ),
     }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_dir": str(run_dir.resolve()),
         "score": score,
         "server": {
@@ -152,11 +161,16 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                 for name, counter in status_fields.items()
             },
             "kick_setup_phase": dict(setup_phases.most_common()),
+            "kick_setup_phase_by_mode": {
+                mode: dict(counter.most_common())
+                for mode, counter in sorted(setup_phases_by_mode.items())
+            },
             "execution_events": {
                 "motion": dict(execution_event_motion.most_common()),
                 "status": dict(execution_event_status.most_common()),
                 "kick_mode": dict(execution_event_kick_mode.most_common()),
             },
+            "strategy_motion": dict(strategy_motion.most_common()),
             "visible_ball_progress": ball_progress,
             "exact_kick_samples": exact_kick_samples,
             "fallback_kick_samples": fallback_kick_samples,

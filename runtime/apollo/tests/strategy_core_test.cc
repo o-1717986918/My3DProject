@@ -4,6 +4,7 @@
 #include "src/strategy/action_capability.h"
 #include "src/strategy/ball_trajectory_model.h"
 #include "src/strategy/pass_candidate_generator.h"
+#include "src/math/math_utils.h"
 
 #include <cmath>
 #include <iostream>
@@ -101,6 +102,35 @@ int main() {
         return 1;
     }
 
+    // Natural possession traces repeatedly entered an exact dribble with a
+    // 70--80 degree body turn, then spent several seconds rotating over the
+    // ball. A forward-progressing intermediate touch must cap that first turn
+    // while retaining positive x progress toward the opponent goal.
+    world::WorldSnapshot angled_dribble = no_pass;
+    constexpr double kMinus80HalfRadians = -0.6981317007977318;
+    angled_dribble.self.orientation_wxyz = {
+        std::cos(kMinus80HalfRadians), 0.0, 0.0,
+        std::sin(kMinus80HalfRadians)};
+    const auto angled_dribble_plan = planner.plan(
+        angled_dribble, enabled_capabilities, false);
+    if (!angled_dribble_plan.selected.has_value() ||
+        angled_dribble_plan.selected->category !=
+            strategy::ActionCategory::Dribble) {
+        std::cerr << "angled possession lost its dribble action\n";
+        return 1;
+    }
+    const auto angled_direction = math::vec2_sub(
+        angled_dribble_plan.selected->target_point_m,
+        std::array<double, 2>{
+            angled_dribble.ball.position_m[0],
+            angled_dribble.ball.position_m[1]});
+    const double angled_heading_deg = math::vector_angle_deg(angled_direction);
+    if (std::abs(math::normalize_deg(angled_heading_deg + 80.0)) > 30.0 + 1.0e-9 ||
+        angled_direction[0] <= 0.0) {
+        std::cerr << "dribble did not choose a bounded advancing heading\n";
+        return 1;
+    }
+
     world::WorldSnapshot shot = no_pass;
     shot.ball.position_m = {24.0, 0.0, 0.11};
     const auto shot_plan = planner.plan(
@@ -108,6 +138,26 @@ int main() {
     if (!shot_plan.selected.has_value() ||
         shot_plan.selected->category != strategy::ActionCategory::Shoot) {
         std::cerr << "unified planner did not prefer an in-envelope shot\n";
+        return 1;
+    }
+
+    // Near the lower edge of the goal area, a safe near-side aim removes more
+    // than ten degrees of needless setup rotation while staying one metre
+    // inside the post and inside the calibrated 3.5--4.5 m shot distance.
+    world::WorldSnapshot lateral_shot = no_pass;
+    constexpr double kYaw10HalfRadians = 0.0872664625997165;
+    lateral_shot.self.orientation_wxyz = {
+        std::cos(kYaw10HalfRadians), 0.0, 0.0,
+        std::sin(kYaw10HalfRadians)};
+    lateral_shot.ball.position_m = {24.3, -2.65, 0.11};
+    const auto lateral_shot_plan = planner.plan(
+        lateral_shot, enabled_capabilities, false);
+    if (!lateral_shot_plan.selected.has_value() ||
+        lateral_shot_plan.selected->category !=
+            strategy::ActionCategory::Shoot ||
+        std::abs(lateral_shot_plan.selected->target_point_m[1] + 1.0) >
+            1.0e-9) {
+        std::cerr << "lateral shot did not choose the cheaper safe goal aim\n";
         return 1;
     }
 

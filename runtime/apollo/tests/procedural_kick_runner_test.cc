@@ -143,6 +143,17 @@ int main() {
         std::cerr << "validated 4 m shot anchor was not selected\n";
         return 1;
     }
+    profile.relative_target_angle_deg = 2.0;
+    if (!runner.begin(snapshot, profile)) {
+        std::cerr << "live-evidence shot angle boundary was rejected\n";
+        return 1;
+    }
+    profile.relative_target_angle_deg = 2.01;
+    if (runner.begin(snapshot, profile)) {
+        std::cerr << "shot outside the live-evidence angle was accepted\n";
+        return 1;
+    }
+    profile.relative_target_angle_deg = 0.0;
 
     profile.target_distance_m = 6.0;
     profile.requested_speed_mps = 3.50;

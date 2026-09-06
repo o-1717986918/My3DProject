@@ -5,10 +5,14 @@
 #include "src/decision/kick_contract.h"
 #include "src/math/math_utils.h"
 #include "src/server/server_constants.h"
+#include "src/world/frame_normalizer.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <optional>
 
 namespace strategy {
 
@@ -62,6 +66,9 @@ std::vector<CooperativeAction> local_ball_actions(
     const Position2 goal{server_constants::kFieldHalfLengthM, 0.0};
     const Position2 goal_direction = math::vec2_unit_or(
         math::vec2_sub(goal, ball), {1.0, 0.0});
+    const double self_yaw_deg =
+        world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+            snapshot.self.orientation_wxyz);
 
     actions.push_back(make_local_action(
         snapshot,
@@ -74,26 +81,79 @@ std::vector<CooperativeAction> local_ball_actions(
         ball,
         1.0));
 
+    // An exact touch aimed straight at goal can demand a 70--130 degree turn
+    // while the robot stands over the ball. Natural-match traces showed that
+    // such commitments consumed several seconds without one release. When a
+    // forward-progressing intermediate heading exists, ask for at most one
+    // 30 degree turn and let subsequent touches bend the carry toward goal.
+    // If the body points too far away for that intermediate touch to advance
+    // the ball, retain the direct-goal proposal; the decision-layer admission
+    // guard will leave it to the continuous pressure controller instead.
     constexpr double kDribbleTouchDistanceM = 0.55;
+    constexpr double kDribbleMaximumSetupTurnDeg = 30.0;
+    constexpr double kDribbleMaximumResidualGoalErrorDeg = 75.0;
+    const double goal_heading_deg = math::vector_angle_deg(goal_direction);
+    const double goal_heading_error_deg = math::normalize_deg(
+        goal_heading_deg - self_yaw_deg);
+    double dribble_heading_deg = goal_heading_deg;
+    const double bounded_heading_deg = self_yaw_deg + std::clamp(
+        goal_heading_error_deg,
+        -kDribbleMaximumSetupTurnDeg,
+        kDribbleMaximumSetupTurnDeg);
+    if (std::abs(math::normalize_deg(
+            goal_heading_deg - bounded_heading_deg)) <=
+        kDribbleMaximumResidualGoalErrorDeg) {
+        dribble_heading_deg = bounded_heading_deg;
+    }
+    const double dribble_heading_rad = math::deg_to_rad(dribble_heading_deg);
+    const Position2 dribble_direction{
+        std::cos(dribble_heading_rad), std::sin(dribble_heading_rad)};
     actions.push_back(make_local_action(
         snapshot,
         ActionCategory::Dribble,
         math::vec2_add(
             ball,
             math::vec2_scale(
-                goal_direction,
+                dribble_direction,
                 kDribbleTouchDistanceM)),
         decision::kick_contract::kProceduralDribbleRequestedSpeedMps));
 
-    const double goal_distance_m = math::planar_dist(ball, goal);
-    if (goal_distance_m >=
-            decision::kick_contract::kProceduralShotMinimumTargetDistanceM &&
-        goal_distance_m <=
-            decision::kick_contract::kProceduralShotMaximumTargetDistanceM) {
+    // A centre-only target made a near-post opportunity need an unnecessary
+    // 30--40 degree setup turn. Sample three points safely inside the 1.83 m
+    // half-width and select the executable one that costs the current body the
+    // least rotation. A small centre bias keeps the most tolerant aim whenever
+    // its turn cost is already comparable.
+    constexpr std::array<double, 3> kSafeGoalAimYM{{-1.0, 0.0, 1.0}};
+    std::optional<Position2> shot_target;
+    double best_shot_setup_cost = std::numeric_limits<double>::infinity();
+    for (const double target_y_m : kSafeGoalAimYM) {
+        const Position2 candidate{server_constants::kFieldHalfLengthM, target_y_m};
+        const double distance_m = math::planar_dist(ball, candidate);
+        if (distance_m <
+                decision::kick_contract::kProceduralShotMinimumTargetDistanceM ||
+            distance_m >
+                decision::kick_contract::kProceduralShotMaximumTargetDistanceM) {
+            continue;
+        }
+        const Position2 direction = math::vec2_sub(candidate, ball);
+        const double heading_error_deg = std::abs(math::normalize_deg(
+            math::vector_angle_deg(direction) - self_yaw_deg));
+        constexpr double kGoalCentreBiasDegPerM = 4.0;
+        const double setup_cost = heading_error_deg +
+            kGoalCentreBiasDegPerM * std::abs(target_y_m);
+        if (setup_cost < best_shot_setup_cost - 1.0e-9 ||
+            (std::abs(setup_cost - best_shot_setup_cost) <= 1.0e-9 &&
+             (!shot_target.has_value() ||
+              std::abs(target_y_m) < std::abs((*shot_target)[1])))) {
+            best_shot_setup_cost = setup_cost;
+            shot_target = candidate;
+        }
+    }
+    if (shot_target.has_value()) {
         actions.push_back(make_local_action(
             snapshot,
             ActionCategory::Shoot,
-            goal,
+            *shot_target,
             decision::kick_contract::kProceduralShotRequestedSpeedMps));
     }
 

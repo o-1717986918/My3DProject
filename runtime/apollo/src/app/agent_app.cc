@@ -182,6 +182,7 @@ std::string AgentApp::process_perception_message(const std::string& message) {
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - decision_started_at).count());
     pending_execution_feedback_.reset();
+    const auto* walk_command = std::get_if<decision::WalkCommand>(&command);
     const auto* kick_command = std::get_if<decision::KickCommand>(&command);
     const auto* selected_action =
         decision_manager_.selected_cooperative_action();
@@ -387,6 +388,22 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << " y=" << snapshot.self.position_m[1]
             << " z=" << snapshot.self.position_m[2]
             << " self_yaw=" << self_yaw_deg
+            << " walk_target_x=" << (walk_command != nullptr
+                    ? walk_command->target_2d_m[0]
+                    : 0.0)
+            << " walk_target_y=" << (walk_command != nullptr
+                    ? walk_command->target_2d_m[1]
+                    : 0.0)
+            << " walk_target_absolute=" << (walk_command != nullptr &&
+                    walk_command->target_absolute ? 1 : 0)
+            << " walk_orientation=" << (walk_command != nullptr &&
+                    walk_command->orientation_deg.has_value()
+                    ? *walk_command->orientation_deg
+                    : 0.0)
+            << " walk_orientation_set=" << (walk_command != nullptr &&
+                    walk_command->orientation_deg.has_value() ? 1 : 0)
+            << " walk_orientation_absolute=" << (walk_command != nullptr &&
+                    walk_command->orientation_absolute ? 1 : 0)
             << " kick_speed=" << (kick_command != nullptr
                     ? kick_command->requested_ball_speed_mps
                     : 0.0)
@@ -472,6 +489,16 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                     : strategy_plan != nullptr
                     ? strategy::to_string(strategy_plan->tactical_state.possession)
                     : std::string_view{"Unknown"})
+            << " teammate_ball_eta=" << (team_plan != nullptr
+                    ? team_plan->tactical_state.nearest_teammate_ball_time_s
+                    : strategy_plan != nullptr
+                    ? strategy_plan->tactical_state.nearest_teammate_ball_time_s
+                    : 0.0)
+            << " opponent_ball_eta=" << (team_plan != nullptr
+                    ? team_plan->tactical_state.nearest_opponent_ball_time_s
+                    : strategy_plan != nullptr
+                    ? strategy_plan->tactical_state.nearest_opponent_ball_time_s
+                    : 0.0)
             << " ball_owner=" << (team_plan != nullptr
                     ? team_plan->tactical_state.ball_owner_player_number
                     : strategy_plan != nullptr

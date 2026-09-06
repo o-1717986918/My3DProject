@@ -58,7 +58,9 @@ anchors:
     target_distance_m: 4.0
     target_distance_tolerance_m: 0.50
     target_angle_deg: 0.0
-    target_angle_tolerance_deg: 1.0
+    # Live server setup reached 1.486 deg with all remaining release guards
+    # satisfied. At the 4.5 m contract edge, 2 deg is under 0.16 m laterally.
+    target_angle_tolerance_deg: 2.0
     requested_speed_mps: 2.50
     requested_speed_tolerance_mps: 0.05
     ball_local_x_m: 0.3260

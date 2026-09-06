@@ -278,6 +278,52 @@ Walk. The result is therefore a repeatable territory/defensive recovery and a
 clear final-third/action-training target, not a claim that the team is already
 better than base.
 
+### 4.10 Hold execution, goalkeeper clear admission and first win
+
+`apollo-vs-base-restart-control-s20261242-v12` produced an attributable
+`FallbackKickForward/ForwardContact` from the restart taker at cycle 253 and
+then entered `TakerLockout`. This closes one restart execution loop, but its
+failure in the immediately preceding run shows that setup remains gait-phase
+sensitive.
+
+The natural comparison `apollo-vs-base-restartfix-s20261242-v13` lost `0:1`
+and exposed two code-level stalls. `ActionPlanner`'s Hold reference candidate
+was executed as Neutral by the only pressure player, even when an opponent
+could reach the ball in 0.25 seconds. Hold remains visible in telemetry, but
+execution now falls through to continuous pressure. The goalkeeper also spent
+more than three seconds alternating side relocation and precision turning
+around a cached ball; strong Clear setup is now admitted only from a fresh
+track and a coarse behind-ball/heading corridor.
+
+`apollo-vs-base-nohold-s20261242-v14` drew `0:0`. Twelve of thirteen Hold
+samples executed as Walk rather than Neutral, and independent GetUp episodes
+fell from 20 to nine. Territory was poor (1.69% visible opponent-half cycles),
+so this confirms the motor-side Hold correction but not superiority.
+
+`apollo-vs-base-dribblerelease-s20261242-v15` won `1:0`, with zero current-team
+illegal-defense penalties and 33.81% visible opponent-half cycles. This is the
+first retained win against pristine Apollo, not a stable advantage: the three
+latest natural comparisons are one loss, one draw and one win. The run still
+emitted no exact procedural kick. Its `Dribble->Neutral` samples show that most
+attempts failed the shared dynamic transition contract rather than only the
+final pose timer. Dribble-only pose confirmation is now one 20 ms decision
+cycle; static Shot/Clear keeps 40 ms and generic fallback contact keeps 250 ms.
+
+The winning sequence also exposed a final-third geometry error. With the ball
+near `(27.08, 0.67)`, centre-only pressure aim asked a forward-facing robot for
+an unnecessary turn of roughly 58 degrees. Inside the final six metres,
+continuous pressure now chooses among safe `y=-1,0,+1 m` goal-mouth points by
+minimum current-body turn. Outside that region, goal-centre aim remains the
+default. This change is regression-tested; a natural comparison must still
+establish whether it improves conversion.
+
+`apollo-vs-base-goalmouth-s20261242-v16` drew `0:0`. The ball reached only
+`x=5.41 m`, so the final-six-metre aim branch was not exercised. Current again
+had zero illegal-defense penalties versus one for pristine Apollo, but logged
+21 independent GetUp episodes and no exact kick. Across v13--v16 the honest
+score record is therefore one loss, two draws and one win; action stability,
+not another unmeasured tactical weight, remains the leading performance gap.
+
 ## 5. What is actually better, and what is not yet proven
 
 The following improvements are supported by code invariants and tests rather
@@ -292,11 +338,12 @@ humanoid reach-time constants, and the benefit of frequent role/duty changes.
 Through-space passing remains deliberately absent because the runtime does not
 yet expose a trustworthy teammate-velocity or receiver-run contract.
 
-The present loss is primarily evidence against the old action-release contract,
-not evidence that formation, marking, or pass geometry is inferior.  Once
-contact is available, the most likely remaining tactical failure modes are
-overvalued passes, excessive target churn, and decisions whose estimated reach
-margin does not match the deployed locomotion speed.
+The mixed score record is primarily evidence that the action-release contract
+and locomotion stability still dominate outcome variance, not proof that
+formation, marking, or pass geometry is inferior. Once contact is available,
+the most likely remaining tactical failure modes are overvalued passes,
+excessive target churn, and decisions whose estimated reach margin does not
+match the deployed locomotion speed.
 
 ## 6. Controlled comparison protocol
 
@@ -330,24 +377,27 @@ Use `APOLLO_LEARNED_KICK_MODE=active` only for the explicit model ablation.
 
 For each retained run, report score, legal penalties, independent falls,
 time-to-ball/role target, physical contacts, ball progress, pass terminal
-outcomes, shots, and possession chains.  The final judgment should use matched
-seeds and side swaps.  No single score, training reward, or status-sample count
-is sufficient by itself.
+outcomes, shots, and possession chains. The current web server exposes no seed
+argument, so full matches must use repeated independent runs and side swaps;
+matched seeds remain applicable to deterministic single-action evaluation.
+No single score, training reward, or status-sample count is sufficient by
+itself.
 
 ## 7. Immediate development order
 
-1. Preserve the separated pressure-push path and audit final-third sequences:
-   the next improvement must turn repeated opponent-half territory into an
-   executable shot or controlled second contact without reintroducing settle
-   starvation.
-2. Build a phase-conditioned BC/DAgger striker student from successful complete
+1. Preserve the separated pressure-push path and evaluate the low-turn
+   goal-mouth aim over repeated natural runs; one `1:0` result is insufficient.
+2. Make procedural dribble start from a real walking gait phase. The next
+   data task is phase-conditioned approach-to-contact BC/DAgger, not a wider
+   static pose gate.
+3. Build a phase-conditioned BC/DAgger striker student from successful complete
    approach-release trajectories; do not repeat unsupervised residual PPO.
-3. Train and promote stable long-forward, rapid-turn, and later lateral skills
+4. Train and promote stable long-forward, rapid-turn, and later lateral skills
    with explicit fall, drift, speed and transition tests; ordinary Walk is also
    implicated in current falls and must remain in the audit.
-4. Keep the 2/3.5/5 m deterministic bank and original forward contact as
+5. Keep the 2/3.5/5 m deterministic bank and original forward contact as
    explicit fallbacks while collecting server outcome traces.
-5. Calibrate reach time and action utility from deployed FastWalk/turn logs,
+6. Calibrate reach time and action utility from deployed FastWalk/turn logs,
    then repeat tactics-on/tactics-off and side-swapped comparisons.
-6. Decide superiority only from repeated full matches; retain every loss and
+7. Decide superiority only from repeated full matches; retain every loss and
    draw instead of selecting favourable scores.

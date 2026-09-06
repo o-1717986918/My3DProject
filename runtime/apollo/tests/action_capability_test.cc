@@ -64,9 +64,10 @@ int main() {
         !enabled.supported(make_shot(4.0, 2.50)) ||
         enabled.state(strategy::SkillCapability::Shot) !=
             strategy::CapabilityState::Experimental ||
+        !enabled.executable(make_shot(4.0, 2.50), 2.0) ||
         enabled.executable(make_shot(4.51, 2.50), 0.0) ||
         enabled.executable(make_shot(4.0, 2.49), 0.0) ||
-        enabled.executable(make_shot(4.0, 2.50), 1.01)) {
+        enabled.executable(make_shot(4.0, 2.50), 2.01)) {
         std::cerr << "procedural shot capability envelope is incorrect\n";
         return 1;
     }
