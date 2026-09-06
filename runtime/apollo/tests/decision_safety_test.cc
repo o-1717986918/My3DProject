@@ -404,6 +404,61 @@ int main() {
         return 1;
     }
 
+    // A natural 7v7 goal kick reached this safety-plan pose and then remained
+    // stationary for the complete restart window: the coarse relocation path
+    // inherited the 0.25 m/s final-precision cap, which is not an observable
+    // locomotion command for the deployed stable walk actor.  Coarse lateral
+    // correction is still safely behind the ball, so it must use the separate
+    // forward-moving command while preserving the setup-point heading.
+    world::WorldSnapshot stalled_goal_kick = full_team_snapshot();
+    stalled_goal_kick.player_number = 1;
+    stalled_goal_kick.server_time = 79.0;
+    stalled_goal_kick.play_mode = world::PlayMode::OurGoalKick;
+    stalled_goal_kick.play_mode_group = world::PlayModeGroup::OurKick;
+    stalled_goal_kick.ball.visible = false;
+    stalled_goal_kick.ball.position_valid = true;
+    stalled_goal_kick.ball.position_age_s = 0.02;
+    stalled_goal_kick.ball.position_m = {-25.5048, 0.0039, 0.11};
+    stalled_goal_kick.self.position_m = {-26.379, 0.503, 0.657};
+    const double stalled_yaw_rad = math::deg_to_rad(-41.3262);
+    stalled_goal_kick.self.orientation_wxyz = {
+        std::cos(stalled_yaw_rad * 0.5), 0.0, 0.0,
+        std::sin(stalled_yaw_rad * 0.5)};
+    stalled_goal_kick.teammates[0].position_m =
+        stalled_goal_kick.self.position_m;
+    decision::RestartPlan stalled_plan;
+    stalled_plan.mode = world::PlayMode::OurGoalKick;
+    stalled_plan.epoch = 2U;
+    stalled_plan.revision = 3U;
+    stalled_plan.variant = decision::RestartVariant::Safety;
+    stalled_plan.taker_player_number = 1;
+    stalled_plan.ball_anchor_m = {-25.5512, 0.0};
+    stalled_plan.contact_target_m = {-21.5512, 0.0};
+    stalled_plan.contact_direction_deg = 0.0;
+    stalled_plan.ball_anchor_valid = true;
+    stalled_plan.fallback = true;
+    decision::RestartCoordinationDecision stalled_restart;
+    stalled_restart.phase = decision::RestartPhase::Aligning;
+    stalled_restart.plan = stalled_plan;
+    stalled_restart.self_is_taker = true;
+    stalled_restart.should_align = true;
+    decision::Blackboard stalled_blackboard;
+    stalled_blackboard.set(
+        decision::Blackboard::kKeyRestartDecision, stalled_restart);
+    decision::GKBehavior stalled_goalkeeper;
+    const auto stalled_command = stalled_goalkeeper.make_command(
+        stalled_goal_kick, stalled_blackboard, true);
+    const auto* stalled_walk =
+        std::get_if<decision::WalkCommand>(&stalled_command);
+    if (stalled_walk == nullptr || stalled_walk->target_absolute ||
+        stalled_walk->target_2d_m[0] < 0.45 ||
+        std::abs(stalled_walk->target_2d_m[1]) > 1.0e-9 ||
+        !stalled_walk->orientation_deg.has_value() ||
+        *stalled_walk->orientation_deg > -35.0) {
+        std::cerr << "goal-kick coarse relocation retained a stationary crawl\n";
+        return 1;
+    }
+
     world::WorldSnapshot goal_kick = full_team_snapshot();
     goal_kick.player_number = 1;
     goal_kick.play_mode = world::PlayMode::OurGoalKick;

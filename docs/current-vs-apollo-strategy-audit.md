@@ -809,6 +809,26 @@ acts frequently but loses control, the correct successor is the documented
 phase-conditioned transition training—not restoration of an action-starving
 one-degree release gate.
 
+### 6.2 Natural goal-kick coarse-relocation failure (2026-09-06)
+
+The first natural own goal kick after referee-placement reacquisition exposed
+a different controller failure.  The coordinator correctly froze goalkeeper 1
+as taker, reacquired the official ball at about `(-25.5, 0)`, and entered its
+safety-plan `Aligning` phase.  The keeper then remained near
+`(-26.38, 0.50)` for roughly 12 seconds with the ball about `0.99 m` away.
+Telemetry showed `kick_mode=None` and the same local `(0.25, 0)` Walk request
+throughout: no contact action had yet been released.
+
+That command came from coarse lateral relocation but inherited the final
+restart-precision speed cap.  On the deployed stable walk actor it became a
+low-speed hold rather than observable translation.  Coarse relocation now has
+its own `0.45--0.50 m/s` forward command while it faces the canonical setup
+waypoint; the existing `0.25/0.20 m/s` caps remain in force for final
+longitudinal/reverse correction near the release slot.  A regression preserves
+the exact live pose and requires the stronger local forward command.  This is
+a code-level correction; a fresh natural goal kick remains required to confirm
+physical release and ball travel.
+
 ## 7. Immediate development order
 
 1. Complete the motion-owned ball path: direct pressure must reach and cross

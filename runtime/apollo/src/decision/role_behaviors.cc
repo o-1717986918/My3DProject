@@ -79,6 +79,14 @@ constexpr double kDribbleMaxLateralSetupSpeedMps = 0.35;
 // 20 cm after braking and starts play through an accidental walk contact.
 constexpr double kRestartMaxPrecisionForwardSpeedMps = 0.25;
 constexpr double kRestartMaxPrecisionReverseSpeedMps = 0.20;
+// Coarse relocation is still outside the contact corridor and must not inherit
+// the final-setup crawl limit.  The deployed stable walk actor can hold a
+// 0.25 command in its low-speed gait instead of translating: a natural goal
+// kick then remained 0.99 m from the ball for the full restart window.  Keep
+// the slow limit for final longitudinal/lateral correction, but give the
+// turn-then-forward relocation a command that is observably locomoting.
+constexpr double kRestartCoarseRelocationMinimumSpeedMps = 0.45;
+constexpr double kRestartCoarseRelocationMaximumSpeedMps = 0.50;
 // Do not ask the deployed forward-dominant walk policy to strafe across a
 // large precision error. First face and walk toward the canonical setup point;
 // only the final bounded correction retains fixed kick orientation. This is
@@ -1227,13 +1235,17 @@ HighLevelCommand make_dribble_command(
                 // until lateral error enters the independent fine controller.
                 const double relocation_distance_m = math::planar_dist(
                     context.self, canonical_setup_target);
+                const double minimum_relocation_speed_mps =
+                    restart_plan != nullptr
+                        ? kRestartCoarseRelocationMinimumSpeedMps
+                        : 0.12;
                 const double maximum_relocation_speed_mps =
                     restart_plan != nullptr
-                        ? kRestartMaxPrecisionForwardSpeedMps
+                        ? kRestartCoarseRelocationMaximumSpeedMps
                         : kDribbleMaxForwardSetupSpeedMps;
                 const double relocation_speed_mps = std::clamp(
                     2.5 * relocation_distance_m,
-                    0.12,
+                    minimum_relocation_speed_mps,
                     maximum_relocation_speed_mps);
                 WalkCommand relocation_command;
                 relocation_command.target_2d_m = {
