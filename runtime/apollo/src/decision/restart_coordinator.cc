@@ -80,13 +80,20 @@ bool valid_parameters(const RestartCoordinator::Parameters& parameters) {
         std::isfinite(parameters.release_distance_m) &&
         std::isfinite(parameters.release_speed_mps) &&
         std::isfinite(parameters.receiver_standoff_m) &&
+        std::isfinite(parameters.anchor_reacquire_distance_m) &&
+        std::isfinite(parameters.anchor_reacquire_maximum_speed_mps) &&
+        std::isfinite(parameters.anchor_reacquire_candidate_tolerance_m) &&
         parameters.soft_deadline_s > 0.0 &&
         parameters.hard_deadline_s > parameters.soft_deadline_s &&
         parameters.release_verification_timeout_s > 0.0 &&
         parameters.release_distance_m > 0.0 &&
         parameters.release_speed_mps >= 0.0 &&
         parameters.release_confirmation_samples > 0U &&
-        parameters.receiver_standoff_m > 0.0;
+        parameters.receiver_standoff_m > 0.0 &&
+        parameters.anchor_reacquire_distance_m > 0.0 &&
+        parameters.anchor_reacquire_maximum_speed_mps >= 0.0 &&
+        parameters.anchor_reacquire_candidate_tolerance_m > 0.0 &&
+        parameters.anchor_reacquire_confirmation_samples > 0U;
 }
 
 bool has_restart_alternate(world::PlayMode mode) {
@@ -221,6 +228,9 @@ void RestartCoordinator::reset() {
     execution_authorized_ever_ = false;
     taker_lockout_released_ = false;
     hard_deadline_reached_ = false;
+    anchor_reacquire_candidate_m_ = {0.0, 0.0};
+    anchor_reacquire_confirmation_count_ = 0U;
+    anchor_reacquire_candidate_valid_ = false;
 }
 
 void RestartCoordinator::begin_restart(const RestartCoordinatorInput& input) {
@@ -281,6 +291,9 @@ void RestartCoordinator::begin_restart(const RestartCoordinatorInput& input) {
     execution_authorized_ever_ = false;
     taker_lockout_released_ = false;
     hard_deadline_reached_ = false;
+    anchor_reacquire_candidate_m_ = {0.0, 0.0};
+    anchor_reacquire_confirmation_count_ = 0U;
+    anchor_reacquire_candidate_valid_ = false;
 }
 
 void RestartCoordinator::enter_fallback(
@@ -355,6 +368,75 @@ bool RestartCoordinator::observe_release(const RestartCoordinatorInput& input) {
     ++release_confirmation_count_;
     return release_confirmation_count_ >=
         parameters_.release_confirmation_samples;
+}
+
+bool RestartCoordinator::reanchor_before_execution(
+    const RestartCoordinatorInput& input) {
+    const bool before_execution = phase_ == RestartPhase::Positioning ||
+        phase_ == RestartPhase::AwaitReady ||
+        phase_ == RestartPhase::Aligning;
+    if (!plan_.has_value() || !before_execution ||
+        execution_authorized_ever_ || !input.ball_position_valid ||
+        !inside_actual_field(input.ball_position_m)) {
+        anchor_reacquire_confirmation_count_ = 0U;
+        anchor_reacquire_candidate_valid_ = false;
+        return false;
+    }
+
+    const double anchor_displacement_m = math::planar_dist(
+        input.ball_position_m, plan_->ball_anchor_m);
+    const double observed_speed_mps = input.ball_velocity_valid
+        ? math::norm2(input.ball_velocity_mps)
+        : 0.0;
+    if (!std::isfinite(anchor_displacement_m) ||
+        !std::isfinite(observed_speed_mps) ||
+        anchor_displacement_m < parameters_.anchor_reacquire_distance_m ||
+        observed_speed_mps >
+            parameters_.anchor_reacquire_maximum_speed_mps) {
+        anchor_reacquire_confirmation_count_ = 0U;
+        anchor_reacquire_candidate_valid_ = false;
+        return false;
+    }
+
+    if (!anchor_reacquire_candidate_valid_ ||
+        math::planar_dist(
+            input.ball_position_m, anchor_reacquire_candidate_m_) >
+            parameters_.anchor_reacquire_candidate_tolerance_m) {
+        anchor_reacquire_candidate_m_ = input.ball_position_m;
+        anchor_reacquire_confirmation_count_ = 1U;
+        anchor_reacquire_candidate_valid_ = true;
+        return false;
+    }
+
+    ++anchor_reacquire_confirmation_count_;
+    if (anchor_reacquire_confirmation_count_ <
+        parameters_.anchor_reacquire_confirmation_samples) {
+        return false;
+    }
+
+    const Position2 contact_target = restart_contact_target(
+        plan_->mode, input.ball_position_m, plan_->variant);
+    const Position2 contact_delta = math::vec2_sub(
+        contact_target, input.ball_position_m);
+    if (!finite_position(contact_target) ||
+        math::norm2(contact_delta) <= 1.0e-6) {
+        return false;
+    }
+
+    plan_->ball_anchor_m = input.ball_position_m;
+    plan_->contact_target_m = contact_target;
+    plan_->contact_direction_deg = math::vector_angle_deg(contact_delta);
+    plan_->ball_anchor_valid = true;
+    plan_->receiver_target_m = receiver_target(
+        plan_->ball_anchor_m, plan_->contact_direction_deg,
+        parameters_.receiver_standoff_m);
+    ++plan_->revision;
+    if (plan_->revision == 0U) plan_->revision = 1U;
+    phase_ = RestartPhase::Positioning;
+    release_confirmation_count_ = 0U;
+    anchor_reacquire_confirmation_count_ = 0U;
+    anchor_reacquire_candidate_valid_ = false;
+    return true;
 }
 
 RestartCoordinationDecision RestartCoordinator::decision_for(
@@ -436,6 +518,15 @@ RestartCoordinationDecision RestartCoordinator::update(
     }
 
     if (phase_ == RestartPhase::TakerLockout) {
+        last_observed_mode_ = input.play_mode;
+        return decision_for(input.self_player_number);
+    }
+
+    // OurGoalKick can be announced while the ball is still where it crossed
+    // the line; the official placement then arrives without a play-mode or
+    // epoch change.  Rebase the frozen geometry only after confirming that
+    // large, slow relocation and only before any contact was authorized.
+    if (reanchor_before_execution(input)) {
         last_observed_mode_ = input.play_mode;
         return decision_for(input.self_player_number);
     }

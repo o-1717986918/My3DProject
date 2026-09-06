@@ -60,6 +60,36 @@ PlayMode play_mode_from_token(const std::string& play_mode_token, bool is_left_t
     return select_for_side(it->second, is_left_team);
 }
 
+std::string_view to_string(PlayMode play_mode) {
+    switch (play_mode) {
+        case PlayMode::NotInitialized: return "NotInitialized";
+        case PlayMode::BeforeKickOff: return "BeforeKickOff";
+        case PlayMode::OurKickOff: return "OurKickOff";
+        case PlayMode::TheirKickOff: return "TheirKickOff";
+        case PlayMode::PlayOn: return "PlayOn";
+        case PlayMode::OurThrowIn: return "OurThrowIn";
+        case PlayMode::TheirThrowIn: return "TheirThrowIn";
+        case PlayMode::OurCornerKick: return "OurCornerKick";
+        case PlayMode::TheirCornerKick: return "TheirCornerKick";
+        case PlayMode::OurGoalKick: return "OurGoalKick";
+        case PlayMode::TheirGoalKick: return "TheirGoalKick";
+        case PlayMode::OurOffside: return "OurOffside";
+        case PlayMode::TheirOffside: return "TheirOffside";
+        case PlayMode::GameOver: return "GameOver";
+        case PlayMode::OurGoal: return "OurGoal";
+        case PlayMode::TheirGoal: return "TheirGoal";
+        case PlayMode::OurFreeKick: return "OurFreeKick";
+        case PlayMode::TheirFreeKick: return "TheirFreeKick";
+        case PlayMode::OurDirectFreeKick: return "OurDirectFreeKick";
+        case PlayMode::TheirDirectFreeKick: return "TheirDirectFreeKick";
+        case PlayMode::OurPenaltyKick: return "OurPenaltyKick";
+        case PlayMode::TheirPenaltyKick: return "TheirPenaltyKick";
+        case PlayMode::OurPenaltyShoot: return "OurPenaltyShoot";
+        case PlayMode::TheirPenaltyShoot: return "TheirPenaltyShoot";
+    }
+    return "NotInitialized";
+}
+
 PlayModeGroup play_mode_group(PlayMode play_mode, bool is_left_team) {
     switch (play_mode) {
     case PlayMode::PlayOn:

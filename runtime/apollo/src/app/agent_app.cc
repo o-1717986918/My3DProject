@@ -115,7 +115,8 @@ AgentApp::AgentApp(RuntimeConfig config)
       decision_manager_(
           config_.enable_pass_strategy,
           config_.enable_parameterized_kick,
-          config_.enable_team_tactics),
+          config_.enable_team_tactics,
+          config_.enable_learned_kick),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name) {}
 
@@ -125,7 +126,8 @@ AgentApp::AgentApp(RuntimeConfig config, std::unique_ptr<server::TcpLpmClient> c
       decision_manager_(
           config_.enable_pass_strategy,
           config_.enable_parameterized_kick,
-          config_.enable_team_tactics),
+          config_.enable_team_tactics,
+          config_.enable_learned_kick),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name),
       client_(std::move(client)) {}
@@ -287,6 +289,7 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << " player=" << config_.player_number
             << " cycle=" << frame.server_cycle
             << " server_time=" << snapshot.server_time
+            << " play_mode=" << world::to_string(snapshot.play_mode)
             << " play_on=" << (snapshot.play_mode == world::PlayMode::PlayOn ? 1 : 0)
             << " motion=" << last_active_motion_
             << " execution=" << behavior::to_string(last_execution_status_)
@@ -327,6 +330,16 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << (restart_decision != nullptr &&
                     restart_decision->plan.has_value()
                     ? restart_decision->plan->contact_target_m[1]
+                    : 0.0)
+            << " restart_anchor_x="
+            << (restart_decision != nullptr &&
+                    restart_decision->plan.has_value()
+                    ? restart_decision->plan->ball_anchor_m[0]
+                    : 0.0)
+            << " restart_anchor_y="
+            << (restart_decision != nullptr &&
+                    restart_decision->plan.has_value()
+                    ? restart_decision->plan->ball_anchor_m[1]
                     : 0.0)
             << " restart_taker="
             << (restart_decision != nullptr &&

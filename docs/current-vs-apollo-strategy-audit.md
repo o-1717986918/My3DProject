@@ -458,6 +458,165 @@ route directly relevant to the remaining action work. Sources:
 - <https://ssim.robocup.org/2025/12/16/robocup-2026-soccer-simulation-3d-call-for-participation/>
 - <https://github.com/Daffan/humanoid-soccer>
 
+### 4.14 Static-shot admission versus learned transition
+
+The official ICRA 2026 striker pipeline confirms the architectural direction:
+long-distance chase, directional kick training, noisy-observation DAgger, and
+constrained student adaptation form one continuous learned skill. It does not
+justify applying a static keyframe's release conditions to that dynamic policy.
+The runtime therefore keeps three contracts distinct:
+
+- strategy admission decides whether an action is worth attempting;
+- a static procedural trajectory owns braking, exact body-frame pose, tilt,
+  joint-rate, and final release checks;
+- the fixed-2 m learned/residual transition consumes live gait phase after its
+  own one-cycle pose confirmation and never uses the static-shot admission
+  estimate.
+
+Natural-match v23 provided three concrete counterexamples to the old Shot
+admission. Two began with `0.64--0.73 m` of lateral relocation, and another
+occurred while the ball moved at about `1.6 m/s`; one opponent was only
+`0.25 s` from the ball. These were not releasable shots hidden behind a strict
+threshold. They were static actions selected from states that could not finish
+their setup before the opportunity disappeared.
+
+Shot commitment now requires a target still inside the calibrated 4 m range,
+at most `0.35 m` initial lateral setup error, at most `60 deg` initial yaw
+error, no observed ball speed above `0.60 m/s`, and an estimated
+translate/turn/acquire time that fits before the nearest opponent arrives.
+These are coarse attempt conditions, not relaxed or duplicated release
+conditions. A committed static shot is rechecked until the motion request
+actually starts, so a newly moving ball or lost race returns immediately to
+continuous pressure.
+
+All 17 C++ tests pass, including positive calm-shot admission and negative
+moving-ball, opponent-first, and large-lateral-error cases. The retained
+physical scene `procedural-shot-static-admission-s20261242-v5` also passed with
+62 procedural Shot samples, one attributed contact, zero fallback contacts,
+and zero GetUp samples. The first scene run was invalidated by monitor rebeam
+timing and is retained as a fixture-reliability warning rather than counted as
+action evidence.
+
+The first two natural comparisons with the same code both finished `1:0`
+against pristine Apollo. In v24 the fresh-ball median x was `+3.21 m`, 68.8%
+of buckets were in the opponent half, and only five Shot status samples
+remained. In v25 the corresponding values were `+12.13 m`, 78.5%, and 109 Shot
+samples. The latter included one 2.62 s setup that reached the ball but failed
+to settle yaw/lateral pose and leg rate before the bounded forward-contact
+fallback. This is evidence that infeasible commitments were reduced without
+removing real opportunities; it also identifies dynamic locomotion-to-shot
+transition quality as the next action bottleneck.
+
+The next two retained comparisons both finished `0:0`, making the current
+small series `2W-2D-0L`, goals `2:0`. This is encouraging but not yet a
+statistically stable superiority claim. V26 was a materially different game:
+fresh-ball median x was `-13.16 m`, only 25.5% of buckets were in the opponent
+half, 183 status samples selected Clear without one exact contact, and the
+late own goal kick spent 251 setup samples in approach plus 45 in lateral
+relocation. Its coordinator had frozen the ball where it crossed the line
+(`-27.5,-3.04`) before the referee placed the official restart at about
+`-25.5,0`; because the mode and epoch did not change, taker alignment and the
+motion setup then used different anchors.
+
+Restart geometry now reacquires a confirmed large, slow referee relocation
+before any contact has been authorized, increments the plan revision, and
+keeps the taker and selected variant frozen. The test covers both primary and
+already-fallback safety plans and rejects a rolling ball as a false
+placement. Exact play mode and restart anchor are now present in periodic
+runtime telemetry. A monitor-injected physics replay is not counted: the
+installed RCSSServerMJ monitor parses `playMode` but its command implementation
+does not apply it. A future natural goal kick must provide the physical check.
+
+V27 had fresh-ball median x near `0 m`, 49.0% opponent-half occupancy, no
+exact or fallback kick, and 24 independent GetUp entries. It also exposed an
+action-ownership bug independent of release thresholds: several players began
+a Dribble precision setup and then lost AP on the next locally inconsistent
+role assignment. For example, player 6 started setup at 61.64 s, lost the
+Pressure/AP duty roughly one second later, and restarted a different action at
+65.22 s. A committed local action or pass now refreshes a 0.35 s rolling AP
+lease. It is overridden by a fall, expires immediately after refresh stops,
+and avoids a long global ownership lock.
+
+V28 then finished `0:0` with fresh-ball median x `+26.28 m`, maximum x
+`+27.21 m`, and 94.8% of fresh buckets in the opponent half. Ten independent
+GetUp entries followed ordinary Walk. Three fallback Shot contacts executed;
+there was still no exact targeted pass. The retained player stayed Pressure/AP
+through the observed Dribble setup episodes, so the lease repaired the v27
+handoff failure. Those same episodes exposed the next, different fault: the
+static short-touch actor was retained while the ball accelerated away at about
+`1.9--2.4 m/s`. Static Dribble admission now rejects observed ball speed above
+`0.45 m/s`, and an existing commitment is cancelled after more than `0.12 m`
+of ball displacement. This returns to continuous pressure without disabling
+the imperfect but useful locomotion actors.
+
+The score series is now `2W-3D-0L`, goals `2:0`. It is still too small and
+one-sided to claim stable superiority, but v28 supplies strong territorial
+evidence and isolates release quality—not AP ownership—as the remaining final-
+third bottleneck.
+
+The fixed-2 m ONNX transition and deterministic parameterized bank now also
+have separate executable envelopes. Active ONNX may start only in its actual
+fixed-distance corpus (`1.90--2.10 m`, requested speed `1.23--1.63 m/s`), with
+target yaw up to `12 deg` and its trained body-frame ball slot. The static bank
+keeps its `2 deg` yaw limit. In the overlapping slice both runners are prepared
+and the deterministic residual remains a same-cycle fallback; outside the
+static slice, ONNX failure holds/rejects rather than converting a directional
+request into fixed forward contact. Shadow mode never broadens live decisions.
+
+The first active-ONNX comparison, v29, lost `0:1`; fresh-ball median x was
+`+2.68 m` and opponent-half occupancy was 60.1%. This run contained no exact
+TargetedPass release and no `LearnedKickExecute` sample, so it is not evidence
+for or against the actor. The decisive event at 145.4 s instead exposed a
+keeper-state defect. From 142.0 s the local keeper continued an old
+`GoalkeeperSmother` target while its near-contact ball track was already
+1.1--1.7 s old; by the next fresh observation the keeper had moved laterally
+outside the live shooting lane.
+
+Goalkeeper action freshness is now stricter than movement-only tactical
+memory. A visible or at-most-0.20 s old ball may authorize Smother/Intercept.
+A still-close torso-occluded track can only preserve the keeper's current body
+block, never continue a race; a displaced stale track returns the keeper to a
+central goal-line hold. Unit coverage includes the exact v29 stale/displaced
+shape.
+
+The next natural comparison, v30, finished `0:0`. Fresh-ball median x was
+`-3.248 m`, opponent-half occupancy was 37.23%, and the observed range was
+`-27.49..+25.62 m`. The ball naturally reached our goalkeeper area without
+recreating the stale lateral chase: the keeper remained in
+`GoalkeeperHold`, with no stale `GoalkeeperSmother` sample. Eleven independent
+GetUp episodes still followed ordinary Walk, so locomotion stability remains
+a match-result variable. Including v30, the retained natural record is
+`2W-4D-1L`, goals `2:1`; stable superiority remains unproven.
+
+Controlled full-team diagnostics v31--v35 then isolated pass acquisition,
+retention and release without replacing the production strategy. Initial
+proposal still requires a calm, self-owned ball and a safe opponent reach-time
+margin. Once a pass is committed, a temporary gait-speed transient no longer
+cancels it; a genuinely near-contact but torso-occluded ball may retain the
+same commitment for at most 1.5 s. Release itself is not widened and continues
+to require the selected static or learned executor's exact pose contract.
+
+V35 produced the first real server-side `LearnedKickExecute`: a 2.046 m,
+1.43 m/s request moved the ball 1.052 m with `+4.70 deg` signed direction
+error, 0.087 m lateral error and no fall. The pass reached `Commanded` and
+`Executed`, but ended in `Timeout` rather than receiver possession. This proves
+that the active ONNX route and its separate learned-transition guard are wired
+through real server physics. It does not promote the actor: one underpowered
+contact and no completed reception are insufficient, while its frozen exact-
+CPU evaluation remains 27/92 with one fall. Natural comparisons therefore keep
+the model in shadow mode unless an active ablation is requested explicitly.
+
+The first natural comparison after that retention repair, v36, finished
+`0:0`. Fresh-ball median x was `+10.499 m` with 69.25% of fresh buckets in the
+opponent half; strictly visible-ball median x was `+2.290 m` with 65.84% in the
+opponent half. This is territorial evidence, not finishing evidence: one
+natural pass was proposed and later cancelled without Ready, no exact or
+fallback kick executed, and 21 independent GetUp entries followed ordinary
+Walk. Our side committed zero illegal-defense events while pristine Apollo
+committed three. The retained natural record is now `2W-5D-1L`, goals `2:1`.
+Strategy can hold useful territory, but action acquisition, ordinary locomotion
+stability and completed contact still prevent a superiority claim.
+
 ## 5. What is actually better, and what is not yet proven
 
 The following improvements are supported by code invariants and tests rather
@@ -519,23 +678,30 @@ itself.
 
 ## 7. Immediate development order
 
-1. Convert the now-validated static strong-shot release into a dynamic
-   approach-to-shot path; natural final-third Shoot choices still stop in
-   setup even though the isolated physical trajectory succeeds.
-2. Preserve continuous pressure, wide finishing cut-in, danger-memory guard,
-   and low-turn
-   goal-mouth aim over repeated natural runs; one `1:0` result is insufficient.
-3. Make procedural dribble and fixed-distance pass start from a real walking
-   gait phase. The next data task is phase-conditioned approach-to-contact
-   BC/DAgger, not another wider static-trajectory pose gate.
-4. Build a phase-conditioned BC/DAgger striker student from successful complete
+1. Repeat natural, side-swapped comparison matches after the pass-retention
+   repair. Preserve v30 as the first natural stale-keeper replay and do not
+   convert the controlled v35 execution into a score-line claim.
+2. Improve the learned transition's distance and complete the receiver
+   lifecycle. V35 reached only 1.052/2.046 m and timed out; the next corpus must
+   include those underpowered server outcomes as hard negatives/DAgger states.
+3. Validate referee-placement reacquisition on the next natural own goal kick,
+   and verify that boundary smother actually reaches the ball and hands off to
+   Clear instead of leaving the keeper parked outside engagement distance.
+4. Preserve continuous pressure, wide finishing cut-in, danger-memory guard,
+   and low-turn goal-mouth aim over repeated natural runs; `2W-5D-1L` remains
+   a small, one-sided sample and is not a stable superiority result.
+5. Make procedural dribble and all fixed-distance releases start from a real
+   walking gait phase. The next data task is phase-conditioned approach-to-
+   contact BC/DAgger, including v31--v35 acquisition and retention failures,
+   not another wider static-trajectory pose gate.
+6. Build a phase-conditioned BC/DAgger striker student from successful complete
    approach-release trajectories; do not repeat unsupervised residual PPO.
-5. Train and promote stable long-forward, rapid-turn, and later lateral skills
+7. Train and promote stable long-forward, rapid-turn, and later lateral skills
    with explicit fall, drift, speed and transition tests; ordinary Walk is also
    implicated in current falls and must remain in the audit.
-6. Keep the 2/3.5/5 m deterministic bank and original forward contact as
+8. Keep the 2/3.5/5 m deterministic bank and original forward contact as
    explicit fallbacks while collecting server outcome traces.
-7. Calibrate reach time and action utility from deployed FastWalk/turn logs,
+9. Calibrate reach time and action utility from deployed FastWalk/turn logs,
    then repeat tactics-on/tactics-off and side-swapped comparisons.
-8. Decide superiority only from repeated full matches; retain every loss and
+10. Decide superiority only from repeated full matches; retain every loss and
    draw instead of selecting favourable scores.

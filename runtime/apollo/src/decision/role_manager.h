@@ -65,6 +65,16 @@ public:
     bool is_self_set_play_pushed(int self_player_number,
                                  const world::WorldSnapshot& snapshot) const;
 
+    /// Keeps the current open-play ball actor as AP for a short rolling
+    /// lease while a committed pass/dribble/shot/clear is being executed.
+    /// The caller refreshes the lease each decision cycle; cancellation,
+    /// observation loss, or a fall therefore releases it without a long
+    /// global role lock.
+    void retain_self_as_ap_for_action(
+        int self_player_number,
+        const world::WorldSnapshot& snapshot,
+        double lease_duration_s);
+
 private:
     double field_length_m_{field_geometry::kActualFieldLengthM};
     double field_width_m_{field_geometry::kActualFieldWidthM};
@@ -82,6 +92,8 @@ private:
     // next time the world leaves OurKick.
     mutable int pushed_set_play_player_{-1};
     mutable world::PlayMode pushed_set_play_mode{world::PlayMode::NotInitialized};
+    mutable int action_ap_player_{-1};
+    mutable double action_ap_lease_until_s_{0.0};
 };
 
 /// Solves the remaining free-player to free-role assignment.

@@ -56,6 +56,40 @@ inline constexpr double kParameterizedPassRequestedSpeedMps = 1.43;
 inline constexpr double kParameterizedPassMinimumRequestedSpeedMps = 1.43;
 inline constexpr double kParameterizedPassMaximumRequestedSpeedMps = 3.00;
 
+// The currently deployable learned transition actor was trained only on the
+// fixed-2 m corpus.  Its policy consumes the live gait phase and was exposed
+// to a materially wider approach-yaw and ball-pose distribution than the
+// static residual/trajectory bank.  Keep this contract separate: widening the
+// static bank to these limits would make its deterministic contact unsafe,
+// while applying the static limits to this actor discards states it learned to
+// recover from.
+inline constexpr double kLearnedTransitionMinimumTargetDistanceM = 1.90;
+inline constexpr double kLearnedTransitionMaximumTargetDistanceM = 2.10;
+inline constexpr double kLearnedTransitionMaximumTargetAngleDeg = 12.0;
+inline constexpr double kLearnedTransitionMinimumRequestedSpeedMps = 1.23;
+inline constexpr double kLearnedTransitionMaximumRequestedSpeedMps = 1.63;
+inline constexpr double kLearnedTransitionMinimumBallLocalXM = 0.30;
+inline constexpr double kLearnedTransitionMaximumBallLocalXM = 0.39;
+inline constexpr double kLearnedTransitionMinimumBallLocalYM = -0.03;
+inline constexpr double kLearnedTransitionMaximumBallLocalYM = 0.05;
+// Version this independently even while it equals the current static value.
+// The retained transition corpus contains only two of 460 accepted release
+// states above 0.50 m/s, so its 0.57 m/s maximum is not enough evidence to
+// broaden live control. Future gait-entry training may change this limit
+// without weakening the procedural trajectory's stationary-start contract.
+inline constexpr double kLearnedTransitionMaximumStartPlanarSpeedMps = 0.50;
+
+inline bool learned_transition_pass_request_supported(
+    double distance_m,
+    double requested_speed_mps) {
+    return std::isfinite(distance_m) &&
+        std::isfinite(requested_speed_mps) &&
+        distance_m >= kLearnedTransitionMinimumTargetDistanceM &&
+        distance_m <= kLearnedTransitionMaximumTargetDistanceM &&
+        requested_speed_mps >= kLearnedTransitionMinimumRequestedSpeedMps &&
+        requested_speed_mps <= kLearnedTransitionMaximumRequestedSpeedMps;
+}
+
 inline double parameterized_pass_requested_speed_mps(double distance_m) {
     const ParameterizedPassAnchorContract* nearest =
         &kParameterizedPassAnchors.front();

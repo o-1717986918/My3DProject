@@ -3,6 +3,7 @@
 #include "src/behavior/learned_kick_runner.h"
 
 #include "src/behavior/policy_common.h"
+#include "src/decision/kick_contract.h"
 #include "src/math/math_utils.h"
 #include "src/robot/t1_joint_limits.h"
 #include "src/world/frame_normalizer.h"
@@ -22,17 +23,6 @@ constexpr double kDesiredArrivalSpeedMps = 0.8;
 constexpr double kNominalGaitFrequencyHz = 1.6;
 constexpr double kNeutralPhaseMagnitudeRad = 0.02;
 constexpr double kSupportSwitchSine = 0.15;
-// The currently mountable v3 actors were trained on the fixed 2 m transition
-// corpus. Keep their active/shadow support inside that measured input slice;
-// a future companion manifest will replace these candidate-specific bounds.
-constexpr double kMinimumTargetDistanceM = 1.90;
-constexpr double kMaximumTargetDistanceM = 2.10;
-constexpr double kMaximumTargetAngleDeg = 12.0;
-constexpr double kMinimumBallLocalXM = 0.30;
-constexpr double kMaximumBallLocalXM = 0.39;
-constexpr double kMinimumBallLocalYM = -0.03;
-constexpr double kMaximumBallLocalYM = 0.05;
-
 constexpr std::array<double, kJointCount> kKickActionScaleRad{
     0.10, 0.10, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20,
     0.20, 0.20, 0.15, 0.35, 0.25, 0.25, 0.45, 0.25,
@@ -112,6 +102,8 @@ bool LearnedKickRunner::begin(
             snapshot.ball.position_m[1] - snapshot.self.position_m[1],
         },
         -yaw_deg);
+    const double planar_speed_mps = std::hypot(
+        snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]);
     if (profile.kind != KickProfileKind::ParameterizedContact ||
         profile.mode != decision::KickMode::TargetedPass ||
         !ball_track_usable(snapshot) ||
@@ -120,14 +112,24 @@ bool LearnedKickRunner::begin(
         !std::isfinite(profile.target_distance_m) ||
         !std::isfinite(profile.relative_target_angle_deg) ||
         !std::isfinite(profile.requested_speed_mps) ||
-        profile.target_distance_m < kMinimumTargetDistanceM ||
-        profile.target_distance_m > kMaximumTargetDistanceM ||
+        !profile.learned_transition_eligible ||
+        profile.target_distance_m <
+            decision::kick_contract::kLearnedTransitionMinimumTargetDistanceM ||
+        profile.target_distance_m >
+            decision::kick_contract::kLearnedTransitionMaximumTargetDistanceM ||
         std::abs(profile.relative_target_angle_deg) >
-            kMaximumTargetAngleDeg ||
-        ball_local[0] < kMinimumBallLocalXM ||
-        ball_local[0] > kMaximumBallLocalXM ||
-        ball_local[1] < kMinimumBallLocalYM ||
-        ball_local[1] > kMaximumBallLocalYM) {
+            decision::kick_contract::kLearnedTransitionMaximumTargetAngleDeg ||
+        ball_local[0] <
+            decision::kick_contract::kLearnedTransitionMinimumBallLocalXM ||
+        ball_local[0] >
+            decision::kick_contract::kLearnedTransitionMaximumBallLocalXM ||
+        ball_local[1] <
+            decision::kick_contract::kLearnedTransitionMinimumBallLocalYM ||
+        ball_local[1] >
+            decision::kick_contract::kLearnedTransitionMaximumBallLocalYM ||
+        !std::isfinite(planar_speed_mps) ||
+        planar_speed_mps > decision::kick_contract::
+            kLearnedTransitionMaximumStartPlanarSpeedMps) {
         return false;
     }
     active_ = true;

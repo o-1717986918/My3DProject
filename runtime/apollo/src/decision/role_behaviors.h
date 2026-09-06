@@ -68,7 +68,8 @@ public:
         Blackboard& blackboard,
         RoleManager& role_manager,
         bool enable_pass_strategy,
-        bool enable_targeted_kick = false) const;
+        bool enable_targeted_kick = false,
+        bool enable_learned_kick = false) const;
     void apply_execution_feedback(const ExecutionFeedback& feedback) const;
     void reset_state() const { state_ = {}; }
 private:
@@ -125,7 +126,8 @@ public:
         Blackboard& blackboard,
         RoleManager& role_manager,
         bool enable_pass_strategy,
-        bool enable_targeted_kick = false) const;
+        bool enable_targeted_kick = false,
+        bool enable_learned_kick = false) const;
     void reset() const;
     void apply_execution_feedback(const ExecutionFeedback& feedback) const;
 

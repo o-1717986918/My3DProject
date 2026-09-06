@@ -32,6 +32,7 @@ struct BehaviorContext {
     bool enable_pass_strategy;
     bool enable_targeted_kick;
     bool enable_team_tactics;
+    bool enable_learned_kick;
     const std::optional<ExecutionFeedback>& execution_feedback;
 };
 
@@ -574,7 +575,8 @@ HighLevelCommand make_set_play_command(BehaviorContext& context) {
         // and an approaching AP would crowd the keeper's clearance.
         auto selected = context.role_behaviors.select(
             context.snapshot, context.blackboard, context.role_manager,
-            false, context.enable_targeted_kick);
+            false, context.enable_targeted_kick,
+            context.enable_learned_kick);
         if (selected.has_value()) {
             return *selected;
         }
@@ -583,7 +585,8 @@ HighLevelCommand make_set_play_command(BehaviorContext& context) {
     if (role_id == RoleManager::ROLE_GK) {
         auto selected = context.role_behaviors.select(
             context.snapshot, context.blackboard, context.role_manager,
-            false, context.enable_targeted_kick);
+            false, context.enable_targeted_kick,
+            context.enable_learned_kick);
         if (selected.has_value()) {
             return *selected;
         }
@@ -594,7 +597,8 @@ HighLevelCommand make_set_play_command(BehaviorContext& context) {
             Blackboard::kKeyRestartDecision).self_is_receiver) {
         auto selected = context.role_behaviors.select(
             context.snapshot, context.blackboard, context.role_manager,
-            false, context.enable_targeted_kick);
+            false, context.enable_targeted_kick,
+            context.enable_learned_kick);
         if (selected.has_value()) return *selected;
     }
 
@@ -605,7 +609,8 @@ NodeResult make_role_behavior_command(BehaviorContext& context) {
     const int role_id = current_role_from_blackboard(context.blackboard);
     auto selected = context.role_behaviors.select(
         context.snapshot, context.blackboard, context.role_manager,
-        context.enable_pass_strategy, context.enable_targeted_kick);
+        context.enable_pass_strategy, context.enable_targeted_kick,
+        context.enable_learned_kick);
     if (!selected.has_value()) {
         return NodeResult::failure();
     }
@@ -678,7 +683,8 @@ HighLevelCommand BehaviorTree::evaluate(
     bool enable_pass_strategy,
     bool enable_targeted_kick,
     const std::optional<ExecutionFeedback>& execution_feedback,
-    bool enable_team_tactics) const {
+    bool enable_team_tactics,
+    bool enable_learned_kick) const {
     blackboard.clear();
     BehaviorContext context{
         snapshot,
@@ -692,6 +698,7 @@ HighLevelCommand BehaviorTree::evaluate(
         enable_pass_strategy,
         enable_targeted_kick,
         enable_team_tactics,
+        enable_learned_kick,
         execution_feedback};
     if (execution_feedback.has_value()) {
         role_behaviors_.apply_execution_feedback(*execution_feedback);

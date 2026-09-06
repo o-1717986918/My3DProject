@@ -250,6 +250,99 @@ bool test_goal_kick_taker_and_epoch_replan() {
         "new authoritative epoch did not freeze a new goal-kick plan");
 }
 
+bool test_restart_anchor_reacquires_referee_placement() {
+    RestartCoordinator coordinator;
+    auto input = input_for(world::PlayMode::OurGoalKick, 35.0, 66U);
+    input.self_player_number = 1;
+    input.ball_position_m = {-27.4, -3.0};
+    auto decision = coordinator.update(input);
+    if (!expect(
+            decision.plan.has_value() && decision.plan->revision == 1U &&
+                decision.plan->ball_anchor_m[0] < -27.0,
+            "goal-kick crossing position did not initialize the plan")) {
+        return false;
+    }
+
+    input.server_time_s = 35.1;
+    input.ball_position_m = {-25.5, 0.0};
+    input.ball_velocity_mps = {0.0, 0.0};
+    input.ball_velocity_valid = true;
+    decision = coordinator.update(input);
+    if (!expect(
+            decision.plan->revision == 1U &&
+                decision.plan->ball_anchor_m[0] < -27.0,
+            "single relocated sample replaced a frozen restart anchor")) {
+        return false;
+    }
+
+    input.server_time_s = 35.2;
+    decision = coordinator.update(input);
+    if (!expect(
+            decision.phase == RestartPhase::Positioning &&
+                decision.plan->revision == 2U &&
+                std::abs(decision.plan->ball_anchor_m[0] + 25.5) < 1.0e-9 &&
+                std::abs(decision.plan->ball_anchor_m[1]) < 1.0e-9 &&
+                decision.plan->contact_target_m[0] >
+                    decision.plan->ball_anchor_m[0],
+            "confirmed referee placement did not rebase restart geometry")) {
+        return false;
+    }
+
+    RestartCoordinator::Parameters short_deadline;
+    short_deadline.soft_deadline_s = 0.5;
+    short_deadline.hard_deadline_s = 4.0;
+    RestartCoordinator fallback(short_deadline);
+    input = input_for(world::PlayMode::OurGoalKick, 35.5, 68U);
+    input.self_player_number = 1;
+    input.ball_position_m = {-27.4, -3.0};
+    fallback.update(input);
+    input.server_time_s = 36.1;
+    input.ball_position_valid = false;
+    decision = fallback.update(input);
+    if (!expect(
+            decision.plan->fallback && decision.plan->revision == 2U &&
+                decision.plan->variant == RestartVariant::Safety,
+            "goal-kick fallback fixture did not enter its safety revision")) {
+        return false;
+    }
+    input.ball_position_valid = true;
+    input.ball_position_m = {-25.5, 0.0};
+    input.ball_velocity_mps = {0.0, 0.0};
+    input.ball_velocity_valid = true;
+    input.server_time_s = 36.2;
+    fallback.update(input);
+    input.server_time_s = 36.3;
+    decision = fallback.update(input);
+    if (!expect(
+            decision.plan->fallback && decision.plan->revision == 3U &&
+                decision.plan->variant == RestartVariant::Safety &&
+                std::abs(decision.plan->ball_anchor_m[0] + 25.5) < 1.0e-9 &&
+                std::abs(decision.plan->contact_target_m[0] + 21.5) < 1.0e-9 &&
+                std::abs(decision.plan->contact_target_m[1]) < 1.0e-9,
+            "safety fallback did not rebase to confirmed official placement")) {
+        return false;
+    }
+
+    // A rolling ball is not an official placement, and geometry may never be
+    // rewritten after the first contact has been authorized.
+    RestartCoordinator moving;
+    input = input_for(world::PlayMode::OurGoalKick, 36.0, 67U);
+    input.self_player_number = 1;
+    input.ball_position_m = {-27.4, 3.0};
+    moving.update(input);
+    input.ball_position_m = {-25.5, 0.0};
+    input.ball_velocity_mps = {0.8, 0.0};
+    input.ball_velocity_valid = true;
+    input.server_time_s = 36.1;
+    moving.update(input);
+    input.server_time_s = 36.2;
+    decision = moving.update(input);
+    return expect(
+        decision.plan->revision == 1U &&
+            decision.plan->ball_anchor_m[0] < -27.0,
+        "moving ball was mistaken for referee restart placement");
+}
+
 bool test_soft_deadline_and_single_fallback() {
     RestartCoordinator::Parameters parameters;
     parameters.soft_deadline_s = 2.0;
@@ -538,6 +631,7 @@ int main() {
     if (!test_frozen_plan_and_success_lifecycle()) return 1;
     if (!test_authoritative_play_on_lockout()) return 1;
     if (!test_goal_kick_taker_and_epoch_replan()) return 1;
+    if (!test_restart_anchor_reacquires_referee_placement()) return 1;
     if (!test_soft_deadline_and_single_fallback()) return 1;
     if (!test_execution_failure_and_release_timeout_fallbacks()) return 1;
     if (!test_hard_deadline_and_invalid_plan()) return 1;

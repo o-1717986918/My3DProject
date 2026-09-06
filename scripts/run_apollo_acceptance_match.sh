@@ -454,15 +454,25 @@ if [[ "${MATCH_PASS_SCENARIO:-0}" == 1 ]]; then
         "(ball (pos $scenario_ball_x $scenario_ball_y 0.11) (vel 0 0 0))"
     if [[ "$kick_calibration_scenario" == 1 ]]; then
         # First allow a post-transition camera update at 0.8 m, then remove
-        # approach gait phase and accidental pre-kick contacts. Decision,
-        # Ready handshake, residual selection, and physics remain unchanged.
+        # approach gait phase and accidental pre-kick contacts. First place the
+        # passer while player 6 is still near x=1, then allow the planner to
+        # commit the resulting leading target near x=2. Only after the action
+        # identity is fixed do we put the receiver on that target facing the
+        # ball. This exercises the production 0.75 m / 25 deg / 0.30 s Ready
+        # contract instead of weakening it for calibration. Release selection
+        # and contact physics remain unchanged.
         sleep 0.2
         "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
             --host 127.0.0.1 \
             --port "$monitor_port" \
             --delay 0 \
-            "(agent (unum 6) (team My3D-A) (move3d $pass_receiver_x 0 0.8 1 0 0 0))" \
             "(agent (unum 7) (team My3D-A) (move3d -0.33 0 0.8 1 0 0 0))"
+        sleep 0.15
+        "$python_bin" "$repo_dir/scripts/send_monitor_command.py" \
+            --host 127.0.0.1 \
+            --port "$monitor_port" \
+            --delay 0 \
+            "(agent (unum 6) (team My3D-A) (move3d 2 0 0.8 0 0 0 1))"
         sleep 0.05
     elif [[ "$procedural_dribble_scenario" == 1 ]]; then
         # Rebeam at rest so the standalone runner's measured-joint and body
@@ -567,7 +577,7 @@ play_on=$(
 )
 illegal_defense=$(grep -c "Illegal defense" "$run_dir/server.log" || true)
 kick_samples=$(
-    { grep -Eh "MY3D_STATUS.*motion=((Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold)|ProceduralKick(Execute|Hold)|FallbackKick(Forward|Stabilize|Hold))" \
+    { grep -Eh "MY3D_STATUS.*motion=((Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold)|LearnedKick(Execute|Hold)|ProceduralKick(Execute|Hold)|FallbackKick(Forward|Stabilize|Hold))" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
 fallback_kick_samples=$(
@@ -586,7 +596,7 @@ learned_kick_samples=$(
     { grep -Eh "MY3D_STATUS.*motion=LearnedKick(Execute|Hold)" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
-learned_kick_shadow_samples=$(
+learned_kick_valid_samples=$(
     { grep -Eh "MY3D_STATUS.*learned_kick_shadow_valid=1" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
@@ -632,7 +642,7 @@ pass_ready_samples=$(
 )
 targeted_pass_kick_samples=$(
     { grep -Eh \
-        "MY3D_STATUS.*motion=(Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold).*kick_mode=TargetedPass" \
+        "MY3D_STATUS.*motion=((Parameterized(Residual)?)?Kick(Forward|Stabilize|Hold)|LearnedKick(Execute|Hold)).*kick_mode=TargetedPass" \
         "$run_dir"/My3D-*.log 2>/dev/null || true; } | wc -l
 )
 pass_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
@@ -706,7 +716,7 @@ if [[ $clean_exits -ne 14 || $connections -ne 14 || $joins -ne 14 \
         "fallback_kick_samples=$fallback_kick_samples " \
         "fallback_pass_samples=$fallback_pass_samples " \
         "learned_kick_samples=$learned_kick_samples " \
-        "learned_kick_shadow_samples=$learned_kick_shadow_samples " \
+        "learned_kick_valid_samples=$learned_kick_valid_samples " \
         "procedural_kick_samples=$procedural_kick_samples " \
         "procedural_contact_events=$procedural_contact_events " \
         "procedural_shot_samples=$procedural_shot_samples " \
@@ -736,7 +746,7 @@ echo "Apollo 7v7 acceptance passed: cycles=$max_cycles clean_exits=$clean_exits 
     "fallback_kick_samples=$fallback_kick_samples " \
     "fallback_pass_samples=$fallback_pass_samples " \
     "learned_kick_samples=$learned_kick_samples " \
-    "learned_kick_shadow_samples=$learned_kick_shadow_samples " \
+    "learned_kick_valid_samples=$learned_kick_valid_samples " \
     "procedural_kick_samples=$procedural_kick_samples " \
     "procedural_contact_events=$procedural_contact_events " \
     "procedural_shot_samples=$procedural_shot_samples " \

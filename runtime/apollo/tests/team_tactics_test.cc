@@ -203,6 +203,20 @@ int main() {
         std::cerr << "goalkeeper did not claim a safe loose ball in its area\n";
         return 1;
     }
+    goalkeeper.ball.position_m = {-23.5, 3.65, 0.11};
+    goalkeeper.self.position_m = {-24.0, 3.0, 0.8};
+    goalkeeper.opponents = {player(1, -18.0, 6.0, false)};
+    const auto boundary_smother = tactics.plan(
+        goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
+    if (boundary_smother.duty !=
+            decision::TacticalDuty::GoalkeeperSmother ||
+        boundary_smother.position_m[0] < -23.60 ||
+        boundary_smother.position_m[1] < 3.55) {
+        std::cerr << "goalkeeper margin stranded a boundary-area loose ball\n";
+        return 1;
+    }
+    goalkeeper.ball.position_m = {-25.2, 1.0, 0.11};
+    goalkeeper.self.position_m = {-27.0, 0.0, 0.8};
     goalkeeper.opponents = {player(1, -25.1, 1.0, false)};
     const auto contested_smother = tactics.plan(
         goalkeeper, decision::RoleManager::ROLE_GK, {-27.0, 0.0});
@@ -549,9 +563,9 @@ int main() {
         return 1;
     }
 
-    // A local goalkeeper owns a longer near-contact track because its torso
-    // naturally occludes the ball during a smother. Field players must still
-    // remain in formation under the same globally stale observation.
+    // A local goalkeeper may retain a close torso-occluded track, but stale
+    // geometry can only preserve the current body block. It must not continue
+    // an aggressive smother race. Field players remain in formation.
     world::WorldSnapshot occluded_keeper = stale_ball;
     occluded_keeper.player_number = 1;
     occluded_keeper.self.position_m = {-25.65, 0.94, 0.8};
@@ -575,9 +589,36 @@ int main() {
         });
     if (occluded_plan.fresh || occluded_keeper_duty == nullptr ||
         occluded_keeper_duty->target.duty !=
-            decision::TacticalDuty::GoalkeeperSmother ||
+            decision::TacticalDuty::GoalkeeperHold ||
+        std::hypot(
+            occluded_keeper_duty->target.position_m[0] -
+                occluded_keeper.self.position_m[0],
+            occluded_keeper_duty->target.position_m[1] -
+                occluded_keeper.self.position_m[1]) > 1.0e-9 ||
         occluded_field_player_left_shape) {
-        std::cerr << "goalkeeper abandoned an occluded near-contact smother\n";
+        std::cerr << "stale near-contact ball moved the goalkeeper body block\n";
+        return 1;
+    }
+
+    // Reproduce the v29 failure shape: once the stale point is no longer near
+    // the body, even a near-contact-labelled track must return the keeper to a
+    // central line hold instead of chasing the old smother target laterally.
+    world::WorldSnapshot displaced_stale_keeper = occluded_keeper;
+    displaced_stale_keeper.ball.position_age_s = 1.2;
+    displaced_stale_keeper.ball.position_m = {-24.79, 1.21, 0.11};
+    const auto displaced_stale_plan = tactics.plan_all(
+        displaced_stale_keeper, roles);
+    const auto* displaced_stale_duty = displaced_stale_plan.for_role(
+        decision::RoleManager::ROLE_GK);
+    if (displaced_stale_duty == nullptr ||
+        displaced_stale_duty->target.duty !=
+            decision::TacticalDuty::GoalkeeperHold ||
+        std::abs(
+            displaced_stale_duty->target.position_m[0] -
+            (-decision::field_geometry::kActualHalfLengthM +
+             decision::field_geometry::kGkHoldDepthM)) > 1.0e-9 ||
+        std::abs(displaced_stale_duty->target.position_m[1]) > 1.0e-9) {
+        std::cerr << "displaced stale track kept the keeper off centre\n";
         return 1;
     }
     return 0;

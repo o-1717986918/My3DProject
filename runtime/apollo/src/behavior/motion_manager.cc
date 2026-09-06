@@ -115,15 +115,19 @@ MotionStepResult MotionManager::step_kick(
         kick_start_time_ = snapshot.server_time;
         kick_profile_ = make_kick_execution_profile(
             snapshot, command,
-            parameterized_kick_enabled_);
+            parameterized_kick_enabled_, learned_kick_enabled_,
+            learned_kick_shadow_);
         kick_residual_active_ = parameterized_kick_enabled_ &&
+            kick_profile_.static_executor_eligible &&
             kick_residual_runner_.has_value() &&
             kick_residual_runner_->begin(snapshot, kick_profile_);
         procedural_kick_active_ = !kick_residual_active_ &&
             parameterized_kick_enabled_ &&
+            kick_profile_.static_executor_eligible &&
             procedural_kick_runner_.has_value() &&
             procedural_kick_runner_->begin(snapshot, kick_profile_);
-        learned_kick_active_ = learned_kick_runner_.has_value() &&
+        learned_kick_active_ = kick_profile_.learned_transition_eligible &&
+            learned_kick_runner_.has_value() &&
             learned_kick_runner_->begin(snapshot, kick_profile_);
         learned_kick_shadow_valid_ = false;
         learned_kick_maximum_absolute_action_ = 0.0F;
@@ -138,7 +142,7 @@ MotionStepResult MotionManager::step_kick(
     // provenance in the motion name even though no target-aware executor is
     // involved; otherwise match telemetry reports ordinary KickForward and
     // silently loses the reason this contact was selected.
-    const bool use_forward_contact_fallback =
+    bool use_forward_contact_fallback =
         command.allow_forward_contact_fallback &&
         (!target_aware || !specialized_executor_active);
     if (target_aware &&
@@ -213,6 +217,27 @@ MotionStepResult MotionManager::step_kick(
         }
         if (!learned.valid) {
             learned_kick_active_ = false;
+            // Re-evaluate fallback after inference failure in this same
+            // control cycle. A learned-only release is outside the static
+            // bank by definition and must hold/reject; only an explicitly
+            // authorized request in the overlapping static envelope may
+            // continue through the deterministic fallback.
+            if (!kick_residual_active_) {
+                use_forward_contact_fallback =
+                    command.allow_forward_contact_fallback &&
+                    kick_profile_.static_executor_eligible;
+                if (!use_forward_contact_fallback) {
+                    const auto hold = neutral_runner_.step(
+                        reset, snapshot.server_time);
+                    return {
+                        true,
+                        "RejectedLearnedKickHold",
+                        hold.joint_targets,
+                        SkillExecutionStatus::Rejected,
+                        decision::MotionRequestKind::Kick,
+                    };
+                }
+            }
         }
     }
     if (kick_residual_active_) {

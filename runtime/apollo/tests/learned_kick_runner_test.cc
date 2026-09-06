@@ -39,6 +39,7 @@ behavior::KickExecutionProfile make_profile() {
     profile.target_distance_m = 2.0;
     profile.relative_target_angle_deg = 0.0;
     profile.requested_speed_mps = 1.43;
+    profile.learned_transition_eligible = true;
     return profile;
 }
 
@@ -123,6 +124,12 @@ int main(int argc, char* argv[]) {
         out_of_envelope.target_distance_m = 3.0;
         if (runner.begin(snapshot, out_of_envelope)) {
             std::cerr << "fixed-2m actor accepted an untrained distance\n";
+            return 1;
+        }
+        auto excessive_speed = snapshot;
+        excessive_speed.self.lin_vel_b = {0.51, 0.0, 0.0};
+        if (runner.begin(excessive_speed, profile)) {
+            std::cerr << "learned actor accepted an untrained gait speed\n";
             return 1;
         }
     }

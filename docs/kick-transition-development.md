@@ -447,8 +447,102 @@ The contracts are now split:
 
 This preserves the ONNX route and the deterministic procedural bank as
 different executors rather than widening one shared threshold. The retained
-transition ONNX remains shadow-only because its frozen evaluation has not yet
-beaten the deterministic 2 m action.
+transition ONNX remains shadow by default because its frozen evaluation has
+not yet beaten the deterministic 2 m action; explicit active ablations are
+permitted and measured separately.
+
+The split now extends through the complete runtime call graph. Active ONNX is
+admitted only for the actual fixed-2 m slice (`1.90--2.10 m`, requested speed
+`1.23--1.63 m/s`), target yaw up to `12 deg`, and its trained body-frame ball
+window (`x=0.30--0.39 m`, `y=-0.03--0.05 m`). The deterministic parameterized
+bank retains its independent `2 deg` release limit. Where both envelopes
+overlap, the bank stays initialized as a same-cycle fallback if learned
+inference fails. A learned-only request cannot silently degrade to fixed
+forward contact, and shadow inference cannot widen a live release decision.
+
+### Static-shot selection boundary (2026-09-06)
+
+The gate split must begin before release. Natural 7v7 traces showed the action
+planner preferring a high-utility static Shot while the actor was side-on to a
+moving ball or needed more than 0.6 m of lateral relocation. The release layer
+was correct to refuse those poses, but allowing a multi-second commitment had
+already interrupted the stronger continuous-pressure behavior.
+
+Static Shot now has a separate, re-evaluated setup-feasibility admission based
+on current target range, coarse body-ball geometry, observed ball speed, and
+the opponent reach-time window. It does not change the centimetre-scale
+trajectory release envelope and it does not run for the phase-conditioned 2 m
+learned/residual pass. The deterministic shot remains available from its
+verified calm setup; a retained 7v7 physics replay produced the procedural
+contact with no fallback or GetUp.
+
+One natural-match setup still reached a near-ball pose after 2.62 s but could
+not settle final yaw, lateral pose, and leg speed before fallback. That sample
+belongs in the next transition-state corpus. It is direct evidence for
+training locomotion-to-shot acquisition, not evidence for globally widening
+the static release envelope.
+
+Natural comparison v27 exposed a separate pre-release failure: a locally
+committed Dribble could lose the AP role while its precision controller was
+still moving toward the release pose. This is not a model failure and should
+not be learned around. The runtime now gives a live local ball action or pass
+a 0.35 s rolling AP lease, refreshed only while the commitment remains active.
+That keeps one actor responsible for completing or explicitly cancelling the
+transition, while falls and stopped refreshes release the role promptly. The
+training corpus should record one uninterrupted ownership interval; role
+handoffs remain separate episode boundaries rather than mislabeled failed
+transition frames.
+
+Natural comparison v28 verified that the lease kept the same Pressure/AP actor
+through observed setups, but revealed a moving-opportunity admission error.
+Static Dribble was being selected just before the ball accelerated to about
+`1.9--2.4 m/s`; preserving ownership merely made the impossible chase longer.
+The deterministic short touch now admits no observed ball faster than
+`0.45 m/s` and cancels if the ball moves more than `0.12 m` from the committed
+start. These limits do not apply to a future moving-ball learned striker. They
+keep static-action safety and learned transition capability as separate
+development axes.
+
+The first full match with active ONNX after this split (v29) produced no Ready
+pass release and therefore no learned execution sample. Its `0:1` result is
+retained but cannot evaluate the model. The loss came from a separate stale
+goalkeeper-smother duty, now repaired independently. The active route still
+requires a natural or controlled release opportunity before any promotion or
+rejection conclusion.
+
+That opportunity was constructed without replacing the production 7v7
+strategy in diagnostics v31--v35. The sequence exposed two pre-release
+cancellations: a committed passer briefly reached 0.503 m/s while the receiver
+was completing its 0.30 s Ready dwell, then the near-contact ball became torso-
+occluded before the Ready round trip completed. Proposal, commitment retention
+and physical release now have separate predicates. Proposal remains calm and
+self-owned; a live commitment may tolerate the gait transient and retain a
+near-contact track for at most 1.5 s; each executor's release pose, target and
+output checks remain unchanged.
+
+V35 then produced a real `LearnedKickExecute` through RCSSServerMJ. The request
+was 2.046 m at 1.43 m/s. One physical contact advanced the ball 1.052 m with
+`+4.70 deg` signed direction error and 0.087 m lateral error, with no GetUp.
+The lifecycle reached `Commanded` and `Executed`, then `Timeout`; the receiver
+did not take possession. This is positive runtime-integration evidence but
+negative range/completion evidence. It preserves active mode as an explicit
+ablation and shadow as the comparison default. The underpowered server state
+and outcome should be added as hard-negative/DAgger data rather than weakening
+the learned or static release envelopes.
+
+The start-speed guard is also now a separately versioned learned-transition
+contract and is checked again inside `LearnedKickRunner`. Its present value
+remains 0.50 m/s: only two of 460 accepted states in the retained transition
+corpus exceed it (the observed maximum is about 0.57 m/s), which is too little
+support for a live expansion. This removes the architectural coupling without
+inventing an unsupported larger envelope; new gait-entry data can widen the
+learned value later without touching the static trajectory guard.
+
+Natural comparison v36 kept useful territory but produced no Ready and no kick
+contact. It also recorded 21 independent GetUp entries after ordinary Walk.
+That result keeps both next tasks explicit: train a phase-conditioned
+approach/release that can turn natural near-ball states into contact, and audit
+the baseline gait instead of attributing every fall to optional FastWalk.
 
 ### K1. Version the transition contract
 
@@ -537,6 +631,9 @@ Only then expand to 3.5/5 m, angle bins, shot/clear, and moving-ball entries.
 - [ ] train range/direction above the retained contact-and-recovery baseline;
 - [x] add the guarded C++ kick-policy runner, shadow/active modes, tensor and
       finite-output checks, plus same-cycle fallback tests;
-- [ ] rerun the central 2 m CPU and 7v7 server gates;
+- [x] produce one real active-ONNX 7v7 server contact through the full
+      Proposed/Ready/Commanded/Executed lifecycle;
+- [ ] recover central 2 m distance and receiver completion over repeated CPU
+      and server trials; v35 reached 1.052/2.046 m and timed out;
 - [x] update this record and the R1 checkpoint with immutable K2-B bootstrap
       artifact hashes;

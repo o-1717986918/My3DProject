@@ -55,8 +55,7 @@ Position2 clamp_goalkeeper(Position2 point) {
     return point;
 }
 
-Position2 clamp_goalkeeper_area(Position2 point) {
-    constexpr double margin = 0.35;
+Position2 clamp_goalkeeper_area(Position2 point, double margin = 0.35) {
     point[0] = std::clamp(
         point[0],
         -field_geometry::kActualHalfLengthM + margin,
@@ -423,6 +422,30 @@ TacticalTarget plan_goalkeeper(
     std::optional<double> goalkeeper_yaw_deg = std::nullopt) {
     constexpr double hold_x =
         -field_geometry::kActualHalfLengthM + field_geometry::kGkHoldDepthM;
+    // A cached ball may still be useful for conservative shape, but it must
+    // not authorize an aggressive keeper race. In v29 a 1.1--1.7 s old
+    // near-contact track kept GoalkeeperSmother alive while the real ball had
+    // moved over a metre, pulling the keeper outside the shooting lane. If a
+    // very close torso-occluded ball is retained, hold the current body block;
+    // otherwise recover the centre of the goal line.
+    const double goalkeeper_ball_distance_m =
+        math::planar_dist(goalkeeper_position, ball);
+    const bool goalkeeper_action_ball_fresh = snapshot.ball.visible ||
+        snapshot.ball.position_age_s <= world::kBallPositionFreshLifetimeS;
+    constexpr double near_contact_body_hold_distance_m = 0.50;
+    if (!goalkeeper_action_ball_fresh) {
+        const bool preserve_body_block =
+            snapshot.ball.near_contact_track &&
+            goalkeeper_ball_distance_m <= near_contact_body_hold_distance_m;
+        return {
+            TacticalDuty::GoalkeeperHold,
+            preserve_body_block
+                ? clamp_goalkeeper(goalkeeper_position)
+                : Position2{hold_x, 0.0},
+            ball,
+            0,
+            preserve_body_block ? 0.85 : 0.95};
+    }
     constexpr double emergency_smother_depth_m = 1.5;
     constexpr double emergency_smother_max_eta_s = 1.5;
     // Start a near-post challenge earlier than a central challenge. In the
@@ -515,7 +538,13 @@ TacticalTarget plan_goalkeeper(
                 {snapshot.ball.velocity_mps[0], snapshot.ball.velocity_mps[1]},
                 0.30);
         }
-        target = clamp_goalkeeper_area(target);
+        // A loose ball at the edge of the legal keeper area must remain
+        // reachable.  The general 0.35 m planning margin made the keeper stop
+        // 0.55--0.70 m away from boundary balls, outside the clear-engagement
+        // radius.  Keep only a small numerical margin for the smother target;
+        // the separate last-line and reach-time checks still govern safety.
+        constexpr double smother_boundary_margin_m = 0.05;
+        target = clamp_goalkeeper_area(target, smother_boundary_margin_m);
         const strategy::ReachTimeModel keeper_reach(
             strategy::ReachTimeModel::Parameters{
                 1.10, 30.0, 0.20, 0.15, 0.10});
@@ -782,7 +811,14 @@ TeamPlan TeamTactics::plan_all(
                     snapshot.ball.position_valid &&
                     snapshot.ball.near_contact_track &&
                     snapshot.ball.position_age_s <=
-                        world::kNearContactBallTrackLifetimeS;
+                        world::kNearContactBallTrackLifetimeS &&
+                    math::planar_dist(
+                        Position2{
+                            snapshot.self.position_m[0],
+                            snapshot.self.position_m[1]},
+                        Position2{
+                            snapshot.ball.position_m[0],
+                            snapshot.ball.position_m[1]}) <= 0.50;
                 if (local_keeper_near_contact) {
                     const Position2 ball{
                         snapshot.ball.position_m[0],

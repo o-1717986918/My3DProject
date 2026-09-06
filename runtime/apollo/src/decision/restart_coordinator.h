@@ -129,6 +129,14 @@ public:
         double release_speed_mps{0.30};
         unsigned int release_confirmation_samples{2U};
         double receiver_standoff_m{2.0};
+        // The referee may publish OurKick while the ball is still at the
+        // crossing/out-of-play position and place it at the official restart
+        // spot a few cycles later.  Confirm a large, slow relocation before
+        // rebasing a plan that has not yet been authorized for contact.
+        double anchor_reacquire_distance_m{0.75};
+        double anchor_reacquire_maximum_speed_mps{0.30};
+        double anchor_reacquire_candidate_tolerance_m{0.20};
+        unsigned int anchor_reacquire_confirmation_samples{2U};
     };
 
     RestartCoordinator();
@@ -156,6 +164,9 @@ private:
     bool execution_authorized_ever_{false};
     bool taker_lockout_released_{false};
     bool hard_deadline_reached_{false};
+    field_geometry::Position2 anchor_reacquire_candidate_m_{0.0, 0.0};
+    unsigned int anchor_reacquire_confirmation_count_{0U};
+    bool anchor_reacquire_candidate_valid_{false};
 
     void begin_restart(const RestartCoordinatorInput& input);
     void enter_fallback(
@@ -163,6 +174,7 @@ private:
         const RestartCoordinatorInput& input);
     bool feedback_matches(const RestartExecutionFeedback& feedback) const;
     bool observe_release(const RestartCoordinatorInput& input);
+    bool reanchor_before_execution(const RestartCoordinatorInput& input);
     RestartCoordinationDecision decision_for(int self_player_number) const;
 };
 

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 
 namespace world {
 
@@ -47,6 +48,7 @@ enum class PlayModeGroup {
 
 /// Converts a server token into a team-relative mode.
 PlayMode play_mode_from_token(const std::string& play_mode_token, bool is_left_team);
+std::string_view to_string(PlayMode play_mode);
 PlayModeGroup play_mode_group(PlayMode play_mode, bool is_left_team);
 bool should_reset_beam(PlayMode play_mode);
 

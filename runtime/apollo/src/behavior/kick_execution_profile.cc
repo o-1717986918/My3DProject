@@ -30,7 +30,9 @@ bool finite_point(const std::array<double, 2>& point) {
 KickExecutionProfile make_kick_execution_profile(
     const world::WorldSnapshot& snapshot,
     const decision::KickCommand& command,
-    bool parameterized_enabled) {
+    bool parameterized_enabled,
+    bool learned_transition_enabled,
+    bool learned_transition_shadow) {
     KickExecutionProfile profile;
     if (!parameterized_enabled ||
         command.mode == decision::KickMode::ForwardContact ||
@@ -109,14 +111,30 @@ KickExecutionProfile make_kick_execution_profile(
         profile.target_distance_m = target_distance_m;
         profile.mode = command.mode;
         profile.total_duration_s = 1.20;
+        profile.static_executor_eligible = true;
         return profile;
     }
 
-    if (command.mode != decision::KickMode::TargetedPass ||
-        !decision::kick_contract::parameterized_pass_request_supported(
-            target_distance_m, command.requested_ball_speed_mps) ||
-        std::abs(relative_angle_deg) >
-            decision::kick_contract::kParameterizedPassMaximumTargetAngleDeg) {
+    if (command.mode != decision::KickMode::TargetedPass) {
+        return profile;
+    }
+
+    const bool static_executor_eligible =
+        decision::kick_contract::parameterized_pass_request_supported(
+            target_distance_m, command.requested_ball_speed_mps) &&
+        std::abs(relative_angle_deg) <=
+            decision::kick_contract::kParameterizedPassMaximumTargetAngleDeg;
+    const bool learned_transition_eligible =
+        (learned_transition_enabled || learned_transition_shadow) &&
+        decision::kick_contract::learned_transition_pass_request_supported(
+            target_distance_m, command.requested_ball_speed_mps) &&
+        std::abs(relative_angle_deg) <=
+            decision::kick_contract::kLearnedTransitionMaximumTargetAngleDeg;
+    // Shadow inference must never broaden the live command surface.  It may
+    // observe requests the deterministic executor can actually carry, while
+    // only an active learned actor can admit its wider transition envelope.
+    if (!static_executor_eligible &&
+        !(learned_transition_enabled && learned_transition_eligible)) {
         return profile;
     }
 
@@ -146,6 +164,8 @@ KickExecutionProfile make_kick_execution_profile(
     profile.relative_target_angle_deg = relative_angle_deg;
     profile.target_distance_m = target_distance_m;
     profile.mode = command.mode;
+    profile.static_executor_eligible = static_executor_eligible;
+    profile.learned_transition_eligible = learned_transition_eligible;
     return profile;
 }
 

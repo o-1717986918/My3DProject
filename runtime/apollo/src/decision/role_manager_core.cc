@@ -108,7 +108,8 @@ std::optional<int> select_ap(
     int self_player_number,
     int self_previous_role,
     const std::array<double, 2>& ball_position_m,
-    int excluded_player_number = -1) {
+    int excluded_player_number = -1,
+    int leased_player_number = -1) {
     int best_player = -1;
     double best_distance = std::numeric_limits<double>::infinity();
     double self_distance = std::numeric_limits<double>::infinity();
@@ -128,6 +129,18 @@ std::optional<int> select_ap(
         if (player.player_number == self_player_number) {
             self_distance = distance;
         }
+    }
+
+    if (leased_player_number > 0 &&
+        leased_player_number != goalkeeper_player_number &&
+        leased_player_number != excluded_player_number) {
+        const auto leased = std::find_if(
+            teammates.begin(), teammates.end(),
+            [&](const PlayerRoleCandidate& player) {
+                return player.player_number == leased_player_number &&
+                    !player.fallen;
+            });
+        if (leased != teammates.end()) return leased_player_number;
     }
 
     if (best_player <= 0) {
@@ -230,6 +243,20 @@ bool RoleManager::is_self_set_play_pushed(int self_player_number,
     return pushed_set_play_player_ == self_player_number;
 }
 
+void RoleManager::retain_self_as_ap_for_action(
+    int self_player_number,
+    const world::WorldSnapshot& snapshot,
+    double lease_duration_s) {
+    if (snapshot.play_mode != world::PlayMode::PlayOn ||
+        self_player_number <= 0 || !std::isfinite(lease_duration_s) ||
+        lease_duration_s <= 0.0) {
+        return;
+    }
+    action_ap_player_ = self_player_number;
+    action_ap_lease_until_s_ = std::max(
+        action_ap_lease_until_s_, snapshot.server_time + lease_duration_s);
+}
+
 std::vector<RoleAssignment> RoleManager::assign(
     const world::WorldSnapshot& snapshot) const {
     const std::array<double, 2> ball_position_m{
@@ -266,13 +293,25 @@ std::vector<RoleAssignment> RoleManager::assign(
     const int excluded_ap_player = is_self_set_play_pushed(snapshot.player_number, snapshot)
         ? snapshot.player_number
         : -1;
+    if (snapshot.play_mode != world::PlayMode::PlayOn ||
+        snapshot.server_time >= action_ap_lease_until_s_) {
+        action_ap_player_ = -1;
+        action_ap_lease_until_s_ = 0.0;
+    }
     const std::optional<int> ap_player_number = select_ap(
         teammate_candidates,
         goalkeeper_player_number,
         snapshot.player_number,
         self_previous_role,
         ball_position_m,
-        excluded_ap_player);
+        excluded_ap_player,
+        action_ap_player_);
+    if (action_ap_player_ > 0 &&
+        (!ap_player_number.has_value() ||
+         *ap_player_number != action_ap_player_)) {
+        action_ap_player_ = -1;
+        action_ap_lease_until_s_ = 0.0;
+    }
 
     auto write_assignment = [&](int player_number, int role_id, const std::array<double, 2>& role_position_m) {
         if (player_number <= 0 || static_cast<std::size_t>(player_number) > assignments.size()) {

@@ -93,7 +93,51 @@ int main() {
         return 1;
     }
 
+    // Waiting for the receiver must not reuse the calm-entry speed gate.  A
+    // real server trace reached 0.503 m/s while braking in the correct ball
+    // slot and cancelled the proposal 0.02 s before the Ready dwell elapsed.
+    // Keep the bounded commitment; the low-level release gate still rejects
+    // this speed until the body settles.
+    snapshot.server_time = 1.007;
+    snapshot.self.lin_vel_b = {0.55, 0.0, 0.0};
+    const decision::HighLevelCommand transient_wait = behavior.make_command(
+        snapshot, blackboard, role_manager, true, true);
+    if (std::holds_alternative<decision::KickCommand>(transient_wait) ||
+        !blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction) ||
+        blackboard.get<strategy::CooperativeAction>(
+            decision::Blackboard::kKeySelectedCooperativeAction).category !=
+            strategy::ActionCategory::Pass) {
+        std::cerr << "pass commitment was cancelled by a gait-speed transient\n";
+        return 1;
+    }
+
+    // A receiver Ready acknowledgement includes a 0.30 s physical dwell and
+    // communication delay. Preserve a genuinely near-contact, still-local
+    // occluded ball long enough for that round trip, while ordinary stale
+    // tactical observations remain bounded by the shorter world TTL.
+    snapshot.server_time = 1.008;
+    snapshot.self.lin_vel_b = {0.0, 0.0, 0.0};
+    snapshot.ball.visible = false;
+    snapshot.ball.near_contact_track = true;
+    snapshot.ball.position_age_s = 1.0;
+    const decision::HighLevelCommand occluded_near_wait = behavior.make_command(
+        snapshot, blackboard, role_manager, true, true);
+    if (std::holds_alternative<decision::KickCommand>(occluded_near_wait) ||
+        !blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction) ||
+        blackboard.get<strategy::CooperativeAction>(
+            decision::Blackboard::kKeySelectedCooperativeAction).category !=
+            strategy::ActionCategory::Pass) {
+        std::cerr << "near-contact pass track expired before Ready round trip\n";
+        return 1;
+    }
+
     snapshot.server_time = 1.01;
+    snapshot.self.lin_vel_b = {0.0, 0.0, 0.0};
+    snapshot.ball.visible = true;
+    snapshot.ball.near_contact_track = false;
+    snapshot.ball.position_age_s = 0.0;
     snapshot.teammates[5].seen = true;
     snapshot.teammates[5].last_seen_time = snapshot.server_time;
     snapshot.teammates[5].position_m = {1.0, 0.0, 0.8};
@@ -145,6 +189,61 @@ int main() {
         kick.sequence_id != selected.sequence_id ||
         kick.action_id != selected.action_id) {
         std::cerr << "targeted pass metadata was not preserved\n";
+        return 1;
+    }
+
+    // The active learned transition owns a wider yaw/ball-pose distribution
+    // than the deterministic residual bank.  At -8 degrees the ball remains
+    // inside the actor's trained body-frame slot but is outside the static
+    // +/-2 degree release contract; the decision layer must still dispatch
+    // it when (and only when) learned control was explicitly enabled.
+    world::WorldSnapshot learned_snapshot = make_open_pass_snapshot();
+    constexpr double kYawMinusEightHalfRadians =
+        -8.0 * 3.14159265358979323846 / 360.0;
+    learned_snapshot.self.orientation_wxyz = {
+        std::cos(kYawMinusEightHalfRadians), 0.0, 0.0,
+        std::sin(kYawMinusEightHalfRadians)};
+    decision::APBehavior learned_behavior;
+    decision::Blackboard learned_blackboard;
+    static_cast<void>(learned_behavior.make_command(
+        learned_snapshot, learned_blackboard, role_manager,
+        true, true, true));
+    if (!learned_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "learned transition pass was not selected\n";
+        return 1;
+    }
+    const auto learned_selected =
+        learned_blackboard.get<strategy::CooperativeAction>(
+            decision::Blackboard::kKeySelectedCooperativeAction);
+    learned_snapshot.server_time = 1.02;
+    learned_snapshot.team_comm_snapshot.pass_intents.push_back({
+        learned_selected.target_player_number,
+        53,
+        comm::PassIntentState::Ready,
+        learned_snapshot.player_number,
+        learned_selected.target_player_number,
+        learned_selected.sequence_id,
+        learned_selected.target_point_m[0],
+        learned_selected.target_point_m[1],
+        learned_selected.requested_ball_speed_mps,
+        learned_selected.predicted_ball_time_s,
+        comm::PassIntentAuthor::Receiver,
+        learned_snapshot.player_number,
+    });
+    static_cast<void>(learned_behavior.make_command(
+        learned_snapshot, learned_blackboard, role_manager,
+        true, true, true));
+    learned_snapshot.server_time = 1.05;
+    const auto learned_release = learned_behavior.make_command(
+        learned_snapshot, learned_blackboard, role_manager,
+        true, true, true);
+    if (const auto* learned_kick =
+            std::get_if<decision::KickCommand>(&learned_release);
+        learned_kick == nullptr ||
+        learned_kick->mode != decision::KickMode::TargetedPass ||
+        learned_kick->allow_forward_contact_fallback) {
+        std::cerr << "learned transition did not own its wider release state\n";
         return 1;
     }
 
@@ -638,6 +737,34 @@ int main() {
         return 1;
     }
 
+    // A deterministic touch must not hold the action lease while a live ball
+    // is already rolling out of its static setup.  Reuse the same exact start
+    // pose, then accelerate and displace the ball beyond the bounded window;
+    // execution should return immediately to continuous pressure.
+    world::WorldSnapshot moving_dribble_snapshot = make_open_pass_snapshot();
+    moving_dribble_snapshot.teammates.clear();
+    moving_dribble_snapshot.self.position_m = {-0.32, -0.04, 0.8};
+    decision::APBehavior moving_dribble_behavior;
+    decision::Blackboard moving_dribble_blackboard;
+    static_cast<void>(moving_dribble_behavior.make_command(
+        moving_dribble_snapshot, moving_dribble_blackboard, role_manager,
+        false, true));
+    moving_dribble_snapshot.server_time += 0.02;
+    moving_dribble_snapshot.ball.position_m[0] += 0.20;
+    moving_dribble_snapshot.ball.velocity_valid = true;
+    moving_dribble_snapshot.ball.velocity_mps = {1.0, 0.0, 0.0};
+    moving_dribble_blackboard.clear();
+    const auto moving_dribble_fallback = moving_dribble_behavior.make_command(
+        moving_dribble_snapshot, moving_dribble_blackboard, role_manager,
+        false, true);
+    if (!std::holds_alternative<decision::WalkCommand>(
+            moving_dribble_fallback) ||
+        moving_dribble_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "moving ball retained a static dribble setup\n";
+        return 1;
+    }
+
     // The procedural anchor's ball slot is body-relative. A pose may be exact
     // in the requested target frame while a still-misaligned torso moves that
     // same ball outside the runner's measured lateral envelope. Preserve the
@@ -790,13 +917,14 @@ int main() {
         return 1;
     }
 
-    // A final-third shot may start positioning from the full precision-entry
-    // range when the opponent has not clearly won the race. Dribble and pass
-    // retain the stricter calm-possession admission tested above/below.
+    // A final-third shot may start a short, physically reachable static setup
+    // when its estimated acquisition time remains inside the opponent window.
+    // Dribble and pass retain the stricter calm-possession admission tested
+    // above/below.
     world::WorldSnapshot urgent_shot_snapshot = make_open_pass_snapshot();
     urgent_shot_snapshot.teammates.clear();
     urgent_shot_snapshot.ball.position_m = {23.5, 0.0, 0.11};
-    urgent_shot_snapshot.self.position_m = {22.60, 0.0, 0.8};
+    urgent_shot_snapshot.self.position_m = {22.95, 0.0, 0.8};
     decision::TeamPlan urgent_shot_plan;
     urgent_shot_plan.tactical_state.possession =
         strategy::PossessionOwner::Contested;
@@ -866,9 +994,10 @@ int main() {
         return 1;
     }
 
-    // Large lateral setup error must be handled by turn-then-forward
-    // relocation, not by holding the shot heading and issuing the weak
-    // side-strafe domain of the current locomotion policy.
+    // Natural-match replay v23 selected a static shot from 0.64 m of lateral
+    // setup error.  That needs several composed gait phases and lost the ball
+    // before one contact.  Keep such a state on continuous pressure instead of
+    // committing to an action whose static release cannot be reached in time.
     world::WorldSnapshot offset_shot_snapshot = urgent_shot_snapshot;
     offset_shot_snapshot.self.position_m = {22.60, 0.60, 0.8};
     decision::APBehavior offset_shot_behavior;
@@ -878,21 +1007,49 @@ int main() {
     const auto offset_shot_setup = offset_shot_behavior.make_command(
         offset_shot_snapshot, offset_shot_blackboard, role_manager,
         false, true);
-    if (!std::holds_alternative<decision::WalkCommand>(offset_shot_setup)) {
-        std::cerr << "offset shot did not issue coarse setup relocation\n";
+    if (!std::holds_alternative<decision::WalkCommand>(offset_shot_setup) ||
+        offset_shot_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "unreachable lateral shot interrupted continuous pressure\n";
         return 1;
     }
-    const auto& offset_walk =
-        std::get<decision::WalkCommand>(offset_shot_setup);
-    if (!offset_walk.orientation_deg.has_value() ||
-        std::abs(*offset_walk.orientation_deg) < 20.0 ||
-        !offset_walk.target_absolute ||
-        std::hypot(
-            offset_walk.target_2d_m[0] -
-                offset_shot_snapshot.self.position_m[0],
-            offset_walk.target_2d_m[1] -
-                offset_shot_snapshot.self.position_m[1]) > 1.0e-6) {
-        std::cerr << "offset shot still requested lateral precision strafe\n";
+
+    // The static shot actor cannot acquire a moving ball.  This check is only
+    // action admission: the phase-conditioned learned pass is intentionally
+    // governed by a different transition contract.
+    world::WorldSnapshot moving_shot_snapshot = urgent_shot_snapshot;
+    moving_shot_snapshot.ball.velocity_valid = true;
+    moving_shot_snapshot.ball.velocity_mps = {1.20, 0.0, 0.0};
+    decision::APBehavior moving_shot_behavior;
+    decision::Blackboard moving_shot_blackboard;
+    moving_shot_blackboard.set(
+        decision::Blackboard::kKeyTeamPlan, urgent_shot_plan);
+    const auto moving_shot_command = moving_shot_behavior.make_command(
+        moving_shot_snapshot, moving_shot_blackboard, role_manager,
+        false, true);
+    if (!std::holds_alternative<decision::WalkCommand>(moving_shot_command) ||
+        moving_shot_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "moving ball entered the static shot actor\n";
+        return 1;
+    }
+
+    // Even a geometrically close pose is not a static-shot opportunity if an
+    // opponent reaches the ball before the estimated align-and-settle time.
+    world::WorldSnapshot closing_shot_snapshot = urgent_shot_snapshot;
+    decision::TeamPlan closing_shot_plan = urgent_shot_plan;
+    closing_shot_plan.tactical_state.nearest_opponent_ball_time_s = 0.25;
+    decision::APBehavior closing_shot_behavior;
+    decision::Blackboard closing_shot_blackboard;
+    closing_shot_blackboard.set(
+        decision::Blackboard::kKeyTeamPlan, closing_shot_plan);
+    const auto closing_shot_command = closing_shot_behavior.make_command(
+        closing_shot_snapshot, closing_shot_blackboard, role_manager,
+        false, true);
+    if (!std::holds_alternative<decision::WalkCommand>(closing_shot_command) ||
+        closing_shot_blackboard.exists(
+            decision::Blackboard::kKeySelectedCooperativeAction)) {
+        std::cerr << "opponent-first shot consumed a static setup window\n";
         return 1;
     }
 

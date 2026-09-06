@@ -131,6 +131,34 @@ int main() {
         return 1;
     }
 
+    // A precision ball action gets a rolling AP lease so a slightly or even
+    // materially closer teammate cannot tear down its setup on the next
+    // locally inconsistent observation. The lease expires quickly and never
+    // overrides a fall.
+    world::WorldSnapshot leased = snapshot;
+    leased.server_time = 10.0;
+    decision::RoleManager leased_roles;
+    leased_roles.retain_self_as_ap_for_action(7, leased, 0.35);
+    const auto during_lease = leased_roles.assign(leased);
+    if (player_for_role(during_lease, decision::RoleManager::ROLE_AP) != 7) {
+        std::cerr << "committed action did not retain its AP actor\n";
+        return 1;
+    }
+    leased.server_time = 10.36;
+    const auto after_lease = leased_roles.assign(leased);
+    if (player_for_role(after_lease, decision::RoleManager::ROLE_AP) != 3) {
+        std::cerr << "expired action lease retained a stale AP actor\n";
+        return 1;
+    }
+    leased.server_time = 11.0;
+    leased.teammates[6].fallen = true;
+    leased_roles.retain_self_as_ap_for_action(7, leased, 0.35);
+    const auto fallen_lease = leased_roles.assign(leased);
+    if (player_for_role(fallen_lease, decision::RoleManager::ROLE_AP) == 7) {
+        std::cerr << "fallen action actor retained AP through its lease\n";
+        return 1;
+    }
+
     snapshot.play_mode = world::PlayMode::GameOver;
     decision::BehaviorTree tree;
     decision::Blackboard blackboard;

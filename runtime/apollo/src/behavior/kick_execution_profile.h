@@ -30,6 +30,11 @@ struct KickExecutionProfile {
     double relative_target_angle_deg{0.0};
     double target_distance_m{0.0};
     decision::KickMode mode{decision::KickMode::ForwardContact};
+    // Executor-specific admission is explicit.  A learned transition can own
+    // a wider live-gait state while the deterministic bank remains available
+    // as a fallback only inside its independently validated envelope.
+    bool static_executor_eligible{false};
+    bool learned_transition_eligible{false};
 };
 
 /// Converts a target-aware high-level kick into a conservative, bounded
@@ -38,6 +43,8 @@ struct KickExecutionProfile {
 KickExecutionProfile make_kick_execution_profile(
     const world::WorldSnapshot& snapshot,
     const decision::KickCommand& command,
-    bool parameterized_enabled);
+    bool parameterized_enabled,
+    bool learned_transition_enabled = false,
+    bool learned_transition_shadow = false);
 
 }  // namespace behavior

@@ -92,9 +92,27 @@ int main() {
     const auto pass = behavior::make_kick_execution_profile(
         snapshot, make_targeted(1.43, 0.0), true);
     if (pass.kind != behavior::KickProfileKind::ParameterizedContact ||
+        !pass.static_executor_eligible ||
+        pass.learned_transition_eligible ||
         !near(pass.target_distance_m, 2.0) ||
         pass.mode != decision::KickMode::TargetedPass) {
         std::cerr << "validated pass profile was not accepted\n";
+        return 1;
+    }
+
+    const auto learned_overlap = behavior::make_kick_execution_profile(
+        snapshot, make_targeted(1.43, 1.5), true, true);
+    const auto learned_only = behavior::make_kick_execution_profile(
+        snapshot, make_targeted(1.43, 8.0), true, true);
+    const auto shadow_only = behavior::make_kick_execution_profile(
+        snapshot, make_targeted(1.43, 8.0), true, false, true);
+    if (!learned_overlap.static_executor_eligible ||
+        !learned_overlap.learned_transition_eligible ||
+        learned_only.kind != behavior::KickProfileKind::ParameterizedContact ||
+        learned_only.static_executor_eligible ||
+        !learned_only.learned_transition_eligible ||
+        shadow_only.kind != behavior::KickProfileKind::StableFallback) {
+        std::cerr << "learned and static pass envelopes were not separated\n";
         return 1;
     }
     const auto medium_pass = behavior::make_kick_execution_profile(

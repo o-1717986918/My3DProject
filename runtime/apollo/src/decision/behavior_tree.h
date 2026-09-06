@@ -27,7 +27,8 @@ public:
         bool enable_targeted_kick = false,
         const std::optional<ExecutionFeedback>& execution_feedback =
             std::nullopt,
-        bool enable_team_tactics = true) const;
+        bool enable_team_tactics = true,
+        bool enable_learned_kick = false) const;
 
 private:
     mutable TeamTactics team_tactics_;
