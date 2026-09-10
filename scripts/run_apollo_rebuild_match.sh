@@ -24,6 +24,9 @@ monitor_port=${MATCH_MONITOR_PORT:-$((agent_port + 1))}
 rebuild_side=${REBUILD_SIDE:-left}
 kickoff_side=${MATCH_KICKOFF_SIDE:-left}
 forced_goal_kick_side=${MATCH_FORCE_GOAL_KICK_SIDE:-}
+force_near_ball=${MATCH_FORCE_NEAR_BALL:-0}
+near_ball_robot_x=${MATCH_NEAR_BALL_ROBOT_X:--0.55}
+near_ball_robot_y=${MATCH_NEAR_BALL_ROBOT_Y:-0}
 run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-rebuild-vs-base-$(date +%Y%m%d-%H%M%S)-$rebuild_side}
 
 server_pid=
@@ -51,6 +54,7 @@ fi
 case "$rebuild_side" in left|right) ;; *) echo "REBUILD_SIDE must be left or right" >&2; exit 2 ;; esac
 case "$kickoff_side" in left|right) ;; *) echo "MATCH_KICKOFF_SIDE must be left or right" >&2; exit 2 ;; esac
 case "$forced_goal_kick_side" in ""|left|right) ;; *) echo "MATCH_FORCE_GOAL_KICK_SIDE must be left or right" >&2; exit 2 ;; esac
+case "$force_near_ball" in 0|1) ;; *) echo "MATCH_FORCE_NEAR_BALL must be 0 or 1" >&2; exit 2 ;; esac
 if [[ "${APOLLO_REBUILD_STATUS_INTERVAL:-0}" != 0 ]]; then
     if ! [[ "$APOLLO_REBUILD_STATUS_INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
         echo "APOLLO_REBUILD_STATUS_INTERVAL must be a positive integer" >&2
@@ -180,6 +184,32 @@ sleep 1
     --port "$monitor_port" \
     --delay 0.1 \
     "(kickOff ${kickoff_side^})"
+
+if [[ "$force_near_ball" == 1 ]]; then
+    # Put the left striker just behind a stationary ball and keep every other
+    # player out of the lane. This is a repeatable contact-delay probe, not a
+    # different decision or motion path.
+    "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        --delay 0.02 \
+        "(agent (unum 1) (team $left_name) (move3d -26 0 0.8 1 0 0 0))" \
+        "(agent (unum 2) (team $left_name) (move3d -12 -7 0.8 1 0 0 0))" \
+        "(agent (unum 3) (team $left_name) (move3d -12 7 0.8 1 0 0 0))" \
+        "(agent (unum 4) (team $left_name) (move3d -9 -5 0.8 1 0 0 0))" \
+        "(agent (unum 5) (team $left_name) (move3d -9 5 0.8 1 0 0 0))" \
+        "(agent (unum 6) (team $left_name) (move3d -6 0 0.8 1 0 0 0))" \
+        "(agent (unum 7) (team $left_name) (move3d $near_ball_robot_x $near_ball_robot_y 0.8 1 0 0 0))" \
+        "(agent (unum 1) (team $right_name) (move3d 26 0 0.8 0 0 0 1))" \
+        "(agent (unum 2) (team $right_name) (move3d 18 -7 0.8 0 0 0 1))" \
+        "(agent (unum 3) (team $right_name) (move3d 18 -5 0.8 0 0 0 1))" \
+        "(agent (unum 4) (team $right_name) (move3d 18 -3 0.8 0 0 0 1))" \
+        "(agent (unum 5) (team $right_name) (move3d 18 3 0.8 0 0 0 1))" \
+        "(agent (unum 6) (team $right_name) (move3d 18 5 0.8 0 0 0 1))" \
+        "(agent (unum 7) (team $right_name) (move3d 18 7 0.8 0 0 0 1))" \
+        "(dropBall)" \
+        "(ball (pos 0 0 0.11) (vel 0 0 0))"
+fi
 
 if [[ -n "$forced_goal_kick_side" ]]; then
     sleep 1
