@@ -49,6 +49,7 @@ private:
     comm::TeamCommManager team_comm_manager_;
     std::unique_ptr<server::TcpLpmClient> client_;
     std::size_t last_command_variant_index_{static_cast<std::size_t>(-1)};
+    std::size_t processed_frames_{0};
     std::string last_active_motion_{"Neutral"};
 };
 

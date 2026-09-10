@@ -27,6 +27,7 @@ run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-rebuild-vs-base-$(date +%Y%m
 
 server_pid=
 player_pids=()
+rebuild_args=()
 cleanup() {
     for pid in "${player_pids[@]:-}"; do
         kill "$pid" 2>/dev/null || true
@@ -44,6 +45,13 @@ if ! [[ "$wall_seconds" =~ ^[1-9][0-9]*$ ]]; then
 fi
 case "$rebuild_side" in left|right) ;; *) echo "REBUILD_SIDE must be left or right" >&2; exit 2 ;; esac
 case "$kickoff_side" in left|right) ;; *) echo "MATCH_KICKOFF_SIDE must be left or right" >&2; exit 2 ;; esac
+if [[ "${APOLLO_REBUILD_STATUS_INTERVAL:-0}" != 0 ]]; then
+    if ! [[ "$APOLLO_REBUILD_STATUS_INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
+        echo "APOLLO_REBUILD_STATUS_INTERVAL must be a positive integer" >&2
+        exit 2
+    fi
+    rebuild_args=(--status-interval "$APOLLO_REBUILD_STATUS_INTERVAL")
+fi
 
 if [[ ! -x "$server_python" || ! -x "$server_binary" ]]; then
     echo "RCSSServerMJ environment is missing" >&2
@@ -104,6 +112,10 @@ for side in left right; do
         binary=$right_binary
         asset_root=$right_assets
     fi
+    team_args=()
+    if [[ "$team_name" == Apollo-Rebuild ]]; then
+        team_args=("${rebuild_args[@]}")
+    fi
     for number in $(seq 1 7); do
         OMP_NUM_THREADS=1 "$binary" \
             --team "$team_name" \
@@ -111,6 +123,7 @@ for side in left right; do
             --host 127.0.0.1 \
             --port "$agent_port" \
             --asset-root "$asset_root" \
+            "${team_args[@]}" \
             >"$run_dir/$team_name-$number.log" 2>&1 &
         player_pids+=("$!")
         sleep 0.05

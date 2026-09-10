@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -127,6 +128,34 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             const auto motor_nodes = server::ActionEncoder::encode_motor_actions(motion_result.joint_targets, robot_model_);
             nodes.insert(nodes.end(), motor_nodes.begin(), motor_nodes.end());
         }
+    }
+
+    ++processed_frames_;
+    if (config_.status_interval > 0 &&
+        processed_frames_ % config_.status_interval == 0) {
+        const std::array<double, 2> self{
+            snapshot.self.position_m[0], snapshot.self.position_m[1]};
+        const std::array<double, 2> ball{
+            snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+        double walk_target_norm = -1.0;
+        int walk_target_absolute = -1;
+        if (const auto* walk = std::get_if<decision::WalkCommand>(&command)) {
+            walk_target_norm = math::norm2(walk->target_2d_m);
+            walk_target_absolute = walk->target_absolute ? 1 : 0;
+        }
+        std::cerr
+            << "APOLLO_REBUILD_STATUS"
+            << " t=" << snapshot.server_time
+            << " player=" << snapshot.player_number
+            << " mode=" << static_cast<int>(snapshot.play_mode)
+            << " role=" << decision::current_role_from_blackboard(
+                   decision_manager_.blackboard())
+            << " ball_dist=" << math::planar_dist(self, ball)
+            << " ball_visible=" << (snapshot.ball.visible ? 1 : 0)
+            << " motion=" << last_active_motion_
+            << " walk_target_norm=" << walk_target_norm
+            << " walk_target_absolute=" << walk_target_absolute
+            << '\n';
     }
 
     if (team_comm_manager_.is_send_slot(config_.player_number, frame.server_cycle)) {

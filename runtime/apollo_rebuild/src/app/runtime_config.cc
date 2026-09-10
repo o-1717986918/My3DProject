@@ -44,6 +44,9 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
             config.config_root = require_value("--config-root");
         } else if (arg == "--log-level") {
             config.log_level = require_value("--log-level");
+        } else if (arg == "--status-interval") {
+            config.status_interval = std::stoull(
+                require_value("--status-interval"));
         }
     }
 
