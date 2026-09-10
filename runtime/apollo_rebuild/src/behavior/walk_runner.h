@@ -22,6 +22,7 @@ struct WalkStepResult {
     std::vector<float> observation;
     std::vector<float> action;
     robot::JointTargets joint_targets;
+    bool fast_walk_active{false};
     bool rapid_turn_active{false};
     bool rapid_turn_mirrored{false};
 };
@@ -36,6 +37,7 @@ public:
 
     explicit WalkRunner(
         const std::filesystem::path& model_path,
+        std::optional<std::filesystem::path> fast_walk_model_path = std::nullopt,
         std::optional<std::filesystem::path> rapid_turn_model_path = std::nullopt);
 
     /// Evaluates one policy step; `reset` reinitializes temporal observations.
@@ -50,6 +52,7 @@ private:
     static constexpr float kOrientationToAngVelScale = 0.2F;
 
     OnnxSession session_;
+    std::optional<OnnxSession> fast_walk_session_;
     std::optional<OnnxSession> rapid_turn_session_;
     robot::T1RobotModel robot_model_;
     std::vector<float> previous_action_;
@@ -58,6 +61,11 @@ private:
     int history_length_{1};
     int step_obs_dim_{0};
     HeadTrackerState head_tracker_state_;
+    std::vector<float> fast_walk_previous_action_;
+    double fast_walk_gait_phase_{0.0};
+    bool fast_walk_disabled_{false};
+    bool fast_walk_active_{false};
+    double fast_walk_cooldown_until_s_{0.0};
     std::vector<float> rapid_turn_previous_action_;
     double rapid_turn_gait_phase_{0.0};
     bool rapid_turn_disabled_{false};
@@ -74,6 +82,16 @@ private:
         const world::WorldSnapshot& snapshot,
         const std::vector<float>& action,
         std::optional<int> role_id);
+    bool fast_walk_supported(
+        const world::WorldSnapshot& snapshot,
+        const decision::WalkCommand& command,
+        const std::array<float, 3>& stable_velocity_command);
+    std::optional<robot::JointTargets> step_fast_walk(
+        const world::WorldSnapshot& snapshot,
+        const decision::WalkCommand& command,
+        const std::array<float, 3>& stable_velocity_command,
+        const robot::JointTargets& stable_targets,
+        bool reset);
     std::vector<float> build_run_policy_observation(
         const world::WorldSnapshot& snapshot,
         const std::array<float, 3>& velocity_command,

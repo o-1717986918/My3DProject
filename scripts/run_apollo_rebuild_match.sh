@@ -28,6 +28,8 @@ run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-rebuild-vs-base-$(date +%Y%m
 server_pid=
 player_pids=()
 rebuild_args=()
+fast_walk_model=${APOLLO_REBUILD_FAST_WALK_MODEL:-/home/win98/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/policy.onnx}
+fast_walk_sha=6214b656c28f0b95300287e5e3a26508078a6a8d036dbeda0ec5130051a190d6
 rapid_turn_model=${APOLLO_REBUILD_RAPID_TURN_MODEL:-/home/win98/rl_runs/stable-motion/rapid-turn-s20261101-v1/policy.onnx}
 rapid_turn_sha=c086b819d3ffa3dbb971dbcc2bb2e40c949864a4a702546f678d89414c510cca
 cleanup() {
@@ -65,6 +67,18 @@ if [[ "${APOLLO_REBUILD_ENABLE_RAPID_TURN:-0}" == 1 ]]; then
         exit 2
     fi
     rebuild_args+=(--enable-rapid-turn --rapid-turn-model "$rapid_turn_model")
+fi
+if [[ "${APOLLO_REBUILD_ENABLE_FAST_WALK:-0}" == 1 ]]; then
+    if [[ ! -f "$fast_walk_model" ]]; then
+        echo "FastWalk model is missing: $fast_walk_model" >&2
+        exit 2
+    fi
+    actual_sha=$(sha256sum "$fast_walk_model" | awk '{print $1}')
+    if [[ "$actual_sha" != "$fast_walk_sha" ]]; then
+        echo "FastWalk model checksum mismatch: $fast_walk_model" >&2
+        exit 2
+    fi
+    rebuild_args+=(--enable-fast-walk --fast-walk-model "$fast_walk_model")
 fi
 
 if [[ ! -x "$server_python" || ! -x "$server_binary" ]]; then

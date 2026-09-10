@@ -19,6 +19,8 @@ struct RuntimeConfig {
     std::string config_root{"config"};
     std::string log_level{"info"};
     std::size_t status_interval{0};
+    bool enable_fast_walk{false};
+    std::string fast_walk_model;
     bool enable_rapid_turn{false};
     std::string rapid_turn_model;
 

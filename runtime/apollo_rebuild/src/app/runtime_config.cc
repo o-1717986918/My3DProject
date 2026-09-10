@@ -47,6 +47,10 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
         } else if (arg == "--status-interval") {
             config.status_interval = std::stoull(
                 require_value("--status-interval"));
+        } else if (arg == "--enable-fast-walk") {
+            config.enable_fast_walk = true;
+        } else if (arg == "--fast-walk-model") {
+            config.fast_walk_model = require_value("--fast-walk-model");
         } else if (arg == "--enable-rapid-turn") {
             config.enable_rapid_turn = true;
         } else if (arg == "--rapid-turn-model") {
@@ -54,6 +58,10 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
         }
     }
 
+    if (config.enable_fast_walk && config.fast_walk_model.empty()) {
+        throw std::invalid_argument(
+            "--enable-fast-walk requires --fast-walk-model");
+    }
     if (config.enable_rapid_turn && config.rapid_turn_model.empty()) {
         throw std::invalid_argument(
             "--enable-rapid-turn requires --rapid-turn-model");

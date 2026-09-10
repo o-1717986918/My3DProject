@@ -10,6 +10,9 @@ namespace behavior {
 MotionManager::MotionManager(const app::RuntimeConfig& config)
     : walk_runner_(
           config.resolve_asset_path("networks/walk/policy.onnx"),
+          config.enable_fast_walk
+              ? std::optional<std::filesystem::path>{config.fast_walk_model}
+              : std::nullopt,
           config.enable_rapid_turn
               ? std::optional<std::filesystem::path>{config.rapid_turn_model}
               : std::nullopt),
@@ -38,7 +41,7 @@ MotionStepResult MotionManager::step(
                 ? result.rapid_turn_mirrored
                     ? "RapidTurnV1RightMirror"
                     : "RapidTurnV1Left"
-                : "Walk",
+                : result.fast_walk_active ? "FastWalkV2" : "Walk",
             result.joint_targets};
     }
 
