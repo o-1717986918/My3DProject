@@ -223,4 +223,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(goal_kick_behavior_test PRIVATE decision_core)
     add_test(NAME goal_kick_behavior_test COMMAND goal_kick_behavior_test)
+
+    add_executable(run_policy_reflection_test
+        tests/run_policy_reflection_test.cc
+    )
+    target_link_libraries(run_policy_reflection_test PRIVATE behavior_core)
+    add_test(NAME run_policy_reflection_test COMMAND run_policy_reflection_test)
 endif()

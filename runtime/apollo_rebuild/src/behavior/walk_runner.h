@@ -12,6 +12,7 @@
 #include <array>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace behavior {
@@ -21,6 +22,8 @@ struct WalkStepResult {
     std::vector<float> observation;
     std::vector<float> action;
     robot::JointTargets joint_targets;
+    bool rapid_turn_active{false};
+    bool rapid_turn_mirrored{false};
 };
 
 /// Executes the learned walking policy and its observation history.
@@ -31,7 +34,9 @@ public:
         std::optional<double> last_ball_seen_time;
     };
 
-    explicit WalkRunner(const std::filesystem::path& model_path);
+    explicit WalkRunner(
+        const std::filesystem::path& model_path,
+        std::optional<std::filesystem::path> rapid_turn_model_path = std::nullopt);
 
     /// Evaluates one policy step; `reset` reinitializes temporal observations.
     WalkStepResult step(
@@ -45,6 +50,7 @@ private:
     static constexpr float kOrientationToAngVelScale = 0.2F;
 
     OnnxSession session_;
+    std::optional<OnnxSession> rapid_turn_session_;
     robot::T1RobotModel robot_model_;
     std::vector<float> previous_action_;
     std::vector<float> observation_;
@@ -52,6 +58,11 @@ private:
     int history_length_{1};
     int step_obs_dim_{0};
     HeadTrackerState head_tracker_state_;
+    std::vector<float> rapid_turn_previous_action_;
+    double rapid_turn_gait_phase_{0.0};
+    bool rapid_turn_disabled_{false};
+    bool rapid_turn_active_{false};
+    double rapid_turn_cooldown_until_s_{0.0};
 
     std::array<float, 3> compute_velocity_command(
         const world::WorldSnapshot& snapshot,
@@ -63,6 +74,19 @@ private:
         const world::WorldSnapshot& snapshot,
         const std::vector<float>& action,
         std::optional<int> role_id);
+    std::vector<float> build_run_policy_observation(
+        const world::WorldSnapshot& snapshot,
+        const std::array<float, 3>& velocity_command,
+        const std::vector<float>& previous_action,
+        double gait_phase) const;
+    bool rapid_turn_supported(
+        const world::WorldSnapshot& snapshot,
+        const std::array<float, 3>& stable_velocity_command);
+    std::optional<robot::JointTargets> step_rapid_turn(
+        const world::WorldSnapshot& snapshot,
+        const std::array<float, 3>& stable_velocity_command,
+        const robot::JointTargets& stable_targets,
+        bool reset);
 };
 
 }  // namespace behavior

@@ -28,6 +28,8 @@ run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-rebuild-vs-base-$(date +%Y%m
 server_pid=
 player_pids=()
 rebuild_args=()
+rapid_turn_model=${APOLLO_REBUILD_RAPID_TURN_MODEL:-/home/win98/rl_runs/stable-motion/rapid-turn-s20261101-v1/policy.onnx}
+rapid_turn_sha=c086b819d3ffa3dbb971dbcc2bb2e40c949864a4a702546f678d89414c510cca
 cleanup() {
     for pid in "${player_pids[@]:-}"; do
         kill "$pid" 2>/dev/null || true
@@ -50,7 +52,19 @@ if [[ "${APOLLO_REBUILD_STATUS_INTERVAL:-0}" != 0 ]]; then
         echo "APOLLO_REBUILD_STATUS_INTERVAL must be a positive integer" >&2
         exit 2
     fi
-    rebuild_args=(--status-interval "$APOLLO_REBUILD_STATUS_INTERVAL")
+    rebuild_args+=(--status-interval "$APOLLO_REBUILD_STATUS_INTERVAL")
+fi
+if [[ "${APOLLO_REBUILD_ENABLE_RAPID_TURN:-0}" == 1 ]]; then
+    if [[ ! -f "$rapid_turn_model" ]]; then
+        echo "RapidTurn model is missing: $rapid_turn_model" >&2
+        exit 2
+    fi
+    actual_sha=$(sha256sum "$rapid_turn_model" | awk '{print $1}')
+    if [[ "$actual_sha" != "$rapid_turn_sha" ]]; then
+        echo "RapidTurn model checksum mismatch: $rapid_turn_model" >&2
+        exit 2
+    fi
+    rebuild_args+=(--enable-rapid-turn --rapid-turn-model "$rapid_turn_model")
 fi
 
 if [[ ! -x "$server_python" || ! -x "$server_binary" ]]; then

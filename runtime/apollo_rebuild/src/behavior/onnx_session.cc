@@ -55,9 +55,15 @@ std::size_t tensor_size(const std::vector<int64_t>& shape) {
 }
 
 void verify_shape(
-    const std::vector<int64_t>& actual,
+    std::vector<int64_t>& actual,
     const std::vector<int64_t>& expected,
     const char* label) {
+    // Training exports use a dynamic batch dimension; runtime always runs one
+    // observation at a time. Feature dimensions remain strict.
+    if (actual.size() == expected.size() && !actual.empty() &&
+        actual[0] == -1 && expected[0] == 1) {
+        actual[0] = 1;
+    }
     if (actual != expected) {
         throw std::runtime_error(
             std::string("ONNX ") + label + " shape mismatch");
