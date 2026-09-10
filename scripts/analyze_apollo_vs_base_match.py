@@ -135,7 +135,7 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
         for line in log_path.read_text(
             encoding="utf-8", errors="replace"
         ).splitlines():
-            if line.startswith("MY3D_STATUS"):
+            if line.startswith(("MY3D_STATUS", "APOLLO_REBUILD_STATUS")):
                 status_samples += 1
                 values = _fields(line)
                 for name in status_fields:
