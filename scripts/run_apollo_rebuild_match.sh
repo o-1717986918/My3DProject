@@ -160,7 +160,21 @@ for side in left right; do
     done
 done
 
-sleep 4
+all_agents_active=0
+for _ in $(seq 1 100); do
+    activated=$(awk '/ activated\.$/ { count += 1 } END { print count + 0 }' "$run_dir/server.log")
+    if [[ "$activated" -ge 14 ]]; then
+        all_agents_active=1
+        break
+    fi
+    sleep 0.1
+done
+if [[ "$all_agents_active" != 1 ]]; then
+    echo "agents did not all activate before kickoff; logs: $run_dir" >&2
+    exit 1
+fi
+# Give every newly activated client one synchronized cycle to apply its beam.
+sleep 1
 "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
     --host 127.0.0.1 \
     --port "$monitor_port" \
