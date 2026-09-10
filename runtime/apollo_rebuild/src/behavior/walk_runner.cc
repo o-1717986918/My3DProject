@@ -39,11 +39,14 @@ std::optional<robot::T1RobotModel::HeadTargets> update_head_tracker(
     constexpr double sweep_max_deg = 90.0;
     constexpr double sweep_speed_deg_per_sec = 60.0;
     constexpr double sweep_pitch_deg = 0.0;
+    const bool active_player = role_id.has_value() &&
+        *role_id == decision::RoleManager::ROLE_AP;
 
-    // Only the GK (ROLE_GK = 0) tracks the ball with its head; every other
-    // role sweeps the field. Roles are 0..6 in this codebase (see
-    // decision::RoleManager), so there is no special "role 10" anymore.
-    if (role_id.has_value() && *role_id != decision::RoleManager::ROLE_GK) {
+    // The active player must keep the ball observable during the final
+    // approach. Other field roles continue sweeping for situational awareness.
+    if (role_id.has_value() &&
+        *role_id != decision::RoleManager::ROLE_GK &&
+        *role_id != decision::RoleManager::ROLE_AP) {
         const double sweep_range = sweep_max_deg - sweep_min_deg;
         const double period = sweep_range / sweep_speed_deg_per_sec * 2.0;
         const double t = std::fmod(snapshot.server_time, period);
@@ -58,13 +61,14 @@ std::optional<robot::T1RobotModel::HeadTargets> update_head_tracker(
         return robot_model.clamp_head_targets(yaw, sweep_pitch_deg);
     }
 
-    if (snapshot.ball.visible) {
+    if (snapshot.ball.visible || active_player) {
         const std::array<double, 3> ball_vec_world{
             snapshot.ball.position_m[0] - snapshot.self.position_m[0],
             snapshot.ball.position_m[1] - snapshot.self.position_m[1],
             snapshot.ball.position_m[2] - snapshot.self.position_m[2],
         };
-        if (norm2({ball_vec_world[0], ball_vec_world[1]}) <= lock_distance) {
+        if (!active_player &&
+            norm2({ball_vec_world[0], ball_vec_world[1]}) <= lock_distance) {
             if (!state.last_head_target_deg.has_value()) {
                 return std::nullopt;
             }
@@ -79,8 +83,10 @@ std::optional<robot::T1RobotModel::HeadTargets> update_head_tracker(
         }
         const double yaw = std::atan2(body_vec[1], body_vec[0]) * 180.0 / kPi;
         const double pitch = -std::atan2(body_vec[2], horiz) * 180.0 / kPi;
-        state.last_ball_seen_time = snapshot.server_time;
-        state.last_head_target_deg = std::array<double, 2>{yaw, pitch};
+        if (snapshot.ball.visible) {
+            state.last_ball_seen_time = snapshot.server_time;
+            state.last_head_target_deg = std::array<double, 2>{yaw, pitch};
+        }
         return robot_model.clamp_head_targets(yaw, pitch);
     }
 
