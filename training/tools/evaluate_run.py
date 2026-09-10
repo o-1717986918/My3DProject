@@ -64,7 +64,9 @@ def main() -> None:
             "fixed_command": [args.vx, args.vy, args.yaw_rate],
             "reset_joint_noise": 0.005 if reference_centered else 0.03,
             "reset_root_velocity_noise": 0.01 if reference_centered else 0.05,
-            "reset_yaw_range": 0.02 if reference_centered else 0.10,
+            # Drift below is measured on the world Y axis, so keep the fixed
+            # straight-line evaluation aligned with world X.
+            "reset_yaw_range": 0.0,
             "reference_init_probability": 1.0 if reference_centered else 0.0,
             "push_enable": False,
             "action_delay_max_steps": 0,
