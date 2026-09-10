@@ -215,3 +215,12 @@ set_target_properties(ApolloCodeBase PROPERTIES
 if(APOLLO_STATIC_CXX_RUNTIME AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_link_options(ApolloCodeBase PRIVATE -static-libstdc++ -static-libgcc)
 endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(goal_kick_behavior_test
+        tests/goal_kick_behavior_test.cc
+    )
+    target_link_libraries(goal_kick_behavior_test PRIVATE decision_core)
+    add_test(NAME goal_kick_behavior_test COMMAND goal_kick_behavior_test)
+endif()

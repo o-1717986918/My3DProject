@@ -177,6 +177,7 @@ using APNodePtr = bt::NodePtr<APDecisionContext>;
 
 struct GKDecisionContext {
     const world::WorldSnapshot& snapshot;
+    APState& restart_state;
     std::array<double, 2> ball{0.0, 0.0};
     std::array<double, 2> self{0.0, 0.0};
     double ball_distance{0.0};
@@ -279,10 +280,16 @@ bool is_gk_our_goal_kick(const GKDecisionContext& context) {
 }
 
 WalkCommand make_gk_walk_to_ball(GKDecisionContext& context) {
-    // On OurGoalKick the keeper walks straight at the ball.
-    return make_walk_command_avoiding(
-        context.ball, context.snapshot, std::nullopt, true, true,
-        RoleManager::ROLE_GK);
+    // Walking to the ball itself brakes at the ball and may never restart
+    // play. Reuse the baseline dribble alignment and walk through the ball.
+    APDecisionContext restart_context{
+        context.snapshot,
+        context.restart_state,
+        context.ball,
+        context.self,
+        context.ball_distance,
+    };
+    return make_dribble_command(restart_context, 0.0);
 }
 
 HighLevelCommand make_gk_hold_position(GKDecisionContext& /*context*/) {
@@ -441,10 +448,15 @@ HighLevelCommand GKBehavior::make_command(
 
     GKDecisionContext context{
         snapshot,
+        restart_state_,
         {snapshot.ball.position_m[0], snapshot.ball.position_m[1]},
         {snapshot.self.position_m[0], snapshot.self.position_m[1]},
         0.0};
     context.ball_distance = math::planar_dist(context.ball, context.self);
+
+    if (!is_gk_our_goal_kick(context)) {
+        restart_state_ = {};
+    }
 
     const auto result = gk_tree->tick(context);
     return result.command.value_or(NeutralCommand{});
