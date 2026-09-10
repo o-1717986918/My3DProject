@@ -67,9 +67,7 @@ public:
     HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
         const Blackboard& blackboard) const override;
-    void reset_state() const { restart_state_ = {}; }
-private:
-    mutable APState restart_state_;
+    void reset_state() const {}
 };
 
 /// Clears persistent state owned by all role behavior instances.

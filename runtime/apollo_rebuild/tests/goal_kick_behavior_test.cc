@@ -32,7 +32,8 @@ int main() {
 
     assert(walk != nullptr);
     assert(!walk->target_absolute);
-    assert(walk->target_2d_m[0] > 1.4);
+    assert(walk->target_2d_m[0] > 0.5);
+    assert(walk->target_2d_m[0] < 1.2);
     assert(walk->target_2d_m[1] > -0.1);
     assert(walk->target_2d_m[1] < 0.1);
     return 0;

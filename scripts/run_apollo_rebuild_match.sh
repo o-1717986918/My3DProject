@@ -23,6 +23,7 @@ agent_port=${MATCH_AGENT_PORT:-$((34000 + $$ % 1000))}
 monitor_port=${MATCH_MONITOR_PORT:-$((agent_port + 1))}
 rebuild_side=${REBUILD_SIDE:-left}
 kickoff_side=${MATCH_KICKOFF_SIDE:-left}
+forced_goal_kick_side=${MATCH_FORCE_GOAL_KICK_SIDE:-}
 run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-rebuild-vs-base-$(date +%Y%m%d-%H%M%S)-$rebuild_side}
 
 server_pid=
@@ -49,6 +50,7 @@ if ! [[ "$wall_seconds" =~ ^[1-9][0-9]*$ ]]; then
 fi
 case "$rebuild_side" in left|right) ;; *) echo "REBUILD_SIDE must be left or right" >&2; exit 2 ;; esac
 case "$kickoff_side" in left|right) ;; *) echo "MATCH_KICKOFF_SIDE must be left or right" >&2; exit 2 ;; esac
+case "$forced_goal_kick_side" in ""|left|right) ;; *) echo "MATCH_FORCE_GOAL_KICK_SIDE must be left or right" >&2; exit 2 ;; esac
 if [[ "${APOLLO_REBUILD_STATUS_INTERVAL:-0}" != 0 ]]; then
     if ! [[ "$APOLLO_REBUILD_STATUS_INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
         echo "APOLLO_REBUILD_STATUS_INTERVAL must be a positive integer" >&2
@@ -164,6 +166,20 @@ sleep 4
     --port "$monitor_port" \
     --delay 0.1 \
     "(kickOff ${kickoff_side^})"
+
+if [[ -n "$forced_goal_kick_side" ]]; then
+    sleep 1
+    if [[ "$forced_goal_kick_side" == left ]]; then
+        goal_line_x=-28.0
+    else
+        goal_line_x=28.0
+    fi
+    "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        --delay 0.1 \
+        "(ball (pos $goal_line_x 8.0 0.11) (vel 0 0 0))"
+fi
 
 sleep "$wall_seconds"
 
