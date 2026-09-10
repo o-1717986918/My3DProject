@@ -27,15 +27,13 @@ forced_goal_kick_side=${MATCH_FORCE_GOAL_KICK_SIDE:-}
 force_near_ball=${MATCH_FORCE_NEAR_BALL:-0}
 near_ball_robot_x=${MATCH_NEAR_BALL_ROBOT_X:--0.55}
 near_ball_robot_y=${MATCH_NEAR_BALL_ROBOT_Y:-0}
+near_ball_robot_qw=${MATCH_NEAR_BALL_ROBOT_QW:-1}
+near_ball_robot_qz=${MATCH_NEAR_BALL_ROBOT_QZ:-0}
 run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-rebuild-vs-base-$(date +%Y%m%d-%H%M%S)-$rebuild_side}
 
 server_pid=
 player_pids=()
 rebuild_args=()
-fast_walk_model=${APOLLO_REBUILD_FAST_WALK_MODEL:-/home/win98/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/policy.onnx}
-fast_walk_sha=6214b656c28f0b95300287e5e3a26508078a6a8d036dbeda0ec5130051a190d6
-rapid_turn_model=${APOLLO_REBUILD_RAPID_TURN_MODEL:-/home/win98/rl_runs/stable-motion/rapid-turn-s20261101-v1/policy.onnx}
-rapid_turn_sha=c086b819d3ffa3dbb971dbcc2bb2e40c949864a4a702546f678d89414c510cca
 cleanup() {
     for pid in "${player_pids[@]:-}"; do
         kill "$pid" 2>/dev/null || true
@@ -62,31 +60,6 @@ if [[ "${APOLLO_REBUILD_STATUS_INTERVAL:-0}" != 0 ]]; then
     fi
     rebuild_args+=(--status-interval "$APOLLO_REBUILD_STATUS_INTERVAL")
 fi
-if [[ "${APOLLO_REBUILD_ENABLE_RAPID_TURN:-0}" == 1 ]]; then
-    if [[ ! -f "$rapid_turn_model" ]]; then
-        echo "RapidTurn model is missing: $rapid_turn_model" >&2
-        exit 2
-    fi
-    actual_sha=$(sha256sum "$rapid_turn_model" | awk '{print $1}')
-    if [[ "$actual_sha" != "$rapid_turn_sha" ]]; then
-        echo "RapidTurn model checksum mismatch: $rapid_turn_model" >&2
-        exit 2
-    fi
-    rebuild_args+=(--enable-rapid-turn --rapid-turn-model "$rapid_turn_model")
-fi
-if [[ "${APOLLO_REBUILD_ENABLE_FAST_WALK:-0}" == 1 ]]; then
-    if [[ ! -f "$fast_walk_model" ]]; then
-        echo "FastWalk model is missing: $fast_walk_model" >&2
-        exit 2
-    fi
-    actual_sha=$(sha256sum "$fast_walk_model" | awk '{print $1}')
-    if [[ "$actual_sha" != "$fast_walk_sha" ]]; then
-        echo "FastWalk model checksum mismatch: $fast_walk_model" >&2
-        exit 2
-    fi
-    rebuild_args+=(--enable-fast-walk --fast-walk-model "$fast_walk_model")
-fi
-
 if [[ ! -x "$server_python" || ! -x "$server_binary" ]]; then
     echo "RCSSServerMJ environment is missing" >&2
     exit 2
@@ -199,7 +172,7 @@ if [[ "$force_near_ball" == 1 ]]; then
         "(agent (unum 4) (team $left_name) (move3d -9 -5 0.8 1 0 0 0))" \
         "(agent (unum 5) (team $left_name) (move3d -9 5 0.8 1 0 0 0))" \
         "(agent (unum 6) (team $left_name) (move3d -6 0 0.8 1 0 0 0))" \
-        "(agent (unum 7) (team $left_name) (move3d $near_ball_robot_x $near_ball_robot_y 0.8 1 0 0 0))" \
+        "(agent (unum 7) (team $left_name) (move3d $near_ball_robot_x $near_ball_robot_y 0.8 $near_ball_robot_qw 0 0 $near_ball_robot_qz))" \
         "(agent (unum 1) (team $right_name) (move3d 26 0 0.8 0 0 0 1))" \
         "(agent (unum 2) (team $right_name) (move3d 18 -7 0.8 0 0 0 1))" \
         "(agent (unum 3) (team $right_name) (move3d 18 -5 0.8 0 0 0 1))" \
