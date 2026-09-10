@@ -1,11 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "src/decision/role_behaviors.h"
+#include "src/decision/field_geometry.h"
 
 #include <cassert>
 #include <variant>
 
 int main() {
+    for (const int player_number : {6, 7}) {
+        const auto pose =
+            decision::field_geometry::player_defensive_kickoff_beam_pose(
+                player_number);
+        const decision::field_geometry::Position2 position{pose[0], pose[1]};
+        assert(!decision::field_geometry::is_in_our_goalie_area(position));
+        assert(position[0] < 0.0);
+        assert(decision::field_geometry::squared_norm(position) >
+               decision::field_geometry::kCenterCircleRadiusM *
+                   decision::field_geometry::kCenterCircleRadiusM);
+    }
+
     world::WorldSnapshot snapshot;
     snapshot.play_mode = world::PlayMode::OurGoalKick;
     snapshot.play_mode_group = world::PlayModeGroup::OurKick;

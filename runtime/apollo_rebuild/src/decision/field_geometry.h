@@ -64,7 +64,7 @@ inline constexpr std::array<Position2, 7> kBasePlayerPoses{{
 // circle so the team is not bunched deep in its own half. All poses below are in
 // ACTUAL-field meters (goal line at -kActualHalfLengthM) and keep >= ~1.3 m of
 // margin on both legality limits.
-inline constexpr double kDefensiveKickoffBaselineDepthM = 4.0;
+inline constexpr double kDefensiveKickoffBaselineDepthM = 4.5;
 inline constexpr double kDefensiveKickoffBaselineSpreadYM = 3.0;
 inline constexpr Position2 kDefensiveKickoffPressCenterPose{-7.0, 0.0};  // striker press, faces the ball
 inline constexpr Position2 kDefensiveKickoffPressWingPose{-6.5, 5.0};    // wing press (y mirrored per side)
@@ -152,8 +152,8 @@ inline Pose3 player_beam_pose(int player_number) {
 
 /// Returns a legal defensive-kickoff beam pose for a 1-based player number.
 inline Pose3 player_defensive_kickoff_beam_pose(int player_number) {
-    // Players 6 and 7 drop to the deep guard pair 4 m off our own goal line; 2/3
-    // press the wings, 5 presses through the middle, and 4 screens centrally in
+    // Players 6 and 7 drop to the deep guard pair 4.5 m off our own goal line;
+    // 2/3 press the wings, 5 presses through the middle, and 4 screens centrally in
     // front of the deep pair. Everyone else (the GK) keeps its default goal-mouth
     // beam pose. See the shape constants above for the legality margins (own half
     // + outside the center circle).
