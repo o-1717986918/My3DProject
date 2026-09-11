@@ -245,9 +245,16 @@ WalkCommand make_dribble_command(
         return approach_command;
     }
 
-    return make_walk_command_avoiding(
+    WalkCommand push_command = make_walk_command_avoiding(
         push_target, context.snapshot, std::nullopt, true, true,
         RoleManager::ROLE_AP, false, false);
+    // Once the setup is complete, hold the intended ball-travel heading.
+    // Re-facing the ball every tick creates positive feedback: a small lateral
+    // deflection turns the robot toward the deflected ball and makes the next
+    // contact even less accurate.
+    push_command.orientation_deg = absolute_direction_deg;
+    push_command.orientation_absolute = true;
+    return push_command;
 }
 
 WalkCommand make_ap_push_ball_to_goal(APDecisionContext& context) {
