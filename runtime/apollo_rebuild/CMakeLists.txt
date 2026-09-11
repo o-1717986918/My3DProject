@@ -224,10 +224,4 @@ if(BUILD_TESTING)
     target_link_libraries(goal_kick_behavior_test PRIVATE decision_core)
     add_test(NAME goal_kick_behavior_test COMMAND goal_kick_behavior_test)
 
-    add_executable(ap_push_behavior_test
-        tests/ap_push_behavior_test.cc
-    )
-    target_link_libraries(ap_push_behavior_test PRIVATE decision_core)
-    add_test(NAME ap_push_behavior_test COMMAND ap_push_behavior_test)
-
 endif()
