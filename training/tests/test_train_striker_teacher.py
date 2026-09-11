@@ -11,6 +11,7 @@ from training.tools.train_striker_teacher import (
     _load_kick_prior,
     _load_kick_prior_bank,
     _load_parity_report,
+    _validate_walk_clone_checkpoint,
 )
 
 
@@ -30,6 +31,7 @@ def test_striker_curriculum_expands_without_changing_stage_order():
 def test_t1_striker_curriculum_separates_chase_from_directional_contact():
     chase = STAGES["ball_chase"]
     reposition = STAGES["ball_reposition"]
+    clone = STAGES["walk_clone_pre_kick"]
     release = STAGES["contact_release_2m"]
     kick = STAGES["directional_kick"]
 
@@ -40,6 +42,8 @@ def test_t1_striker_curriculum_separates_chase_from_directional_contact():
     assert reposition["robot_distance_range"] == [0.35, 1.25]
     assert reposition["kick_prior_enabled"] is False
     assert reposition["learned_approach_residual_floor"] == 1.0
+    assert clone["control_decoder"] == "direct_joint_delta"
+    assert clone["kick_prior_enabled"] is False
     assert kick["kick_prior_enabled"] is True
     assert 0.0 < kick["learned_approach_residual_floor"] < 1.0
     assert kick["robot_distance_range"][1] < chase["robot_distance_range"][1]
@@ -154,3 +158,11 @@ def test_kick_prior_bank_is_sorted_by_declared_target_distance(tmp_path: Path):
     assert trajectories.shape == (3, 60, 23)
     assert distances.tolist() == [2.0, 3.5, 5.0]
     assert metadata["selection"] == "nearest_remaining_target_distance_first_tie"
+
+
+def test_direct_stage_rejects_checkpoint_without_clone_lineage(tmp_path: Path):
+    checkpoint = tmp_path / "run" / "checkpoints" / "000000001000"
+    checkpoint.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="manifest"):
+        _validate_walk_clone_checkpoint(checkpoint)

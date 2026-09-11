@@ -69,6 +69,10 @@ def default_config() -> config_dict.ConfigDict:
     config.kick_trigger_requires_settle = False
     config.kick_rearm_steps = 25
     config.kick_prior_enabled = True
+    # Competition remains a residual over Apollo Walk.  The direct decoder is
+    # training-only and accepts physical joint deltas cloned from that Walk;
+    # it must never be cold-started from the unstable zero-action posture.
+    config.control_decoder = "walk_residual"
     # Zero preserves the deployed kick-residual contract.  The staged T1
     # striker curriculum raises this floor so the actor can first learn ball
     # chasing and then a continuous chase-to-contact transition.
@@ -187,6 +191,23 @@ def settled_release_command(
     )
 
 
+def compose_striker_targets(
+    default_pose: jax.Array,
+    walk_action: jax.Array,
+    prior_residual: jax.Array,
+    policy_action: jax.Array,
+    learned_correction: jax.Array,
+    *,
+    control_decoder: str,
+) -> jax.Array:
+    """Compose the deployed residual or a Walk-cloned direct teacher target."""
+    if control_decoder == "direct_joint_delta":
+        return default_pose + policy_action + prior_residual
+    if control_decoder != "walk_residual":
+        raise ValueError(f"unsupported striker decoder: {control_decoder}")
+    return default_pose + 0.25 * walk_action + prior_residual + learned_correction
+
+
 class LongHorizonStriker(DirectionalKick):
     """Twenty-second privileged-teacher task with a deployable actor boundary."""
 
@@ -221,6 +242,11 @@ class LongHorizonStriker(DirectionalKick):
             raise ValueError("kick activation thresholds must be strictly nested")
         if not 0.0 < self._config.residual_scale <= 1.0:
             raise ValueError("residual_scale must be in (0, 1]")
+        if self._config.control_decoder not in {
+            "walk_residual",
+            "direct_joint_delta",
+        }:
+            raise ValueError("unsupported control_decoder")
         if self._config.arrival_speed_tolerance <= 0.0:
             raise ValueError("arrival_speed_tolerance must be positive")
         if self.contract.observation_size != 102 or self.action_size != 23:
@@ -644,10 +670,14 @@ class LongHorizonStriker(DirectionalKick):
             * jp.asarray(KICK_ACTION_SCALE)
         )
         targets = jp.clip(
-            self._default_pose
-            + 0.25 * walk_action
-            + prior_joint_residual
-            + learned_correction,
+            compose_striker_targets(
+                self._default_pose,
+                walk_action,
+                prior_joint_residual,
+                action,
+                learned_correction,
+                control_decoder=self._config.control_decoder,
+            ),
             self._lowers,
             self._uppers,
         )

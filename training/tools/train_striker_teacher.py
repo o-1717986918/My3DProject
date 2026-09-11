@@ -61,6 +61,22 @@ STAGES: dict[str, dict[str, Any]] = {
         "kick_prior_enabled": False,
         "learned_approach_residual_floor": 1.0,
     },
+    # Direct full-body teacher initialized by collect_striker_walk_clone.py and
+    # train_striker_walk_clone.py.  It uses a physical joint-delta action so a
+    # cloned Apollo Walk output is an exact decoder match.
+    "walk_clone_pre_kick": {
+        "robot_distance_range": [0.35, 1.25],
+        "robot_bearing_range": [-3.141593, 3.141593],
+        "robot_lateral_range": [0.0, 0.0],
+        "robot_yaw_noise_range": [-3.141593, 3.141593],
+        "target_angle_range": [-3.141593, 3.141593],
+        "target_distance_range": [2.0, 5.0],
+        "reset_joint_noise": 0.02,
+        "reset_root_velocity_noise": 0.06,
+        "kick_prior_enabled": False,
+        "learned_approach_residual_floor": 1.0,
+        "control_decoder": "direct_joint_delta",
+    },
     # Stage 2 resumes the chase teacher and enables a direction-conditioned
     # contact prior.  A non-zero residual floor makes approach and strike one
     # continuous policy instead of teaching only a narrow release window.
@@ -137,6 +153,23 @@ STAGES: dict[str, dict[str, Any]] = {
 NORMALIZE_OBSERVATIONS = False
 
 
+def make_striker_network_factory(init_noise_std: float):
+    """Return the one versioned network shape shared by PPO and Walk cloning."""
+    return functools.partial(
+        ppo_networks.make_ppo_networks,
+        policy_hidden_layer_sizes=(256, 128, 128),
+        value_hidden_layer_sizes=(256, 256, 128),
+        policy_obs_key="teacher_state",
+        value_obs_key="privileged_state",
+        distribution_type="normal",
+        noise_std_type="log",
+        init_noise_std=init_noise_std,
+        mean_clip_scale=1.0,
+        mean_kernel_init_fn=jax.nn.initializers.normal,
+        mean_kernel_init_kwargs={"stddev": 0.0},
+    )
+
+
 def _json_value(value: Any) -> Any:
     try:
         return value.item()
@@ -171,6 +204,28 @@ def _load_parity_report(path: Path, implementation: str) -> dict[str, Any]:
         "path": str(path.resolve()),
         "sha256": _sha256(path),
         "summary": report["summary"],
+    }
+
+
+def _validate_walk_clone_checkpoint(path: Path) -> dict[str, Any]:
+    """Require direct-control PPO to start from a closed-loop Walk clone."""
+    manifest_path = path.parents[1] / "manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError("Walk-clone checkpoint manifest is missing")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if (
+        manifest.get("status") != "complete"
+        or manifest.get("purpose")
+        != "apollo_walk_initialized_privileged_striker_actor"
+        or Path(manifest.get("checkpoint", "")).resolve() != path.resolve()
+    ):
+        raise ValueError("Walk-clone checkpoint lineage is invalid")
+    return {
+        "manifest": str(manifest_path.resolve()),
+        "manifest_sha256": _sha256(manifest_path),
+        "source_walk_policy_sha256": manifest["source_walk_policy_sha256"],
+        "validation_mse": manifest["validation_mse"],
+        "validation_max_abs_error": manifest["validation_max_abs_error"],
     }
 
 
@@ -330,6 +385,13 @@ def main() -> None:
         raise ValueError("run-dir must be an absolute path outside the repository")
     if args.restore_checkpoint is not None and not args.restore_checkpoint.exists():
         raise FileNotFoundError(args.restore_checkpoint)
+    walk_clone_initializer = None
+    if args.stage == "walk_clone_pre_kick":
+        if args.restore_checkpoint is None:
+            raise ValueError("walk_clone_pre_kick requires a cloned Walk checkpoint")
+        walk_clone_initializer = _validate_walk_clone_checkpoint(
+            args.restore_checkpoint
+        )
     if (
         args.num_envs < 1
         or args.num_eval_envs < 1
@@ -394,19 +456,7 @@ def main() -> None:
         kick_prior_joint_residuals=kick_prior,
         kick_prior_target_distances=kick_prior_distances,
     )
-    network_factory = functools.partial(
-        ppo_networks.make_ppo_networks,
-        policy_hidden_layer_sizes=(256, 128, 128),
-        value_hidden_layer_sizes=(256, 256, 128),
-        policy_obs_key="teacher_state",
-        value_obs_key="privileged_state",
-        distribution_type="normal",
-        noise_std_type="log",
-        init_noise_std=args.init_noise_std,
-        mean_clip_scale=1.0,
-        mean_kernel_init_fn=jax.nn.initializers.normal,
-        mean_kernel_init_kwargs={"stddev": 0.0},
-    )
+    network_factory = make_striker_network_factory(args.init_noise_std)
 
     args.run_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = args.run_dir / "checkpoints"
@@ -444,6 +494,16 @@ def main() -> None:
         "evaluation_environment_config": eval_env._config.to_dict(),
         "action_size": env.action_size,
         "observation_size": env.observation_size,
+        "policy_action_semantics": (
+            "physical_joint_delta_rad"
+            if env._config.control_decoder == "direct_joint_delta"
+            else "normalized_walk_residual"
+        ),
+        "contract_scope": (
+            "joint_order_and_future_student_observation"
+            if env._config.control_decoder == "direct_joint_delta"
+            else "complete_deployment_boundary"
+        ),
         "optimizer": {
             "learning_rate": args.learning_rate,
             "entropy_cost": args.entropy_cost,
@@ -459,6 +519,7 @@ def main() -> None:
             if args.restore_checkpoint is not None
             else None
         ),
+        "walk_clone_initializer": walk_clone_initializer,
     }
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

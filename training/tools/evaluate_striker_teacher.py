@@ -70,7 +70,7 @@ def _stage_success_mask(
     task_succeeded: np.ndarray,
 ) -> np.ndarray:
     """Use pre-contact setup, not an impossible kick, for chase stages."""
-    if stage in {"ball_chase", "ball_reposition"}:
+    if stage in {"ball_chase", "ball_reposition", "walk_clone_pre_kick"}:
         return setup_reached
     return task_succeeded
 
@@ -169,7 +169,11 @@ def main() -> None:
         )
         stage_setup_done = (
             setup_ready
-            if args.stage in {"ball_chase", "ball_reposition"}
+            if args.stage in {
+                "ball_chase",
+                "ball_reposition",
+                "walk_clone_pre_kick",
+            }
             else jp.zeros_like(setup_ready)
         )
         next_state = jax.tree.map(
@@ -367,7 +371,11 @@ def main() -> None:
         "success_definition": {
             "stage_metric": (
                 "bounded_pre_contact_setup"
-                if args.stage in {"ball_chase", "ball_reposition"}
+                if args.stage in {
+                    "ball_chase",
+                    "ball_reposition",
+                    "walk_clone_pre_kick",
+                }
                 else "directional_ball_arrival"
             ),
             "goal_radius_m": float(env._config.success_radius),
@@ -375,7 +383,9 @@ def main() -> None:
                 env._config.arrival_speed_tolerance
             ),
             "requires_contact": args.stage not in {
-                "ball_chase", "ball_reposition"
+                "ball_chase",
+                "ball_reposition",
+                "walk_clone_pre_kick",
             },
             "setup_distance_m": float(env._config.kick_settled_distance),
             "setup_heading_rad": float(env._config.kick_settled_heading),

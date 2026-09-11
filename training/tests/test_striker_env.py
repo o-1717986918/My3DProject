@@ -9,6 +9,7 @@ from my3d_rl.striker_cpu import (
     settled_release_command_numpy,
 )
 from my3d_rl.striker_env import (
+    compose_striker_targets,
     DEFAULT_CONTRACT,
     LongHorizonStriker,
     closed_loop_approach_control,
@@ -64,7 +65,22 @@ def test_striker_default_release_gate_is_bounded_but_not_perfect_pose_only():
     assert config.kick_settled_planar_speed == 0.35
     assert config.kick_trigger_requires_settle is False
     assert config.learned_approach_residual_floor == 0.0
+    assert config.control_decoder == "walk_residual"
     np.testing.assert_allclose(config.robot_bearing_range, [np.pi, np.pi])
+
+
+def test_walk_cloned_direct_decoder_uses_physical_joint_delta_only():
+    default = jax.numpy.full(3, 1.0)
+    targets = compose_striker_targets(
+        default,
+        walk_action=jax.numpy.full(3, 4.0),
+        prior_residual=jax.numpy.array([0.1, 0.2, 0.3]),
+        policy_action=jax.numpy.array([0.5, -0.5, 0.8]),
+        learned_correction=jax.numpy.full(3, 9.0),
+        control_decoder="direct_joint_delta",
+    )
+
+    np.testing.assert_allclose(targets, [1.6, 0.7, 2.1])
 
 
 def test_striker_reset_can_place_robot_ahead_of_ball_for_reposition_training():
