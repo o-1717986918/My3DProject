@@ -332,7 +332,29 @@ def main() -> int:
     json_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    print(json.dumps(report, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "output": str(json_path.resolve()),
+                "candidate_entries": candidate_count,
+                "selected_prototype_rollout_ids": report[
+                    "selected_prototype_rollout_ids"
+                ],
+                "train_oracle_coverage": report["train_oracle_coverage"],
+                "validation_oracle_coverage": report[
+                    "validation_oracle_coverage"
+                ],
+                "all_bank_train_oracle_coverage": report[
+                    "all_bank_train_oracle_coverage"
+                ],
+                "all_bank_validation_oracle_coverage": report[
+                    "all_bank_validation_oracle_coverage"
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

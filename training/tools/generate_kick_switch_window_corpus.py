@@ -525,7 +525,21 @@ def main() -> int:
     json_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    print(json.dumps(manifest, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "output": str(json_path.resolve()),
+                "requested_approach_rollouts": args.rollouts,
+                "approach_rollouts_with_candidates": total,
+                "candidate_entries": len(candidates),
+                "approach_rollouts_with_success_window": covered,
+                "approach_success_window_coverage": covered / total,
+                "fallen_candidates": int(np.count_nonzero(arrays["fell"])),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

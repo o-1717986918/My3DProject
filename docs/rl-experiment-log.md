@@ -1722,3 +1722,33 @@ runtime integration was added. Baselines are
 `/home/win98/rl_runs/striker/walk-clone-contact-baseline-s2026160{1,2,3,4}.json`;
 the checkpoint and external reports are under
 `/home/win98/rl_runs/striker/walk-clone-contact-smoke-s20261605-v1`.
+
+## Frozen dynamic kick-selector repeatability — 2026-09-12
+
+The existing switch-window corpus and ten-prototype bank were revisited before
+building any new kick runtime. Their old grouped blind split had 101/102 oracle
+coverage, while the frozen current-state ONNX selector realized 66/102 target
+successes with zero falls. A predeclared fixed comparison, prototype rollout 65
+at confirmation cycle 39, produced 59/102 successes with zero falls. The new
+`evaluate_frozen_kick_switch_selector.py` tool reproduced those exact counts
+from the saved ONNX and outcome arrays before external testing.
+
+An independent seed 10911 then generated 128 new approach rollouts. Two never
+formed an upright candidate; the remaining 126 supplied 3,387 exact CPU
+`qpos/qvel` switch states. The original single prototype had a success window
+on 93/126 approaches, and re-executing all ten existing prototypes raised
+oracle coverage to 123/126. No selector or action was trained on this corpus.
+
+The frozen selector released on 75/126 approaches, succeeded on 68, and had no
+falls, for 90.67% release precision. The predeclared fixed policy released on
+108/126, also succeeded on 68, and had no falls, for 62.96% precision. They
+shared 53 successes and each had 15 successes the other missed. The independent
+net success advantage is therefore zero: the classifier is useful evidence for
+rejecting bad releases, but it is not a repeatable capability improvement.
+
+The selector, prototype bank and old `KickCommand` remain unmounted. Reports
+are under `/home/win98/rl_runs/kick-switch-window-independent-s10911`,
+`/home/win98/rl_runs/kick-switch-prototype-bank-independent-s10912` and
+`/home/win98/rl_runs/kick-switch-selector-independent-s10915`. The reusable
+evaluator remains in the repository so a future, genuinely better action bank
+can be checked without retraining or recalibrating the gate.
