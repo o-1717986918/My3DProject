@@ -61,6 +61,7 @@ def analyze_logs(
     kick_mode: str = "TargetedPass",
     minimum_progress_m: float = 0.1,
     outcome_window_cycles: int = 100,
+    required_motion_prefix: str | None = None,
 ) -> list[PassOutcome]:
     outcomes: list[PassOutcome] = []
     for path in paths:
@@ -68,6 +69,10 @@ def analyze_logs(
         consumed: set[tuple[int, int]] = set()
         for index, status in enumerate(statuses):
             if status.get("kick_mode") != kick_mode:
+                continue
+            if required_motion_prefix and not status.get("motion", "").startswith(
+                required_motion_prefix
+            ):
                 continue
             start_cycle = int(status.get("cycle", "0"))
             action_key = (
@@ -79,7 +84,10 @@ def analyze_logs(
                     continue
                 consumed.add(action_key)
             elif index > 0 and statuses[index - 1].get("kick_mode") == kick_mode:
-                continue
+                if not required_motion_prefix or statuses[index - 1].get(
+                    "motion", ""
+                ).startswith(required_motion_prefix):
+                    continue
             start = (_number(status, "ball_x"), _number(status, "ball_y"))
             target = (
                 _number(
@@ -138,6 +146,14 @@ def analyze_logs(
                 # a later non-target kick can contaminate the outcome.
                 if later.get("kick_mode") not in {"None", kick_mode, None}:
                     break
+                if (
+                    required_motion_prefix
+                    and cycle > start_cycle
+                    and not later.get("motion", "").startswith(
+                        required_motion_prefix
+                    )
+                ):
+                    break
                 # A procedural contact must move the ball during its own
                 # command lifetime. Do not credit the subsequent chase gait
                 # with a contact that the standalone trajectory did not make.
@@ -185,6 +201,10 @@ def main() -> int:
     parser.add_argument("--minimum-progress", type=float, default=0.1)
     parser.add_argument("--window-cycles", type=int, default=100)
     parser.add_argument(
+        "--required-motion-prefix",
+        help="Only start and measure attempts executed by this motion family.",
+    )
+    parser.add_argument(
         "--kick-mode",
         choices=("TargetedPass", "DribbleTouch", "Shot", "Clear"),
         default="TargetedPass",
@@ -200,6 +220,7 @@ def main() -> int:
         kick_mode=args.kick_mode,
         minimum_progress_m=args.minimum_progress,
         outcome_window_cycles=args.window_cycles,
+        required_motion_prefix=args.required_motion_prefix,
     )
     contacts = sum(outcome.contact for outcome in outcomes)
     if args.metric == "attempts":

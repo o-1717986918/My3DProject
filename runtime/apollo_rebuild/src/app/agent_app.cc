@@ -152,6 +152,11 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                    decision_manager_.blackboard())
             << " ball_dist=" << math::planar_dist(self, ball)
             << " ball_visible=" << (snapshot.ball.visible ? 1 : 0)
+            << " ball_x=" << snapshot.ball.position_m[0]
+            << " ball_y=" << snapshot.ball.position_m[1]
+            << " x=" << snapshot.self.position_m[0]
+            << " y=" << snapshot.self.position_m[1]
+            << " z=" << snapshot.self.position_m[2]
             << " self_speed=" << math::norm2({
                    snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]})
             << " ball_speed=" << (snapshot.ball.velocity_valid

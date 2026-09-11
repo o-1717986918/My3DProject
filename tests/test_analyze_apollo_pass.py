@@ -96,3 +96,37 @@ def test_active_kick_identity_wins_over_new_strategy_plan(tmp_path: Path) -> Non
     assert outcomes[0].action_id == 7
     assert outcomes[0].sequence_id == 2
     assert outcomes[0].forward_progress_m == 0.5
+
+
+def test_required_motion_prefix_does_not_credit_fallback_contact(
+    tmp_path: Path,
+) -> None:
+    log = tmp_path / "procedural-clear.log"
+    log.write_text(
+        "\n".join(
+            [
+                "MY3D_STATUS cycle=100 motion=FallbackKickForward kick_mode=Clear "
+                "ball_x=0 ball_y=0 kick_target_x=6 kick_target_y=0",
+                "MY3D_STATUS cycle=110 motion=FallbackKickHold kick_mode=Clear "
+                "ball_x=0.4 ball_y=0 kick_target_x=6 kick_target_y=0",
+                "MY3D_STATUS cycle=120 motion=ProceduralKickExecute kick_mode=Clear "
+                "ball_x=0.4 ball_y=0 kick_target_x=6 kick_target_y=0",
+                "MY3D_STATUS cycle=130 motion=ProceduralKickHold kick_mode=Clear "
+                "ball_x=0.45 ball_y=0 kick_target_x=6 kick_target_y=0",
+                "MY3D_STATUS cycle=131 motion=Walk kick_mode=None "
+                "ball_x=0.45 ball_y=0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    unfiltered = analyze_logs([log], kick_mode="Clear")
+    filtered = analyze_logs(
+        [log], kick_mode="Clear", required_motion_prefix="ProceduralKick"
+    )
+
+    assert len(unfiltered) == 1
+    assert unfiltered[0].contact
+    assert len(filtered) == 1
+    assert not filtered[0].contact
+    assert abs(filtered[0].forward_progress_m - 0.05) < 1.0e-9

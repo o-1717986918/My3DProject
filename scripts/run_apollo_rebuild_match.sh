@@ -25,10 +25,14 @@ rebuild_side=${REBUILD_SIDE:-left}
 kickoff_side=${MATCH_KICKOFF_SIDE:-left}
 forced_goal_kick_side=${MATCH_FORCE_GOAL_KICK_SIDE:-}
 force_near_ball=${MATCH_FORCE_NEAR_BALL:-0}
+near_ball_x=${MATCH_NEAR_BALL_X:-0}
+near_ball_y=${MATCH_NEAR_BALL_Y:-0}
 near_ball_robot_x=${MATCH_NEAR_BALL_ROBOT_X:--0.55}
 near_ball_robot_y=${MATCH_NEAR_BALL_ROBOT_Y:-0}
 near_ball_robot_qw=${MATCH_NEAR_BALL_ROBOT_QW:-1}
 near_ball_robot_qz=${MATCH_NEAR_BALL_ROBOT_QZ:-0}
+near_ball_opponent_gk_x=${MATCH_NEAR_BALL_OPPONENT_GK_X:-26}
+near_ball_opponent_field_x=${MATCH_NEAR_BALL_OPPONENT_FIELD_X:-18}
 run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-rebuild-vs-base-$(date +%Y%m%d-%H%M%S)-$rebuild_side}
 
 server_pid=
@@ -159,6 +163,23 @@ sleep 1
     "(kickOff ${kickoff_side^})"
 
 if [[ "$force_near_ball" == 1 ]]; then
+    # kickOff enters the restart mode; it is not PlayOn. Move to PlayOn before
+    # placing an attacking-third actor, otherwise the referee correctly sends
+    # that player to the penalty position for crossing halfway at kickoff.
+    # Stage the ball before the mode change so the first PlayOn observation is
+    # at the fixed-scene location and is not rejected by Apollo's 12 m
+    # anti-teleport vision guard.
+    "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        "(ball (pos $near_ball_x $near_ball_y 0.11) (vel 0 0 0))"
+    "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        "(dropBall)"
+    # Let every client observe PlayOn before moving the actors. This also keeps
+    # a final BeforeKickOff Beam from overwriting the fixed release pose.
+    sleep 0.2
     # Put the left striker just behind a stationary ball and keep every other
     # player out of the lane. This is a repeatable contact-delay probe, not a
     # different decision or motion path.
@@ -173,15 +194,14 @@ if [[ "$force_near_ball" == 1 ]]; then
         "(agent (unum 5) (team $left_name) (move3d -9 5 0.8 1 0 0 0))" \
         "(agent (unum 6) (team $left_name) (move3d -6 0 0.8 1 0 0 0))" \
         "(agent (unum 7) (team $left_name) (move3d $near_ball_robot_x $near_ball_robot_y 0.8 $near_ball_robot_qw 0 0 $near_ball_robot_qz))" \
-        "(agent (unum 1) (team $right_name) (move3d 26 0 0.8 0 0 0 1))" \
-        "(agent (unum 2) (team $right_name) (move3d 18 -7 0.8 0 0 0 1))" \
-        "(agent (unum 3) (team $right_name) (move3d 18 -5 0.8 0 0 0 1))" \
-        "(agent (unum 4) (team $right_name) (move3d 18 -3 0.8 0 0 0 1))" \
-        "(agent (unum 5) (team $right_name) (move3d 18 3 0.8 0 0 0 1))" \
-        "(agent (unum 6) (team $right_name) (move3d 18 5 0.8 0 0 0 1))" \
-        "(agent (unum 7) (team $right_name) (move3d 18 7 0.8 0 0 0 1))" \
-        "(dropBall)" \
-        "(ball (pos 0 0 0.11) (vel 0 0 0))"
+        "(agent (unum 1) (team $right_name) (move3d $near_ball_opponent_gk_x 0 0.8 0 0 0 1))" \
+        "(agent (unum 2) (team $right_name) (move3d $near_ball_opponent_field_x -7 0.8 0 0 0 1))" \
+        "(agent (unum 3) (team $right_name) (move3d $near_ball_opponent_field_x -5 0.8 0 0 0 1))" \
+        "(agent (unum 4) (team $right_name) (move3d $near_ball_opponent_field_x -3 0.8 0 0 0 1))" \
+        "(agent (unum 5) (team $right_name) (move3d $near_ball_opponent_field_x 3 0.8 0 0 0 1))" \
+        "(agent (unum 6) (team $right_name) (move3d $near_ball_opponent_field_x 5 0.8 0 0 0 1))" \
+        "(agent (unum 7) (team $right_name) (move3d $near_ball_opponent_field_x 7 0.8 0 0 0 1))" \
+        "(ball (pos $near_ball_x $near_ball_y 0.11) (vel 0 0 0))"
 fi
 
 if [[ -n "$forced_goal_kick_side" ]]; then

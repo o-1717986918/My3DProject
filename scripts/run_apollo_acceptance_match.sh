@@ -648,11 +648,14 @@ targeted_pass_kick_samples=$(
 pass_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
     --metric contacts "$run_dir"/My3D-*.log)
 procedural_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
-    --kick-mode DribbleTouch --metric contacts "$run_dir"/My3D-*.log)
+    --kick-mode DribbleTouch --required-motion-prefix ProceduralKick \
+    --metric contacts "$run_dir"/My3D-*.log)
 procedural_shot_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
-    --kick-mode Shot --metric contacts "$run_dir"/My3D-*.log)
+    --kick-mode Shot --required-motion-prefix ProceduralKick \
+    --metric contacts "$run_dir"/My3D-*.log)
 procedural_clear_contact_events=$("$python_bin" "$repo_dir/scripts/analyze_apollo_pass.py" \
-    --kick-mode Clear --metric contacts "$run_dir"/My3D-*.log)
+    --kick-mode Clear --required-motion-prefix ProceduralKick \
+    --metric contacts "$run_dir"/My3D-*.log)
 activation_warnings=0
 if [[ -f "$run_dir/MUJOCO_LOG.TXT" ]]; then
     activation_warnings=$(grep -c "Nan, Inf or huge value in CTRL" \
