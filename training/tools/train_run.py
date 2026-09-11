@@ -21,7 +21,11 @@ from mujoco_playground._src import wrapper
 import numpy as np
 import onnxruntime as ort
 
-from my3d_rl.legacy_policy import load_onnx_teacher_params
+from my3d_rl.apollo_run_env import ApolloWaypointRun
+from my3d_rl.legacy_policy import (
+    load_apollo_onnx_teacher_params,
+    load_onnx_teacher_params,
+)
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.motion_reference import validate_motion_reference
 from my3d_rl.ppo_profile import PROFILES, get_ppo_profile
@@ -33,6 +37,42 @@ from my3d_rl.training_schedule import (
 
 
 STAGES: dict[str, dict[str, Any]] = {
+    # Preserve Apollo's actor boundary while training the way the competition
+    # actually uses it: a target point is converted to a new body-frame command
+    # every 20 ms.  Full-circle bearings cover turn-then-approach cases without
+    # introducing a new observation or deployment protocol.
+    "apollo_waypoint": {
+        "use_fixed_command": True,
+        "fixed_command": [0.0, 0.0, 0.0],
+        "waypoint_distance_range": [2.0, 6.0],
+        "waypoint_bearing_range": [-3.141592653589793, 3.141592653589793],
+        "waypoint_arrival_radius": 0.25,
+        "gait_frequency": [1.5, 1.5],
+        "stand_probability": 0.0,
+        "reset_joint_noise": 0.015,
+        "reset_joint_velocity_noise": 0.0,
+        "reset_policy_action_noise": 0.0,
+        "reset_root_velocity_noise": 0.03,
+        "reset_yaw_range": 0.10,
+        "push_enable": False,
+        "action_delay_max_steps": 0,
+        "reward.tracking_linear": 6.0,
+        "reward.tracking_yaw": 8.0,
+        "reward.upright": 3.0,
+        "reward.height": 2.0,
+        "reward.alive": 0.75,
+        "reward.lateral_tracking": -4.0,
+        "reward.yaw_rate_error": -6.0,
+        "reward.vertical_velocity": -0.45,
+        "reward.angular_xy": -0.40,
+        "reward.action_rate": -0.04,
+        "reward.action_acceleration": -0.015,
+        "reward.foot_slip": -0.025,
+        "reward.pose": -0.02,
+        "reward.fall": -180.0,
+        "reward.waypoint_progress": 4.0,
+        "reward.waypoint_success": 10.0,
+    },
     "balance": {
         "use_fixed_command": True,
         "fixed_command": [0.0, 0.0, 0.0],
@@ -659,7 +699,10 @@ def _teacher_restore_params(
     )
     policy_key, value_key = jax.random.split(jax.random.PRNGKey(seed))
     policy_params = networks.policy_network.init(policy_key)
-    policy_params = load_onnx_teacher_params(policy_params, model_path)
+    if profile.factory_kind == "apollo_teacher":
+        policy_params = load_apollo_onnx_teacher_params(policy_params, model_path)
+    else:
+        policy_params = load_onnx_teacher_params(policy_params, model_path)
     value_params = networks.value_network.init(value_key)
     actor_size = env.observation_size["state"][-1]
     privileged_size = env.observation_size["privileged_state"][-1]
@@ -682,9 +725,16 @@ def _teacher_restore_params(
     session = ort.InferenceSession(
         str(model_path.resolve()), providers=["CPUExecutionProvider"]
     )
-    onnx_actions = session.run(
-        None, {session.get_inputs()[0].name: observations[:, :78]}
-    )[0]
+    input_name = session.get_inputs()[0].name
+    onnx_actions = np.concatenate(
+        [
+            session.run(None, {input_name: observation[None, :78]})[0]
+            for observation in observations
+        ],
+        axis=0,
+    )
+    if profile.factory_kind == "apollo_teacher":
+        onnx_actions = np.clip(onnx_actions, -5.0, 5.0)
     max_error = float(np.max(np.abs(np.asarray(jax_actions) - onnx_actions)))
     if max_error > 2.0e-5:
         raise ValueError(f"teacher import parity error {max_error:.3e} exceeds 2e-5")
@@ -724,6 +774,13 @@ def main() -> None:
         Path(__file__).parents[1] / "contracts" / f"{profile.policy_contract}.yaml"
     )
     contract = load_policy_contract(contract_path)
+    apollo_waypoint = args.stage == "apollo_waypoint"
+    apollo_contract = contract.policy_name == "apollo_walk_policy_v1"
+    if apollo_waypoint != apollo_contract:
+        raise ValueError(
+            "apollo_waypoint requires --network-profile "
+            "apollo_walk_warmstart_v1, and that profile is scoped to this stage"
+        )
     if args.restore_checkpoint and args.bootstrap_onnx:
         raise ValueError("restore-checkpoint and bootstrap-onnx are mutually exclusive")
     if args.fixed_vx is not None and (
@@ -732,8 +789,11 @@ def main() -> None:
         raise ValueError(
             "fixed-vx must be in [0.2, 3.0] and requires reference_residual"
         )
-    if args.bootstrap_onnx and profile.factory_kind != "legacy_teacher":
-        raise ValueError("bootstrap-onnx requires the legacy_warmstart_v1 profile")
+    if args.bootstrap_onnx and profile.factory_kind not in {
+        "legacy_teacher",
+        "apollo_teacher",
+    }:
+        raise ValueError("bootstrap-onnx requires a warm-start profile")
     if (
         args.stage in {"motion_track", "motion_straight", "reference_residual"}
         and args.motion_reference is None
@@ -805,11 +865,17 @@ def main() -> None:
         stage_overrides["fixed_command"] = [args.fixed_vx, 0.0, 0.0]
     if phase_sampling is not None:
         stage_overrides["reference_phase_sampling_weights"] = phase_sampling["weights"]
-    env = DirectionalRun(
-        config_overrides=stage_overrides,
-        contract=contract,
-        motion_reference=args.motion_reference,
-    )
+    if apollo_waypoint:
+        env = ApolloWaypointRun(
+            config_overrides=stage_overrides,
+            contract=contract,
+        )
+    else:
+        env = DirectionalRun(
+            config_overrides=stage_overrides,
+            contract=contract,
+            motion_reference=args.motion_reference,
+        )
     eval_env = None
     if args.motion_reference:
         evaluation_reference_probability = (

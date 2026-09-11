@@ -42,9 +42,10 @@ def main() -> None:
     params = ppo_checkpoint.load(args.checkpoint)
     normalizer_params, policy_params = params[0], params[1]
     learned = policy_params["params"]
-    legacy_layout = "fc1" in learned
+    legacy_layout = "fc1" in learned and "layer_norm" in learned
+    apollo_layout = "fc1" in learned and "layer_norm" not in learned
     standard_normal_layout = "MLP_0" in learned and "Dense_0" in learned
-    if legacy_layout:
+    if legacy_layout or apollo_layout:
         actor_size = int(learned["fc1"]["kernel"].shape[0])
     elif standard_normal_layout:
         actor_size = int(learned["MLP_0"]["hidden_0"]["kernel"].shape[0])
@@ -94,7 +95,7 @@ def main() -> None:
         )
         previous = "observations_normalized"
 
-    if legacy_layout:
+    if legacy_layout or apollo_layout:
         for layer in ("fc1", "fc2", "fc3", "fc4"):
             weight_name = f"{layer}.weight"
             bias_name = f"{layer}.bias"
@@ -114,7 +115,7 @@ def main() -> None:
                     transB=1,
                 )
             )
-            if layer == "fc1":
+            if layer == "fc1" and legacy_layout:
                 initializers.extend(
                     [
                         _tensor(

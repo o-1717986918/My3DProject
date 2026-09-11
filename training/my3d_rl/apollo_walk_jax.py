@@ -69,7 +69,7 @@ def load_apollo_walk_jax(model_path: Path) -> ApolloWalkJax:
         observation_std = jp.asarray(arrays["add"].reshape(78))
         layer_norm_scale = None
         layer_norm_bias = None
-    else:
+    elif "fc1.weight" in arrays:
         layer_names = tuple(f"fc{index}" for index in range(1, 5))
         required = {
             *(
@@ -77,16 +77,27 @@ def load_apollo_walk_jax(model_path: Path) -> ApolloWalkJax:
                 for name in layer_names
                 for field in ("weight", "bias")
             ),
-            "layer_norm.weight",
-            "layer_norm.bias",
         }
         missing = required - arrays.keys()
         if missing:
             raise ValueError(f"Apollo walk ONNX is missing tensors: {sorted(missing)}")
         observation_mean = jp.zeros(78, dtype=jp.float32)
         observation_std = jp.ones(78, dtype=jp.float32)
-        layer_norm_scale = jp.asarray(arrays["layer_norm.weight"])
-        layer_norm_bias = jp.asarray(arrays["layer_norm.bias"])
+        layer_norm_names = {"layer_norm.weight", "layer_norm.bias"}
+        present_layer_norm_names = layer_norm_names.intersection(arrays)
+        if present_layer_norm_names and present_layer_norm_names != layer_norm_names:
+            raise ValueError("Apollo walk ONNX has an incomplete layer norm")
+        has_layer_norm = present_layer_norm_names == layer_norm_names
+        layer_norm_scale = (
+            jp.asarray(arrays["layer_norm.weight"]) if has_layer_norm else None
+        )
+        layer_norm_bias = (
+            jp.asarray(arrays["layer_norm.bias"]) if has_layer_norm else None
+        )
+    else:
+        raise ValueError(
+            "Apollo walk ONNX does not contain actor.0 or fc1 actor tensors"
+        )
     kernels = tuple(jp.asarray(arrays[f"{name}.weight"].T) for name in layer_names)
     biases = tuple(jp.asarray(arrays[f"{name}.bias"]) for name in layer_names)
     if kernels[0].shape != (78, 512) or kernels[-1].shape != (128, 23):

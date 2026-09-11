@@ -7,9 +7,10 @@ import functools
 from typing import Any, Callable
 
 import jax
+import numpy as np
 from brax.training.agents.ppo import networks as ppo_networks
 
-from .legacy_policy import make_legacy_ppo_networks
+from .legacy_policy import make_apollo_ppo_networks, make_legacy_ppo_networks
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,8 @@ class PpoProfile:
     def network_factory(self) -> Callable[..., Any]:
         if self.factory_kind == "legacy_teacher":
             return make_legacy_ppo_networks
+        if self.factory_kind == "apollo_teacher":
+            return make_apollo_ppo_networks
         options: dict[str, Any] = {
             "policy_hidden_layer_sizes": self.policy_hidden_layer_sizes,
             "value_hidden_layer_sizes": self.value_hidden_layer_sizes,
@@ -276,6 +279,31 @@ PROFILES = {
         normalize_observations=False,
         adaptive_kl=True,
         factory_kind="legacy_teacher",
+    ),
+    # Exact frozen Apollo Walk graph and 78-value C++ observation boundary.
+    # This profile is intentionally separate from run_policy_v1, whose field
+    # order, nominal pose, action scale, and scalar gains belong to the Python
+    # My3D walk controller rather than ApolloCodebase.
+    "apollo_walk_warmstart_v1": PpoProfile(
+        name="apollo_walk_warmstart_v1",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=2,
+        discounting=0.995,
+        entropy_cost=5.0e-4,
+        learning_rate=5.0e-6,
+        normalize_observations=False,
+        adaptive_kl=True,
+        factory_kind="apollo_teacher",
+        policy_contract="apollo_walk_policy_v1",
+        desired_kl=0.002,
+        learning_rate_min=1.0e-6,
+        learning_rate_max=1.0e-5,
+        init_noise_std=float(np.exp(-2.5)),
     ),
     # Phase-aware extension of the exact legacy teacher.  The two new first
     # layer rows are initialized to zero, so bootstrap actions remain exactly

@@ -33,6 +33,7 @@ class PolicyContract:
     action_scale: float | None
     kp: float | None
     kd: float | None
+    gain_profile: str | None
     reference_sha256: str | None
 
 
@@ -64,6 +65,9 @@ def load_policy_contract(path: str | Path) -> PolicyContract:
     action_scale = float(control["action_scale"]) if "action_scale" in control else None
     kp = float(control["kp"]) if "kp" in control else None
     kd = float(control["kd"]) if "kd" in control else None
+    gain_profile = (
+        str(control["gain_profile"]) if "gain_profile" in control else None
+    )
     reference_sha256 = (
         raw.get("decoder", {}).get("reference_artifact", {}).get("expected_sha256")
     )
@@ -95,6 +99,12 @@ def load_policy_contract(path: str | Path) -> PolicyContract:
         raise ContractError("control.action_scale must be in (0, 1]")
     if (kp is None) != (kd is None):
         raise ContractError("control.kp and control.kd must be declared together")
+    if gain_profile is not None and kp is not None:
+        raise ContractError(
+            "control.gain_profile and scalar kp/kd are mutually exclusive"
+        )
+    if gain_profile not in {None, "apollo_runtime_per_joint"}:
+        raise ContractError(f"unsupported control.gain_profile {gain_profile!r}")
     if kp is not None and kd is not None and (kp <= 0.0 or kd < 0.0):
         raise ContractError("control gains must satisfy kp > 0 and kd >= 0")
     if reference_sha256 is not None and (
@@ -118,5 +128,6 @@ def load_policy_contract(path: str | Path) -> PolicyContract:
         action_scale=action_scale,
         kp=kp,
         kd=kd,
+        gain_profile=gain_profile,
         reference_sha256=reference_sha256,
     )

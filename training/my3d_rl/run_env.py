@@ -242,12 +242,18 @@ class DirectionalRun(mjx_env.MjxEnv):
             raise ValueError("run policy contract must declare action_scale")
         if not np.isclose(self._config.action_scale, self.contract.action_scale):
             raise ValueError("environment action_scale differs from policy contract")
-        if self.contract.kp is None or self.contract.kd is None:
-            raise ValueError("run policy contract must declare PD gains")
-        if not np.isclose(self._config.kp, self.contract.kp) or not np.isclose(
-            self._config.kd, self.contract.kd
-        ):
-            raise ValueError("environment PD gains differ from policy contract")
+        if self.contract.gain_profile is None:
+            if self.contract.kp is None or self.contract.kd is None:
+                raise ValueError("run policy contract must declare PD gains")
+            if not np.isclose(self._config.kp, self.contract.kp) or not np.isclose(
+                self._config.kd, self.contract.kd
+            ):
+                raise ValueError("environment PD gains differ from policy contract")
+        elif not self._supports_gain_profile(self.contract.gain_profile):
+            raise ValueError(
+                f"environment does not support gain profile "
+                f"{self.contract.gain_profile!r}"
+            )
 
         # Start far enough from the ball for a ten-second straight rollout.
         self._mj_model = build_single_t1_soccer_model(
@@ -438,6 +444,11 @@ class DirectionalRun(mjx_env.MjxEnv):
             self._mj_model.actuator_biasprm[pos_id, 1] = -self._config.kp
             self._mj_model.actuator_gainprm[vel_id, 0] = self._config.kd
             self._mj_model.actuator_biasprm[vel_id, 2] = -self._config.kd
+
+    def _supports_gain_profile(self, profile: str) -> bool:
+        """Return whether a specialised environment owns this gain profile."""
+        del profile
+        return False
 
     @property
     def xml_path(self) -> str:

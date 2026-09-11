@@ -53,6 +53,36 @@ class LegacyPolicyWithStd(linen.Module):
         return mean, jp.broadcast_to(std, mean.shape)
 
 
+class ApolloPolicyWithStd(linen.Module):
+    """Apollo actor with its input normalizer fused into the first dense layer."""
+
+    init_noise_std: float = float(np.exp(-2.5))
+
+    @linen.compact
+    def __call__(self, observations: jp.ndarray) -> tuple[jp.ndarray, jp.ndarray]:
+        hidden = linen.elu(
+            linen.Dense(512, precision=lax.Precision.HIGHEST, name="fc1")(
+                observations
+            )
+        )
+        hidden = linen.elu(
+            linen.Dense(256, precision=lax.Precision.HIGHEST, name="fc2")(hidden)
+        )
+        hidden = linen.elu(
+            linen.Dense(128, precision=lax.Precision.HIGHEST, name="fc3")(hidden)
+        )
+        mean = jp.clip(
+            linen.Dense(23, precision=lax.Precision.HIGHEST, name="fc4")(hidden),
+            -5.0,
+            5.0,
+        )
+        std = self.param(
+            "std",
+            lambda _: jp.full((23,), self.init_noise_std, dtype=jp.float32),
+        )
+        return mean, jp.broadcast_to(std, mean.shape)
+
+
 def make_legacy_ppo_networks(
     observation_size: types.ObservationSize,
     action_size: int,
@@ -82,6 +112,54 @@ def make_legacy_ppo_networks(
         actor_observation = observation["state"]
         actor_observation = preprocess_observations_fn(
             actor_observation,
+            brax_networks.normalizer_select(processor_params, "state"),
+        )
+        return module.apply(policy_params, actor_observation)
+
+    policy_network = brax_networks.FeedForwardNetwork(
+        init=lambda key: module.init(
+            key, jp.zeros((1, actor_observation_size), dtype=jp.float32)
+        ),
+        apply=apply,
+    )
+    value_network = brax_networks.make_value_network(
+        observation_size,
+        preprocess_observations_fn=preprocess_observations_fn,
+        hidden_layer_sizes=(512, 256, 128),
+        activation=linen.elu,
+        obs_key="privileged_state",
+    )
+    return ppo_networks.PPONetworks(
+        policy_network=policy_network,
+        value_network=value_network,
+        parametric_action_distribution=distribution.NormalDistribution(
+            event_size=action_size
+        ),
+    )
+
+
+def make_apollo_ppo_networks(
+    observation_size: types.ObservationSize,
+    action_size: int,
+    preprocess_observations_fn: types.PreprocessObservationFn = (
+        types.identity_observation_preprocessor
+    ),
+    *,
+    init_noise_std: float = float(np.exp(-2.5)),
+    **unused: Any,
+) -> ppo_networks.PPONetworks:
+    """Build the frozen-Apollo-compatible actor and privileged critic."""
+    del unused
+    if action_size != 23 or not isinstance(observation_size, Mapping):
+        raise ValueError("Apollo policy requires mapped observations and 23 actions")
+    actor_observation_size = observation_size["state"][-1]
+    if actor_observation_size != 78:
+        raise ValueError("Apollo policy requires the exact 78-value observation")
+    module = ApolloPolicyWithStd(init_noise_std=init_noise_std)
+
+    def apply(processor_params: Any, policy_params: Any, observation: Any):
+        actor_observation = preprocess_observations_fn(
+            observation["state"],
             brax_networks.normalizer_select(processor_params, "state"),
         )
         return module.apply(policy_params, actor_observation)
@@ -154,4 +232,49 @@ def load_onnx_teacher_params(initial_params: Any, model_path: Path) -> Any:
         learned[layer]["bias"] = jp.asarray(arrays[f"{layer}.bias"])
     learned["layer_norm"]["scale"] = jp.asarray(arrays["layer_norm.weight"])
     learned["layer_norm"]["bias"] = jp.asarray(arrays["layer_norm.bias"])
+    return params
+
+
+def load_apollo_onnx_teacher_params(initial_params: Any, model_path: Path) -> Any:
+    """Import Apollo's actor and fuse its fixed input normalizer into fc1."""
+    model = onnx.load(str(model_path))
+    arrays = {
+        initializer.name: np.asarray(
+            numpy_helper.to_array(initializer), dtype=np.float32
+        ).copy()
+        for initializer in model.graph.initializer
+    }
+    layer_names = ("actor.0", "actor.2", "actor.4", "actor.6")
+    required = {
+        *(f"{name}.{field}" for name in layer_names for field in ("weight", "bias")),
+        "normalizer._mean",
+        "add",
+    }
+    missing = required - arrays.keys()
+    if missing:
+        raise ValueError(f"Apollo ONNX is missing tensors: {sorted(missing)}")
+    mean = arrays["normalizer._mean"].reshape(78)
+    scale = arrays["add"].reshape(78)
+    if not np.isfinite(mean).all() or not np.isfinite(scale).all() or np.any(
+        scale <= 0.0
+    ):
+        raise ValueError("Apollo ONNX input normalizer is invalid")
+
+    params = unfreeze(initial_params)
+    learned = params["params"]
+    for destination, source in zip(
+        ("fc1", "fc2", "fc3", "fc4"), layer_names, strict=True
+    ):
+        kernel = arrays[f"{source}.weight"].T
+        bias = arrays[f"{source}.bias"]
+        if destination == "fc1":
+            bias = bias - (mean / scale) @ kernel
+            kernel = kernel / scale[:, None]
+        if learned[destination]["kernel"].shape != kernel.shape:
+            raise ValueError(
+                f"Apollo {source} shape {kernel.shape} does not match initialized "
+                f"{destination} shape {learned[destination]['kernel'].shape}"
+            )
+        learned[destination]["kernel"] = jp.asarray(kernel)
+        learned[destination]["bias"] = jp.asarray(bias)
     return params

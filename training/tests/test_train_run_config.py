@@ -1,4 +1,22 @@
+import numpy as np
+
+from my3d_rl.ppo_profile import get_ppo_profile
 from tools.train_run import STAGES, _compatible_num_evals, _effective_timesteps
+
+
+def test_apollo_waypoint_stage_uses_exact_warmstart_contract():
+    stage = STAGES["apollo_waypoint"]
+    profile = get_ppo_profile("apollo_walk_warmstart_v1")
+
+    assert profile.policy_contract == "apollo_walk_policy_v1"
+    assert profile.factory_kind == "apollo_teacher"
+    assert profile.normalize_observations is False
+    assert stage["use_fixed_command"] is True
+    assert stage["waypoint_bearing_range"] == [-np.pi, np.pi]
+    assert stage["waypoint_distance_range"][0] > stage["waypoint_arrival_radius"]
+    assert stage["push_enable"] is False
+    assert stage["reward.waypoint_progress"] > 0.0
+    assert stage["reward.waypoint_success"] > 0.0
 
 
 def test_motion_reference_initialization_is_scoped_to_motion_stages():
