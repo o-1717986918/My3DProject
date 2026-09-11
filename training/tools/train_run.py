@@ -273,6 +273,39 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.pose": -0.04,
         "reward.fall": -120.0,
     },
+    # Preserve the competition Walk teacher while directly optimising the
+    # multi-second path errors seen in server play.  Earlier continuations only
+    # penalised instantaneous lateral velocity and yaw rate, so a small bias
+    # could still integrate into several metres of drift over ten seconds.
+    "stable_forward_path": {
+        "lin_vel_x": [0.60, 1.55],
+        "lin_vel_y": [0.0, 0.0],
+        "ang_vel_yaw": [0.0, 0.0],
+        "gait_frequency": [1.4, 1.9],
+        "stand_probability": 0.0,
+        "command_resample_steps": 500,
+        "reset_joint_noise": 0.02,
+        "reset_root_velocity_noise": 0.04,
+        "reset_yaw_range": 0.20,
+        "push_enable": False,
+        "action_delay_max_steps": 0,
+        "reward.tracking_linear": 7.0,
+        "reward.tracking_yaw": 6.0,
+        "reward.upright": 3.0,
+        "reward.height": 2.0,
+        "reward.alive": 0.75,
+        "reward.lateral_tracking": -4.0,
+        "reward.yaw_rate_error": -4.0,
+        "reward.path_lateral": -2.0,
+        "reward.heading_drift": -4.0,
+        "reward.vertical_velocity": -0.40,
+        "reward.angular_xy": -0.30,
+        "reward.action_rate": -0.04,
+        "reward.action_acceleration": -0.015,
+        "reward.foot_slip": -0.025,
+        "reward.pose": -0.04,
+        "reward.fall": -150.0,
+    },
     # Competition locomotion recovery: improve the frequently used forward and
     # turn-in-place primitives together so a specialist update cannot forget
     # the opposite turn direction. The weaker negative-yaw direction receives

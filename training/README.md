@@ -158,6 +158,14 @@ PYTHONPATH=training XLA_PYTHON_CLIENT_PREALLOCATE=false \
   --run-dir /home/win98/rl_runs/run-soccer-omni-axis-s20260991-v1
 ```
 
+For a bounded forward specialist experiment, `stable_forward_path` keeps each
+episode in the forward-only domain and adds cumulative lateral-displacement and
+wrapped heading-drift costs in the reset frame.  These are training-only reward
+signals: the immutable 80-value actor input and 23-value action contract do not
+change.  Bootstrap it from the verified Apollo Walk teacher and judge it with
+the frozen CPU evaluator plus the RCSS fixed target-to-ball scenario, not PPO
+reward alone.
+
 Export and verify a v2 checkpoint:
 
 ```bash

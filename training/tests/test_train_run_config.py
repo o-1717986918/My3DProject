@@ -51,6 +51,18 @@ def test_stable_motion_curriculum_decomposes_turn_forward_then_lateral():
     assert lateral["reward.foot_slip"] < 0.0
 
 
+def test_stable_forward_path_targets_accumulated_server_drift():
+    stage = STAGES["stable_forward_path"]
+
+    assert stage["lin_vel_x"][0] > 0.0
+    assert stage["lin_vel_y"] == [0.0, 0.0]
+    assert stage["ang_vel_yaw"] == [0.0, 0.0]
+    assert stage["command_resample_steps"] == 500
+    assert stage["reward.path_lateral"] < 0.0
+    assert stage["reward.heading_drift"] < 0.0
+    assert stage["push_enable"] is False
+
+
 def test_fast_walk_recovery_trains_forward_and_both_turns_without_lateral():
     stage = STAGES["fast_walk_recovery"]
 

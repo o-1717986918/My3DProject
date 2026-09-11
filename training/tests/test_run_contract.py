@@ -12,6 +12,7 @@ from my3d_rl.run_env import (
     NOMINAL_TRAINING_POSE,
     TRAIN_TO_SERVER_SIGN,
     DirectionalRun,
+    path_frame_errors,
 )
 
 
@@ -116,6 +117,18 @@ def test_run_environment_uses_exact_control_period_and_safe_targets():
 
     decoded = np.asarray(env.decode_action_targets(jax.numpy.zeros(23)))
     np.testing.assert_allclose(decoded, np.asarray(env._nominal_physical))
+
+
+def test_path_frame_errors_measure_lateral_drift_and_wrap_heading():
+    lateral, heading = path_frame_errors(
+        jax.numpy.array([0.0, 0.75]),
+        jax.numpy.array(-3.10),
+        jax.numpy.array([0.0, 0.0]),
+        jax.numpy.array(3.10),
+    )
+
+    assert np.isclose(float(lateral), 0.75 * np.cos(3.10), atol=1.0e-6)
+    assert np.isclose(float(heading), 2.0 * np.pi - 6.20, atol=1.0e-6)
 
 
 def test_axis_aligned_command_sampler_zeroes_two_command_axes():

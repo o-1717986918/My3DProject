@@ -79,6 +79,21 @@ TRAIN_TO_SERVER_SIGN = np.array(
 )
 
 
+def path_frame_errors(
+    current_xy: jax.Array,
+    current_yaw: jax.Array,
+    initial_xy: jax.Array,
+    initial_yaw: jax.Array,
+) -> tuple[jax.Array, jax.Array]:
+    """Return cumulative lateral and wrapped heading error in the reset frame."""
+    displacement = current_xy - initial_xy
+    initial_left = jp.array([-jp.sin(initial_yaw), jp.cos(initial_yaw)])
+    lateral_displacement = jp.dot(displacement, initial_left)
+    yaw_delta = current_yaw - initial_yaw
+    heading_drift = jp.arctan2(jp.sin(yaw_delta), jp.cos(yaw_delta))
+    return lateral_displacement, heading_drift
+
+
 def default_config() -> config_dict.ConfigDict:
     """Return the stage-one configuration; trainers override command ranges."""
     return config_dict.create(
@@ -137,6 +152,8 @@ def default_config() -> config_dict.ConfigDict:
             motion_action=0.0,
             lateral_tracking=0.0,
             yaw_rate_error=0.0,
+            path_lateral=0.0,
+            heading_drift=0.0,
             vertical_velocity=-0.25,
             angular_xy=-0.10,
             action_rate=-0.015,
@@ -643,6 +660,10 @@ class DirectionalRun(mjx_env.MjxEnv):
             njmax=self._config.njmax,
         )
         data = mjx.forward(self._mjx_model, data)
+        initial_yaw = jp.arctan2(
+            data.site_xmat[self._torso_site][1, 0],
+            data.site_xmat[self._torso_site][0, 0],
+        )
 
         delay_steps = jax.random.randint(
             delay_rng,
@@ -666,6 +687,8 @@ class DirectionalRun(mjx_env.MjxEnv):
                     data.site_xpos[self._right_foot_site],
                 ]
             ),
+            "initial_torso_xy": data.site_xpos[self._torso_site, :2],
+            "initial_yaw": initial_yaw,
         }
         metrics = {
             "reward/tracking_linear": jp.array(0.0),
@@ -686,12 +709,16 @@ class DirectionalRun(mjx_env.MjxEnv):
             "cost/action_acceleration": jp.array(0.0),
             "cost/joint_velocity": jp.array(0.0),
             "cost/foot_slip": jp.array(0.0),
+            "cost/path_lateral": jp.array(0.0),
+            "cost/heading_drift": jp.array(0.0),
             "cost/pose": jp.array(0.0),
             "cost/joint_limit": jp.array(0.0),
             "cost/fall": jp.array(0.0),
             "diagnostic/local_velocity_x": jp.array(0.0),
             "diagnostic/local_velocity_y": jp.array(0.0),
             "diagnostic/yaw_rate": jp.array(0.0),
+            "diagnostic/path_lateral_m": jp.array(0.0),
+            "diagnostic/heading_drift_rad": jp.array(0.0),
             "diagnostic/torso_height": jp.array(0.0),
         }
         obs = self._get_obs(data, info)
@@ -736,6 +763,16 @@ class DirectionalRun(mjx_env.MjxEnv):
         data = mjx_env.step(self._mjx_model, data, ctrl, self.n_substeps)
 
         local_velocity, yaw_rate, upright, torso_height = self._base_diagnostics(data)
+        current_yaw = jp.arctan2(
+            data.site_xmat[self._torso_site][1, 0],
+            data.site_xmat[self._torso_site][0, 0],
+        )
+        path_lateral, heading_drift = path_frame_errors(
+            data.site_xpos[self._torso_site, :2],
+            current_yaw,
+            state.info["initial_torso_xy"],
+            state.info["initial_yaw"],
+        )
         linear_error = jp.sum(jp.square(state.info["command"][:2] - local_velocity[:2]))
         yaw_error = jp.square(state.info["command"][2] - yaw_rate)
         tracking_linear = jp.exp(-linear_error / self._config.reward.tracking_sigma)
@@ -855,6 +892,10 @@ class DirectionalRun(mjx_env.MjxEnv):
             "lateral_tracking": self._config.reward.lateral_tracking
             * jp.square(state.info["command"][1] - local_velocity[1]),
             "yaw_rate_error": self._config.reward.yaw_rate_error * yaw_error,
+            "path_lateral": self._config.reward.path_lateral
+            * jp.square(path_lateral),
+            "heading_drift": self._config.reward.heading_drift
+            * jp.square(heading_drift),
             "vertical_velocity": self._config.reward.vertical_velocity
             * jp.square(local_velocity[2]),
             "angular_xy": self._config.reward.angular_xy
@@ -912,12 +953,16 @@ class DirectionalRun(mjx_env.MjxEnv):
                 "cost/action_acceleration": action_acceleration,
                 "cost/joint_velocity": joint_velocity,
                 "cost/foot_slip": foot_slip,
+                "cost/path_lateral": jp.square(path_lateral),
+                "cost/heading_drift": jp.square(heading_drift),
                 "cost/pose": pose,
                 "cost/joint_limit": joint_limit,
                 "cost/fall": fall.astype(jp.float32),
                 "diagnostic/local_velocity_x": local_velocity[0],
                 "diagnostic/local_velocity_y": local_velocity[1],
                 "diagnostic/yaw_rate": yaw_rate,
+                "diagnostic/path_lateral_m": path_lateral,
+                "diagnostic/heading_drift_rad": heading_drift,
                 "diagnostic/torso_height": torso_height,
             }
         )
