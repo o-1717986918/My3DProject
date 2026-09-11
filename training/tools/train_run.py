@@ -37,10 +37,9 @@ from my3d_rl.training_schedule import (
 
 
 STAGES: dict[str, dict[str, Any]] = {
-    # Preserve Apollo's actor boundary while training the way the competition
-    # actually uses it: a target point is converted to a new body-frame command
-    # every 20 ms.  Full-circle bearings cover turn-then-approach cases without
-    # introducing a new observation or deployment protocol.
+    # Preserve Apollo's actor boundary while isolating WalkRunner's absolute-
+    # target conversion.  This does not include the decision layer's planner,
+    # braking, obstacle avoidance, or near-ball sequencing.
     "apollo_waypoint": {
         "use_fixed_command": True,
         "fixed_command": [0.0, 0.0, 0.0],
@@ -661,7 +660,6 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.fall": -100.0,
     },
 }
-
 
 def _json_value(value: Any) -> Any:
     try:

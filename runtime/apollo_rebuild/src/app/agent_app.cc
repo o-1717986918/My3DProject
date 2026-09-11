@@ -137,11 +137,26 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             snapshot.self.position_m[0], snapshot.self.position_m[1]};
         const std::array<double, 2> ball{
             snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+        const double self_yaw_deg =
+            world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+                snapshot.self.orientation_wxyz);
         double walk_target_norm = -1.0;
+        double walk_target_x = 0.0;
+        double walk_target_y = 0.0;
+        double walk_orientation_deg = 0.0;
         int walk_target_absolute = -1;
+        int walk_orientation_present = 0;
+        int walk_orientation_absolute = -1;
         if (const auto* walk = std::get_if<decision::WalkCommand>(&command)) {
             walk_target_norm = math::norm2(walk->target_2d_m);
+            walk_target_x = walk->target_2d_m[0];
+            walk_target_y = walk->target_2d_m[1];
             walk_target_absolute = walk->target_absolute ? 1 : 0;
+            if (walk->orientation_deg.has_value()) {
+                walk_orientation_present = 1;
+                walk_orientation_deg = walk->orientation_deg.value();
+                walk_orientation_absolute = walk->orientation_absolute ? 1 : 0;
+            }
         }
         std::cerr
             << "APOLLO_REBUILD_STATUS"
@@ -157,6 +172,7 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             << " x=" << snapshot.self.position_m[0]
             << " y=" << snapshot.self.position_m[1]
             << " z=" << snapshot.self.position_m[2]
+            << " yaw_deg=" << self_yaw_deg
             << " self_speed=" << math::norm2({
                    snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]})
             << " ball_speed=" << (snapshot.ball.velocity_valid
@@ -166,7 +182,12 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                    : -1.0)
             << " motion=" << last_active_motion_
             << " walk_target_norm=" << walk_target_norm
+            << " walk_target_x=" << walk_target_x
+            << " walk_target_y=" << walk_target_y
             << " walk_target_absolute=" << walk_target_absolute
+            << " walk_orientation_present=" << walk_orientation_present
+            << " walk_orientation_deg=" << walk_orientation_deg
+            << " walk_orientation_absolute=" << walk_orientation_absolute
             << '\n';
     }
 

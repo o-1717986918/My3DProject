@@ -80,6 +80,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20_261_403)
     parser.add_argument("--distance-min", type=float, default=2.0)
     parser.add_argument("--distance-max", type=float, default=6.0)
+    parser.add_argument("--bearing-min-deg", type=float, default=-180.0)
+    parser.add_argument("--bearing-max-deg", type=float, default=180.0)
     args = parser.parse_args()
     if (
         not args.model.is_file()
@@ -87,6 +89,7 @@ def main() -> None:
         or args.steps < 1
         or args.seed < 0
         or not 0.25 < args.distance_min <= args.distance_max
+        or not -180.0 <= args.bearing_min_deg < args.bearing_max_deg <= 180.0
     ):
         raise ValueError("waypoint evaluation arguments are invalid")
     run_dir = _external_new_directory(args.run_dir)
@@ -96,7 +99,10 @@ def main() -> None:
             "episode_length": args.steps,
             "naconmax": max(2048, 16 * args.num_envs),
             "waypoint_distance_range": [args.distance_min, args.distance_max],
-            "waypoint_bearing_range": [-float(np.pi), float(np.pi)],
+            "waypoint_bearing_range": [
+                float(np.deg2rad(args.bearing_min_deg)),
+                float(np.deg2rad(args.bearing_max_deg)),
+            ],
             "reset_joint_noise": 0.0,
             "reset_joint_velocity_noise": 0.0,
             "reset_policy_action_noise": 0.0,
@@ -184,6 +190,7 @@ def main() -> None:
         "steps": args.steps,
         "duration_s": args.steps * env.dt,
         "distance_range_m": [args.distance_min, args.distance_max],
+        "bearing_range_deg": [args.bearing_min_deg, args.bearing_max_deg],
         "successes": int(np.sum(success)),
         "success_rate": float(np.mean(success)),
         "falls": int(np.sum(fallen)),
