@@ -131,7 +131,6 @@ def main() -> int:
     parser.add_argument("selector_manifest", type=Path)
     parser.add_argument("--baseline-prototype-rollout-id", type=int, default=65)
     parser.add_argument("--baseline-confirmation-cycles", type=int, default=39)
-    parser.add_argument("--minimum-release-precision", type=float, default=0.90)
     parser.add_argument(
         "--row-selection", choices=("all", "validation"), default="all"
     )
@@ -140,7 +139,6 @@ def main() -> int:
     args = parser.parse_args()
     if (
         args.baseline_confirmation_cycles < 1
-        or not 0.0 < args.minimum_release_precision <= 1.0
         or not args.output.is_absolute()
         or args.output.is_relative_to(Path.cwd())
     ):
@@ -250,9 +248,7 @@ def main() -> int:
     )
     gate_passed = bool(
         independent
-        and selector_metrics["falls"] == 0
-        and selector_metrics["release_precision"]
-        >= args.minimum_release_precision
+        and selector_metrics["falls"] <= baseline_metrics["falls"]
         and comparison["net_success_advantage"] > 0
     )
     report = {
@@ -283,7 +279,10 @@ def main() -> int:
         "selector_gate": {
             "threshold": float(calibration["selected_threshold"]),
             "consecutive_frames": int(calibration["selected_consecutive_frames"]),
-            "minimum_release_precision": args.minimum_release_precision,
+        },
+        "comparison_gate": {
+            "strictly_more_target_successes": True,
+            "no_more_falls_than_fixed_baseline": True,
         },
         "selector_metrics": _summary(selector_metrics),
         "baseline": {

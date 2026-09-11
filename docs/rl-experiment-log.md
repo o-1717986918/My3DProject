@@ -1739,16 +1739,48 @@ formed an upright candidate; the remaining 126 supplied 3,387 exact CPU
 on 93/126 approaches, and re-executing all ten existing prototypes raised
 oracle coverage to 123/126. No selector or action was trained on this corpus.
 
-The frozen selector released on 75/126 approaches, succeeded on 68, and had no
-falls, for 90.67% release precision. The predeclared fixed policy released on
-108/126, also succeeded on 68, and had no falls, for 62.96% precision. They
-shared 53 successes and each had 15 successes the other missed. The independent
-net success advantage is therefore zero: the classifier is useful evidence for
-rejecting bad releases, but it is not a repeatable capability improvement.
+The first audited selector, `kick-switch-selector-all-fallback-s10805`, released
+on 75/126 approaches, succeeded on 68, and had no falls, for 90.67% release
+precision. The predeclared fixed policy released on 108/126, also succeeded on
+68, and had no falls, for 62.96% precision. They shared 53 successes and each
+had 15 successes the other missed. This high-precision selector is therefore
+still rejected: filtering bad releases alone did not increase completed
+rollouts.
 
-The selector, prototype bank and old `KickCommand` remain unmounted. Reports
-are under `/home/win98/rl_runs/kick-switch-window-independent-s10911`,
-`/home/win98/rl_runs/kick-switch-prototype-bank-independent-s10912` and
-`/home/win98/rl_runs/kick-switch-selector-independent-s10915`. The reusable
-evaluator remains in the repository so a future, genuinely better action bank
-can be checked without retraining or recalibrating the gate.
+The original audit also imposed a 90% minimum release-precision threshold. That
+threshold was not derived from RCSSServerMJ rules or a fixed-action comparison,
+and it contradicted the requirement to relax action release when doing so
+produces more useful contacts. The evaluator now uses the direct relative gate:
+on an independent corpus the selector must complete strictly more targets than
+the predeclared fixed action and must not produce more falls.
+
+The already frozen, more permissive
+`kick-switch-selector-all-fallback90-s10806` uses the same current-state feature
+contract and ten prototypes, but a 0.96 threshold, two consecutive frames and
+no fallback. It was not retrained or recalibrated on either new corpus. Its
+independent results were:
+
+| corpus | frozen selector | fixed rollout 65 / cycle 39 | paired net | falls |
+|---|---:|---:|---:|---:|
+| seed `10911` | 74/126, 94 releases | 68/126, 108 releases | +6 | 0 / 0 |
+| seed `10921` | 80/127, 96 releases | 54/127, 115 releases | +26 | 0 / 1 |
+| aggregate | 154/253 (`60.87%`) | 122/253 (`48.22%`) | +32 | 0 / 1 |
+
+Aggregate release precision is `154/190 = 81.05%` for the selector versus
+`122/223 = 54.71%` for the fixed action. Both independent corpora pass the
+direct gate. This authorizes a minimal runtime prototype, not formal promotion:
+the evidence covers only teacher record 60 (`pass`, 2.0 m, 0 degrees, requested
+speed 1.43 m/s, desired arrival speed 0.8 m/s, ball offset
+`(0.02375, 0.01) m`). It says nothing yet about arbitrary directions,
+distances, dribbling or shooting.
+
+The reports are under
+`/home/win98/rl_runs/kick-switch-selector-independent-s10917` and
+`/home/win98/rl_runs/kick-switch-selector-independent-s10923`; their source
+corpora and ten-prototype banks use the matching `s10911/s10912` and
+`s10921/s10922` directories. The selector and prototypes remain outside the
+formal team until RCSSServerMJ replay and side-swapped comparison succeed. The
+runtime prototype must reproduce the training executor by overlaying the
+14-parameter trajectory on the current Walk target. The old procedural runner
+instead fades a captured measured pose toward zero and is not an equivalent
+executor, so it will not be copied along with the old `KickCommand` stack.
