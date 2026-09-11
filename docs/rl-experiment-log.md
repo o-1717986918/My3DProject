@@ -1688,3 +1688,37 @@ The radial chase task was already 93.36% solved by the Walk clone, while PPO
 either changed the result at noise scale or sacrificed the clone's zero-fall
 property. The experimental stage, controller mode, CPU branch, parity CLI
 extension and tests were therefore removed. No model was exported or mounted.
+
+## Walk-clone direct-contact pre-screen — 2026-09-12
+
+The next smallest experiment tested the part that the radial chase task did
+not cover: dynamic contact and ball outcome. The official ICRA 2026 T1 kick
+configuration resumes the pre-kick teacher, keeps commanding 0.7 m/s toward
+the ball, disables the approach rewards inside 0.5 m, and makes projected ball
+velocity toward the goal the primary kick reward. It does not first require a
+stationary program-trajectory release.
+
+A temporary local stage followed only that structural point. It restored the
+verified full-body Walk clone, placed the robot behind the ball at 0.45--1.20 m
+with bounded lateral and yaw error, commanded directly toward the ball, and
+disabled the procedural kick prior. Success required the ball to reach a 2 m
+target zone at the requested arrival speed; merely touching the ball or
+reaching a setup pose did not count.
+
+The untrained Walk clone contacted the ball in all 512 rollouts over seeds
+20261601--20261604, with zero falls and 97 target successes (18.95%). This
+establishes a useful non-zero baseline and shows that the remaining failure is
+contact quality rather than release starvation. A 196,608-step Warp smoke run
+from the clone kept 512/512 contacts and zero falls but fell to 92/512 target
+successes (17.97%) on the same external seeds. Its internal endpoint was
+likewise only 11/64 successes versus 10/64 at initialization.
+
+The short run is intentionally non-promotable and does not disprove the
+official large-scale curriculum, which uses 4096 environments and fine-tunes a
+fully trained pre-kick teacher. It does reject the low-cost hypothesis that
+the existing local reward plus a short direct full-body PPO pass is enough.
+The temporary stage and tests were removed; no parity work, ONNX export or
+runtime integration was added. Baselines are
+`/home/win98/rl_runs/striker/walk-clone-contact-baseline-s2026160{1,2,3,4}.json`;
+the checkpoint and external reports are under
+`/home/win98/rl_runs/striker/walk-clone-contact-smoke-s20261605-v1`.
