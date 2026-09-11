@@ -29,10 +29,9 @@ from my3d_rl.training_schedule import compatible_num_evals, effective_timesteps
 
 
 STAGES: dict[str, dict[str, Any]] = {
-    # Stage 1 follows the public ICRA 2026 Booster-T1 striker recipe: learn
-    # long-distance ball chasing before optimizing any contact.  The policy is
-    # allowed to correct the Apollo walk throughout the approach, while the
-    # kick prior is explicitly disabled.
+    # Legacy residual chase retained for reproducibility.  Its default reset
+    # starts behind the ball, so it is not the direct full-body Stage 1 used by
+    # the public ICRA 2026 Booster-T1 striker route.
     "ball_chase": {
         "robot_distance_range": [1.0, 4.0],
         "robot_lateral_range": [-1.0, 1.0],
@@ -60,6 +59,30 @@ STAGES: dict[str, dict[str, Any]] = {
         "reset_root_velocity_noise": 0.06,
         "kick_prior_enabled": False,
         "learned_approach_residual_floor": 1.0,
+    },
+    # Minimal direct full-body Stage 1: initialize from the verified Apollo
+    # Walk clone, turn toward a ball at any bearing, then advance without a
+    # lateral command.  This deliberately stops at a stable radial standoff;
+    # behind-ball placement and contact remain separate later stages.
+    "walk_clone_ball_chase": {
+        "robot_distance_range": [1.0, 4.0],
+        "robot_bearing_range": [-3.141593, 3.141593],
+        "robot_lateral_range": [0.0, 0.0],
+        "robot_yaw_noise_range": [-3.141593, 3.141593],
+        "target_angle_range": [-3.141593, 3.141593],
+        "target_distance_range": [2.0, 5.0],
+        "reset_joint_noise": 0.01,
+        "reset_root_velocity_noise": 0.03,
+        "kick_prior_enabled": False,
+        "learned_approach_residual_floor": 1.0,
+        "control_decoder": "direct_joint_delta",
+        "approach_mode": "ball_chase",
+        "approach_standoff": 0.45,
+        "approach_ball_lateral": 0.0,
+        "approach_max_forward_speed": 1.20,
+        "approach_max_backward_speed": 0.0,
+        "approach_max_lateral_speed": 0.0,
+        "approach_max_yaw_speed": 1.60,
     },
     # Direct full-body teacher initialized by collect_striker_walk_clone.py and
     # train_striker_walk_clone.py.  It uses a physical joint-delta action so a
@@ -192,12 +215,18 @@ def _git_revision() -> str:
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
-def _load_parity_report(path: Path, implementation: str) -> dict[str, Any]:
+def _load_parity_report(
+    path: Path,
+    implementation: str,
+    stage: str | None = None,
+) -> dict[str, Any]:
     report = json.loads(path.read_text(encoding="utf-8"))
     if report.get("purpose") != "striker_identical_control_cpu_mjx_parity":
         raise ValueError("parity report has the wrong purpose")
     if report.get("accelerated_implementation") != implementation:
         raise ValueError("parity report backend does not match --impl")
+    if stage is not None and report.get("stage") != stage:
+        raise ValueError("parity report stage does not match --stage")
     if not bool(report.get("summary", {}).get("parity_gate_passed")):
         raise ValueError("parity report did not pass")
     return {
@@ -373,7 +402,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.parity_report is not None:
-        parity_metadata = _load_parity_report(args.parity_report, args.impl)
+        parity_metadata = _load_parity_report(
+            args.parity_report, args.impl, args.stage
+        )
     elif args.allow_unverified_backend_smoke:
         parity_metadata = None
     else:
@@ -386,9 +417,9 @@ def main() -> None:
     if args.restore_checkpoint is not None and not args.restore_checkpoint.exists():
         raise FileNotFoundError(args.restore_checkpoint)
     walk_clone_initializer = None
-    if args.stage == "walk_clone_pre_kick":
+    if args.stage in {"walk_clone_ball_chase", "walk_clone_pre_kick"}:
         if args.restore_checkpoint is None:
-            raise ValueError("walk_clone_pre_kick requires a cloned Walk checkpoint")
+            raise ValueError(f"{args.stage} requires a cloned Walk checkpoint")
         walk_clone_initializer = _validate_walk_clone_checkpoint(
             args.restore_checkpoint
         )

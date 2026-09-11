@@ -46,6 +46,11 @@ def default_config() -> config_dict.ConfigDict:
     config.reset_root_velocity_noise = 0.03
     config.approach_standoff = 0.31
     config.approach_ball_lateral = -0.04
+    # Keep the deployed controller aimed at the requested ball path.  A
+    # dedicated pre-kick curriculum may instead aim directly at the ball so
+    # the full-body policy can learn turn-then-forward chasing before it is
+    # asked to solve behind-ball placement.
+    config.approach_mode = "behind_ball"
     config.approach_position_gain = 2.0
     config.approach_lateral_gain = 2.5
     config.approach_yaw_gain = 2.0
@@ -247,6 +252,8 @@ class LongHorizonStriker(DirectionalKick):
             "direct_joint_delta",
         }:
             raise ValueError("unsupported control_decoder")
+        if self._config.approach_mode not in {"behind_ball", "ball_chase"}:
+            raise ValueError("unsupported approach_mode")
         if self._config.arrival_speed_tolerance <= 0.0:
             raise ValueError("arrival_speed_tolerance must be positive")
         if self.contract.observation_size != 102 or self.action_size != 23:
@@ -344,10 +351,15 @@ class LongHorizonStriker(DirectionalKick):
         ball_local_vel_xy = world_to_yaw @ (
             ball_world_vel[:2] - torso_world_vel[:2]
         )
+        control_target_local = (
+            _safe_unit(ball_local_xy)
+            if self._config.approach_mode == "ball_chase"
+            else target_local
+        )
         command, activation, contact_error, heading_error = (
             closed_loop_approach_control(
                 ball_local_xy,
-                target_local,
+                control_target_local,
                 standoff=self._config.approach_standoff,
                 ball_lateral=self._config.approach_ball_lateral,
                 position_gain=self._config.approach_position_gain,

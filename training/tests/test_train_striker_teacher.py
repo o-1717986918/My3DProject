@@ -31,6 +31,7 @@ def test_striker_curriculum_expands_without_changing_stage_order():
 def test_t1_striker_curriculum_separates_chase_from_directional_contact():
     chase = STAGES["ball_chase"]
     reposition = STAGES["ball_reposition"]
+    clone_chase = STAGES["walk_clone_ball_chase"]
     clone = STAGES["walk_clone_pre_kick"]
     release = STAGES["contact_release_2m"]
     kick = STAGES["directional_kick"]
@@ -42,6 +43,15 @@ def test_t1_striker_curriculum_separates_chase_from_directional_contact():
     assert reposition["robot_distance_range"] == [0.35, 1.25]
     assert reposition["kick_prior_enabled"] is False
     assert reposition["learned_approach_residual_floor"] == 1.0
+    assert clone_chase["control_decoder"] == "direct_joint_delta"
+    assert clone_chase["approach_mode"] == "ball_chase"
+    assert clone_chase["robot_distance_range"] == [1.0, 4.0]
+    assert clone_chase["robot_bearing_range"] == [-3.141593, 3.141593]
+    assert clone_chase["approach_max_forward_speed"] == 1.20
+    assert clone_chase["approach_max_backward_speed"] == 0.0
+    assert clone_chase["approach_max_lateral_speed"] == 0.0
+    assert clone_chase["approach_max_yaw_speed"] == 1.60
+    assert clone_chase["kick_prior_enabled"] is False
     assert clone["control_decoder"] == "direct_joint_delta"
     assert clone["kick_prior_enabled"] is False
     assert kick["kick_prior_enabled"] is True
@@ -73,6 +83,26 @@ def test_striker_parity_gate_requires_matching_verified_backend(tmp_path: Path):
     assert accepted["summary"]["parity_gate_passed"] is True
     with pytest.raises(ValueError, match="backend"):
         _load_parity_report(path, "jax")
+
+
+def test_striker_parity_gate_can_require_the_training_stage(tmp_path: Path):
+    path = tmp_path / "parity.json"
+    path.write_text(
+        json.dumps(
+            {
+                "purpose": "striker_identical_control_cpu_mjx_parity",
+                "accelerated_implementation": "warp",
+                "stage": "walk_clone_ball_chase",
+                "summary": {"parity_gate_passed": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    accepted = _load_parity_report(path, "warp", "walk_clone_ball_chase")
+    assert accepted["summary"]["parity_gate_passed"] is True
+    with pytest.raises(ValueError, match="stage"):
+        _load_parity_report(path, "warp", "walk_clone_pre_kick")
 
 
 def test_striker_parity_gate_rejects_wrong_purpose(tmp_path: Path):

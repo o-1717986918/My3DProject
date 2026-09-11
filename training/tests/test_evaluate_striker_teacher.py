@@ -46,6 +46,9 @@ def test_chase_stages_use_setup_arrival_while_kick_stage_uses_ball_result():
         "walk_clone_pre_kick", setup, ball_result
     ).tolist() == [True, False, True]
     assert _stage_success_mask(
+        "walk_clone_ball_chase", setup, ball_result
+    ).tolist() == [True, False, True]
+    assert _stage_success_mask(
         "directional_kick", setup, ball_result
     ).tolist() == [False, True, False]
 

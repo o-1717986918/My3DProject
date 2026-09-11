@@ -1647,3 +1647,33 @@ goal mouth but was recovered by the base goalkeeper. The team has therefore
 recovered pressure tempo and territory, but still needs a stable
 approach-to-contact/continuous-dribble learner and a final-third release that
 can execute before the goalkeeper recovers. Two draws are not superiority.
+
+## Walk-clone dynamic ball-chase pre-screen — 2026-09-12
+
+The direct `walk_clone_pre_kick` stage previously jumped from a stable Apollo
+Walk clone into the hardest near-ball, full-circle behind-ball placement task.
+The audited ICRA 2026 T1 implementation instead learns a forward-only dynamic
+chase toward the ball before its kick stage.  A minimal
+`walk_clone_ball_chase` stage now reproduces that missing decomposition without
+changing the deployed controller: the ball starts 1--4 m away at any bearing,
+the body starts at any yaw, the command first turns toward the ball, lateral
+and backward commands are disabled, and success is a five-frame stable hold at
+a 0.45 m radial standoff without contact.
+
+The verified Apollo Walk clone already reached setup in 478/512 accelerated
+rollouts over seeds 20261501--20261504, with no falls or ball contacts. A
+196,608-step non-promotable Warp smoke run from that clone reached 484/512 on
+the same four seeds, also with no falls or contacts. Mean termination time
+fell from 218.6 to 209.4 control steps. Three seeds improved and one regressed
+slightly, so this is evidence to continue rather than evidence to deploy.
+Reports and the checkpoint are under
+`/home/win98/rl_runs/striker/walk-clone-ball-chase-smoke-s20261501-v1`.
+
+The exact-control 100-step CPU MuJoCo versus MJX/Warp check passed for the new
+direct-joint stage. Maximum joint-position error was `5.52e-6 rad`, root
+position error `2.72e-6 m`, and ball-position error `5.46e-4 m`; the report is
+`/home/win98/rl_runs/striker-parity/walk-clone-ball-chase-warp-s20261505.json`.
+The checkpoint remains unmounted and unexported. The next decision point is a
+fresh, parity-gated longer run from the original Walk clone, followed by
+multi-seed independent evaluation; a failure to widen the small aggregate
+gain will reject the candidate without adding deployment code.
