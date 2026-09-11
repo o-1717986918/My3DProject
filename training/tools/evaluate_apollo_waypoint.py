@@ -14,7 +14,7 @@ import jax
 import jax.numpy as jp
 import numpy as np
 
-from my3d_rl.apollo_run_env import ApolloWaypointRun
+from my3d_rl.apollo_run_env import ApolloHandoffWaypointRun, ApolloWaypointRun
 from my3d_rl.apollo_walk_jax import load_apollo_walk_jax
 
 
@@ -82,6 +82,16 @@ def main() -> None:
     parser.add_argument("--distance-max", type=float, default=6.0)
     parser.add_argument("--bearing-min-deg", type=float, default=-180.0)
     parser.add_argument("--bearing-max-deg", type=float, default=180.0)
+    parser.add_argument(
+        "--entry-model",
+        type=Path,
+        help="frozen Apollo actor used for near-handoff continuity comparison",
+    )
+    parser.add_argument(
+        "--entry-corpus",
+        type=Path,
+        help="sample a live frozen-Walk state before candidate control",
+    )
     args = parser.parse_args()
     if (
         not args.model.is_file()
@@ -92,26 +102,48 @@ def main() -> None:
         or not -180.0 <= args.bearing_min_deg < args.bearing_max_deg <= 180.0
     ):
         raise ValueError("waypoint evaluation arguments are invalid")
+    if args.entry_model is not None and not args.entry_model.is_file():
+        raise FileNotFoundError(args.entry_model)
+    if (args.entry_model is None) != (args.entry_corpus is None):
+        raise ValueError("entry-model and entry-corpus must be supplied together")
+    if args.entry_corpus is not None and not args.entry_corpus.is_file():
+        raise FileNotFoundError(args.entry_corpus)
     run_dir = _external_new_directory(args.run_dir)
-    env = ApolloWaypointRun(
-        config_overrides={
-            "impl": args.impl,
-            "episode_length": args.steps,
-            "naconmax": max(2048, 16 * args.num_envs),
-            "waypoint_distance_range": [args.distance_min, args.distance_max],
-            "waypoint_bearing_range": [
-                float(np.deg2rad(args.bearing_min_deg)),
-                float(np.deg2rad(args.bearing_max_deg)),
-            ],
-            "reset_joint_noise": 0.0,
-            "reset_joint_velocity_noise": 0.0,
-            "reset_policy_action_noise": 0.0,
-            "reset_root_velocity_noise": 0.0,
-            "reset_yaw_range": 0.0,
-            "push_enable": False,
-            "action_delay_max_steps": 0,
-        }
-    )
+    environment_overrides = {
+        "impl": args.impl,
+        "episode_length": args.steps,
+        "naconmax": max(2048, 16 * args.num_envs),
+        "waypoint_distance_range": [args.distance_min, args.distance_max],
+        "waypoint_bearing_range": [
+            float(np.deg2rad(args.bearing_min_deg)),
+            float(np.deg2rad(args.bearing_max_deg)),
+        ],
+        "reset_joint_noise": 0.0,
+        "reset_joint_velocity_noise": 0.0,
+        "reset_policy_action_noise": 0.0,
+        "reset_root_velocity_noise": 0.0,
+        "reset_yaw_range": 0.0,
+        "push_enable": False,
+        "action_delay_max_steps": 0,
+    }
+    if args.entry_model is None:
+        env = ApolloWaypointRun(config_overrides=environment_overrides)
+    else:
+        environment_overrides.update(
+            {
+                "use_fixed_command": False,
+                "lin_vel_x": [-0.5, 1.0],
+                "lin_vel_y": [-0.5, 0.5],
+                "ang_vel_yaw": [-0.5, 0.5],
+                "stand_probability": 0.0,
+                "command_resample_steps": args.steps + 1,
+            }
+        )
+        env = ApolloHandoffWaypointRun(
+            entry_policy=load_apollo_walk_jax(args.entry_model),
+            entry_corpus=args.entry_corpus,
+            config_overrides=environment_overrides,
+        )
     policy = load_apollo_walk_jax(args.model)
     reset = jax.jit(jax.vmap(env.reset))
     batched_step = jax.vmap(env.step)
@@ -183,6 +215,18 @@ def main() -> None:
         ).strip(),
         "model": str(args.model.resolve()),
         "model_sha256": _sha256(args.model),
+        "entry_model": (
+            str(args.entry_model.resolve()) if args.entry_model else None
+        ),
+        "entry_model_sha256": (
+            _sha256(args.entry_model) if args.entry_model else None
+        ),
+        "entry_corpus": (
+            str(args.entry_corpus.resolve()) if args.entry_corpus else None
+        ),
+        "entry_corpus_sha256": (
+            _sha256(args.entry_corpus) if args.entry_corpus else None
+        ),
         "backend": jax.default_backend(),
         "implementation": args.impl,
         "seed": args.seed,

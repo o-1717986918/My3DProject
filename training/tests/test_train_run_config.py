@@ -19,6 +19,19 @@ def test_apollo_waypoint_stage_uses_exact_warmstart_contract():
     assert stage["reward.waypoint_success"] > 0.0
 
 
+def test_apollo_handoff_stage_uses_runtime_command_surface_and_continuity_cost():
+    stage = STAGES["apollo_handoff_waypoint"]
+
+    assert stage["use_fixed_command"] is False
+    assert stage["lin_vel_x"] == [-0.5, 1.0]
+    assert stage["lin_vel_y"] == [-0.5, 0.5]
+    assert stage["ang_vel_yaw"] == [-0.5, 0.5]
+    assert stage["reset_joint_noise"] == 0.0
+    assert stage["reset_joint_velocity_noise"] == 0.0
+    assert stage["reset_policy_action_noise"] == 0.0
+    assert stage["reward.handoff_action"] < 0.0
+
+
 def test_motion_reference_initialization_is_scoped_to_motion_stages():
     assert "reference_init_probability" not in STAGES["balance"]
     assert STAGES["motion_track"]["reference_init_probability"] == 0.20

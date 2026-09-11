@@ -142,6 +142,30 @@ left/right turn. It reports the worst upright completion, planar velocity RMSE
 and yaw-rate RMSE; every command must pass before the candidate can replace
 the retained runtime model.
 
+Static nominal-pose resets do not test a specialist entering from a live Walk
+phase.  Collect frozen Apollo states once, verify that reconstructed states can
+continue their original commands, then use the same corpus for paired handoff
+training and evaluation:
+
+```bash
+PYTHONPATH=training python training/tools/collect_apollo_handoff_states.py \
+  --impl warp --num-envs 128 --steps 75 --burn-in-steps 10 \
+  --run-dir /home/win98/rl_runs/apollo-handoff/corpus-<name>
+
+PYTHONPATH=training python training/tools/train_run.py \
+  --stage apollo_handoff_waypoint --impl warp --num-envs 64 \
+  --num-timesteps 196608 --network-profile apollo_walk_warmstart_v1 \
+  --bootstrap-onnx runtime/apollo_rebuild/assets/networks/walk/policy.onnx \
+  --entry-corpus /home/win98/rl_runs/apollo-handoff/corpus-<name>/apollo-handoff-states.npz \
+  --run-dir /home/win98/rl_runs/apollo-handoff/candidate-<name>
+```
+
+Pass the same `--entry-model` and `--entry-corpus` to
+`evaluate_apollo_waypoint.py`.  Promotion requires independent straight and
+both-sign 150-degree target evaluations; PPO aggregate reward is not an
+acceptance result.  The first 196,608-step experiment was rejected because it
+did not reduce falls in any of those three sets.
+
 The first broad `soccer_omni` run is a rejected baseline: random-command fall
 rate improved, but the frozen CPU suite stayed at 5/8. The follow-up must start
 again from the retained phase-v2 checkpoint and use axis-aligned sampling plus

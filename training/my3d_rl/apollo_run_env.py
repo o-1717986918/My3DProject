@@ -14,8 +14,11 @@ from typing import Any
 import jax
 import jax.numpy as jp
 from ml_collections import config_dict
+from mujoco import mjx
+from mujoco_playground._src import mjx_env
 import numpy as np
 
+from .apollo_walk_jax import ApolloWalkJax
 from .contract import PolicyContract, load_policy_contract
 from .rcss_scene import DEFAULT_RESOURCE_ROOT
 from .run_env import DirectionalRun, default_config as run_default_config
@@ -176,6 +179,10 @@ class ApolloWaypointRun(DirectionalRun):
 
     def reset(self, rng: jax.Array):
         state = super().reset(rng)
+        return self._initialize_waypoint(state)
+
+    def _initialize_waypoint(self, state):
+        """Attach a new waypoint to an already valid Apollo gait state."""
         state.info["rng"], distance_rng, bearing_rng = jax.random.split(
             state.info["rng"], 3
         )
@@ -198,6 +205,14 @@ class ApolloWaypointRun(DirectionalRun):
         state.info["waypoint_bearing"] = bearing
         state.info["waypoint_distance"] = distance
         state.info["command"] = self._waypoint_command(state.data, waypoint_xy)
+        state.info["initial_torso_xy"] = state.data.site_xpos[
+            self._torso_site, :2
+        ]
+        state.info["initial_yaw"] = jp.arctan2(
+            state.data.site_xmat[self._torso_site][1, 0],
+            state.data.site_xmat[self._torso_site][0, 0],
+        )
+        state.info["step"] = jp.array(0, dtype=jp.int32)
         state.metrics["diagnostic/waypoint_distance_m"] = distance
         state.metrics["diagnostic/waypoint_progress_m"] = jp.array(0.0)
         state.metrics["diagnostic/waypoint_success"] = jp.array(0.0)
@@ -231,3 +246,179 @@ class ApolloWaypointRun(DirectionalRun):
             reward=reward,
             done=done.astype(jp.float32),
         )
+
+
+class ApolloHandoffWaypointRun(ApolloWaypointRun):
+    """Start waypoint control from states produced by the frozen Apollo Walk.
+
+    This is deliberately a training/evaluation environment only.  It restores
+    states collected from the frozen actor under sampled runtime commands, then
+    gives the candidate the same 78-value observation and previous-action
+    history at the switch.  Near the destination, a small teacher-action cost
+    discourages a specialist from creating a large discontinuity when control
+    returns to Apollo Walk.
+    """
+
+    def __init__(
+        self,
+        entry_policy: ApolloWalkJax,
+        entry_corpus: Path,
+        config: config_dict.ConfigDict | None = None,
+        config_overrides: dict[str, Any] | None = None,
+        *,
+        contract: PolicyContract | None = None,
+        resource_root: Path = DEFAULT_RESOURCE_ROOT,
+        prefix: str = "train_",
+    ) -> None:
+        config = default_config() if config is None else config
+        config.handoff_radius = 0.60
+        config.reward.handoff_action = -0.10
+        super().__init__(
+            config=config,
+            config_overrides=config_overrides,
+            contract=contract,
+            resource_root=resource_root,
+            prefix=prefix,
+        )
+        self._entry_policy = entry_policy
+        if not 0.0 < self._config.handoff_radius:
+            raise ValueError("handoff_radius must be positive")
+        if not entry_corpus.is_file():
+            raise FileNotFoundError(f"Apollo handoff corpus not found: {entry_corpus}")
+        with np.load(entry_corpus, allow_pickle=False) as archive:
+            required = {
+                "qpos",
+                "qvel",
+                "last_action",
+                "last_last_action",
+                "source_command",
+                "source_step",
+            }
+            missing = required - set(archive.files)
+            if missing:
+                raise ValueError(
+                    f"Apollo handoff corpus is missing arrays: {sorted(missing)}"
+                )
+            qpos = np.asarray(archive["qpos"], dtype=np.float32)
+            qvel = np.asarray(archive["qvel"], dtype=np.float32)
+            last_action = np.asarray(archive["last_action"], dtype=np.float32)
+            last_last_action = np.asarray(
+                archive["last_last_action"], dtype=np.float32
+            )
+            source_command = np.asarray(
+                archive["source_command"], dtype=np.float32
+            )
+            source_step = np.asarray(archive["source_step"], dtype=np.int32)
+        sample_count = qpos.shape[0]
+        if (
+            sample_count < 1
+            or qpos.shape != (sample_count, self._mj_model.nq)
+            or qvel.shape != (sample_count, self._mj_model.nv)
+            or last_action.shape != (sample_count, self.action_size)
+            or last_last_action.shape != (sample_count, self.action_size)
+            or source_command.shape != (sample_count, 3)
+            or source_step.shape != (sample_count,)
+            or not all(
+                np.isfinite(array).all()
+                for array in (
+                    qpos,
+                    qvel,
+                    last_action,
+                    last_last_action,
+                    source_command,
+                )
+            )
+        ):
+            raise ValueError("Apollo handoff corpus arrays are incompatible")
+        self._entry_qpos = jp.asarray(qpos)
+        self._entry_qvel = jp.asarray(qvel)
+        self._entry_last_action = jp.asarray(last_action)
+        self._entry_last_last_action = jp.asarray(last_last_action)
+        self._entry_source_command = jp.asarray(source_command)
+        self._entry_source_step = jp.asarray(source_step)
+        self._entry_sample_count = sample_count
+
+    def reset(self, rng: jax.Array):
+        state = self.reset_source_replay(rng)
+        state = self._initialize_waypoint(state)
+        return state
+
+    def reset_source_replay(self, rng: jax.Array):
+        """Restore one corpus state under its original Walk command."""
+        rng, entry_index_rng = jax.random.split(rng)
+        entry_index = jax.random.randint(
+            entry_index_rng,
+            (),
+            minval=0,
+            maxval=self._entry_sample_count,
+        )
+        last_action = self._entry_last_action[entry_index]
+        ctrl = jp.zeros(self._mj_model.nu)
+        ctrl = ctrl.at[self._pos_actuator].set(
+            self.decode_action_targets(last_action)
+        )
+        data = mjx_env.make_data(
+            self._mj_model,
+            qpos=self._entry_qpos[entry_index],
+            qvel=self._entry_qvel[entry_index],
+            ctrl=ctrl,
+            impl=self._mjx_model.impl.value,
+            naconmax=self._config.naconmax,
+            njmax=self._config.njmax,
+        )
+        data = mjx.forward(self._mjx_model, data)
+        initial_yaw = jp.arctan2(
+            data.site_xmat[self._torso_site][1, 0],
+            data.site_xmat[self._torso_site][0, 0],
+        )
+        info = {
+            "rng": rng,
+            "step": jp.array(0, dtype=jp.int32),
+            "command": self._entry_source_command[entry_index],
+            "gait_phase": jp.array(0.0),
+            "gait_frequency": jp.array(1.5),
+            "last_action": last_action,
+            "last_last_action": self._entry_last_last_action[entry_index],
+            "delay_steps": jp.array(0, dtype=jp.int32),
+            "reference_init": jp.array(False),
+            "last_foot_positions": jp.stack(
+                [
+                    data.site_xpos[self._left_foot_site],
+                    data.site_xpos[self._right_foot_site],
+                ]
+            ),
+            "initial_torso_xy": data.site_xpos[self._torso_site, :2],
+            "initial_yaw": initial_yaw,
+            "entry_sample_index": entry_index,
+            "entry_source_command": self._entry_source_command[entry_index],
+            "entry_steps": self._entry_source_step[entry_index],
+        }
+        metrics = self._initial_metrics()
+        metrics["cost/handoff_action_mismatch"] = jp.array(0.0)
+        return mjx_env.State(
+            data=data,
+            obs=self._get_obs(data, info),
+            reward=jp.array(0.0),
+            done=jp.array(0.0),
+            metrics=metrics,
+            info=info,
+        )
+
+    def step(self, state, action):
+        teacher_action = self._entry_policy(state.obs["state"])
+        mismatch = jp.mean(jp.square(action - teacher_action))
+        distance = jp.linalg.norm(
+            state.info["waypoint_xy"]
+            - state.data.site_xpos[self._torso_site, :2]
+        )
+        handoff_gate = (distance <= self._config.handoff_radius).astype(jp.float32)
+        state = super().step(state, action)
+        state.metrics["cost/handoff_action_mismatch"] = mismatch * handoff_gate
+        reward = (
+            state.reward
+            + self._config.reward.handoff_action
+            * mismatch
+            * handoff_gate
+            * self.dt
+        )
+        return state.replace(reward=reward)

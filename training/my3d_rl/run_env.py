@@ -701,7 +701,20 @@ class DirectionalRun(mjx_env.MjxEnv):
             "initial_torso_xy": data.site_xpos[self._torso_site, :2],
             "initial_yaw": initial_yaw,
         }
-        metrics = {
+        metrics = self._initial_metrics()
+        obs = self._get_obs(data, info)
+        return mjx_env.State(
+            data=data,
+            obs=obs,
+            reward=jp.array(0.0),
+            done=jp.array(0.0),
+            metrics=metrics,
+            info=info,
+        )
+
+    def _initial_metrics(self) -> dict[str, jax.Array]:
+        """Return the common scalar metric tree used by every reset path."""
+        return {
             "reward/tracking_linear": jp.array(0.0),
             "reward/tracking_yaw": jp.array(0.0),
             "reward/upright": jp.array(0.0),
@@ -732,15 +745,6 @@ class DirectionalRun(mjx_env.MjxEnv):
             "diagnostic/heading_drift_rad": jp.array(0.0),
             "diagnostic/torso_height": jp.array(0.0),
         }
-        obs = self._get_obs(data, info)
-        return mjx_env.State(
-            data=data,
-            obs=obs,
-            reward=jp.array(0.0),
-            done=jp.array(0.0),
-            metrics=metrics,
-            info=info,
-        )
 
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
         action = jp.clip(action, -self._config.action_clip, self._config.action_clip)

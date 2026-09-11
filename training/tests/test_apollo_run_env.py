@@ -7,7 +7,12 @@ import onnxruntime as ort
 from brax.training import types as brax_types
 from brax.training.acme import running_statistics
 
-from my3d_rl.apollo_run_env import ApolloWaypointRun, apollo_waypoint_command
+from my3d_rl.apollo_run_env import (
+    ApolloHandoffWaypointRun,
+    ApolloWaypointRun,
+    apollo_waypoint_command,
+)
+from my3d_rl.apollo_walk_jax import load_apollo_walk_jax
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.legacy_policy import load_apollo_onnx_teacher_params
 from my3d_rl.ppo_profile import get_ppo_profile
@@ -130,6 +135,55 @@ def test_apollo_waypoint_step_recomputes_command_and_is_finite():
     assert np.isfinite(float(next_state.info["waypoint_distance"]))
     np.testing.assert_allclose(
         next_state.obs["state"][6:9], next_state.info["command"], atol=1.0e-7
+    )
+
+
+def test_apollo_handoff_reset_preserves_live_walk_history(tmp_path):
+    teacher = load_apollo_walk_jax(WALK_POLICY)
+    source_env = ApolloWaypointRun()
+    corpus = tmp_path / "handoff.npz"
+    last_action = np.linspace(-0.4, 0.4, 23, dtype=np.float32)
+    np.savez_compressed(
+        corpus,
+        qpos=np.asarray(source_env.mj_model.qpos0, dtype=np.float32)[None, :],
+        qvel=np.zeros((1, source_env.mj_model.nv), dtype=np.float32),
+        last_action=last_action[None, :],
+        last_last_action=(0.5 * last_action)[None, :],
+        source_command=np.array([[0.7, -0.2, 0.1]], dtype=np.float32),
+        source_step=np.array([17], dtype=np.int32),
+    )
+    env = ApolloHandoffWaypointRun(
+        entry_policy=teacher,
+        entry_corpus=corpus,
+        config_overrides={
+            "waypoint_distance_range": [2.0, 2.0],
+            "waypoint_bearing_range": [0.0, 0.0],
+            "reset_joint_noise": 0.0,
+            "reset_root_velocity_noise": 0.0,
+            "reset_yaw_range": 0.0,
+        },
+    )
+    state = jax.jit(env.reset)(jax.random.PRNGKey(20_261_405))
+    observation = np.asarray(state.obs["state"])
+
+    assert int(state.info["entry_steps"]) == 17
+    np.testing.assert_allclose(
+        state.info["entry_source_command"], [0.7, -0.2, 0.1], atol=1.0e-7
+    )
+    assert int(state.info["step"]) == 0
+    assert float(state.done) == 0.0
+    assert not np.allclose(observation[55:78], 0.0)
+    # The runtime deliberately masks the two head joints because head tracking
+    # owns them; the remaining action history must survive the handoff exactly.
+    np.testing.assert_allclose(observation[55:57], 0.0, atol=1.0e-7)
+    np.testing.assert_allclose(
+        observation[57:78], state.info["last_action"][2:], atol=1.0e-7
+    )
+
+    teacher_action = teacher(state.obs["state"])
+    next_state = jax.jit(env.step)(state, teacher_action)
+    assert np.isclose(
+        float(next_state.metrics["cost/handoff_action_mismatch"]), 0.0, atol=1.0e-7
     )
 
 

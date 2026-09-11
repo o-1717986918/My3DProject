@@ -21,7 +21,8 @@ from mujoco_playground._src import wrapper
 import numpy as np
 import onnxruntime as ort
 
-from my3d_rl.apollo_run_env import ApolloWaypointRun
+from my3d_rl.apollo_run_env import ApolloHandoffWaypointRun, ApolloWaypointRun
+from my3d_rl.apollo_walk_jax import load_apollo_walk_jax
 from my3d_rl.legacy_policy import (
     load_apollo_onnx_teacher_params,
     load_onnx_teacher_params,
@@ -71,6 +72,46 @@ STAGES: dict[str, dict[str, Any]] = {
         "reward.fall": -180.0,
         "reward.waypoint_progress": 4.0,
         "reward.waypoint_success": 10.0,
+    },
+    # Candidate control starts from a short frozen-Apollo rollout rather than
+    # a synthetic nominal pose.  The command surface mirrors WalkRunner's
+    # runtime clamps, while the waypoint remains an environment-only target.
+    "apollo_handoff_waypoint": {
+        "use_fixed_command": False,
+        "lin_vel_x": [-0.5, 1.0],
+        "lin_vel_y": [-0.5, 0.5],
+        "ang_vel_yaw": [-0.5, 0.5],
+        "stand_probability": 0.0,
+        "command_resample_steps": 500,
+        "handoff_radius": 0.60,
+        "waypoint_distance_range": [2.0, 4.0],
+        "waypoint_bearing_range": [-3.141592653589793, 3.141592653589793],
+        "waypoint_arrival_radius": 0.25,
+        "gait_frequency": [1.5, 1.5],
+        "reset_joint_noise": 0.0,
+        "reset_joint_velocity_noise": 0.0,
+        "reset_policy_action_noise": 0.0,
+        "reset_root_velocity_noise": 0.0,
+        "reset_yaw_range": 0.0,
+        "push_enable": False,
+        "action_delay_max_steps": 0,
+        "reward.tracking_linear": 6.0,
+        "reward.tracking_yaw": 8.0,
+        "reward.upright": 3.0,
+        "reward.height": 2.0,
+        "reward.alive": 0.75,
+        "reward.lateral_tracking": -4.0,
+        "reward.yaw_rate_error": -6.0,
+        "reward.vertical_velocity": -0.45,
+        "reward.angular_xy": -0.40,
+        "reward.action_rate": -0.04,
+        "reward.action_acceleration": -0.015,
+        "reward.foot_slip": -0.025,
+        "reward.pose": -0.02,
+        "reward.fall": -180.0,
+        "reward.waypoint_progress": 4.0,
+        "reward.waypoint_success": 10.0,
+        "reward.handoff_action": -0.10,
     },
     "balance": {
         "use_fixed_command": True,
@@ -755,6 +796,11 @@ def main() -> None:
     )
     parser.add_argument("--restore-checkpoint", type=Path)
     parser.add_argument("--bootstrap-onnx", type=Path)
+    parser.add_argument(
+        "--entry-corpus",
+        type=Path,
+        help="frozen Apollo Walk states for apollo_handoff_waypoint",
+    )
     parser.add_argument("--motion-reference", type=Path)
     parser.add_argument("--reference-phase-weights", type=Path)
     parser.add_argument(
@@ -772,13 +818,22 @@ def main() -> None:
         Path(__file__).parents[1] / "contracts" / f"{profile.policy_contract}.yaml"
     )
     contract = load_policy_contract(contract_path)
-    apollo_waypoint = args.stage == "apollo_waypoint"
+    apollo_waypoint = args.stage in {
+        "apollo_waypoint",
+        "apollo_handoff_waypoint",
+    }
     apollo_contract = contract.policy_name == "apollo_walk_policy_v1"
     if apollo_waypoint != apollo_contract:
         raise ValueError(
-            "apollo_waypoint requires --network-profile "
-            "apollo_walk_warmstart_v1, and that profile is scoped to this stage"
+            "Apollo waypoint stages require --network-profile "
+            "apollo_walk_warmstart_v1, and that profile is scoped to these stages"
         )
+    if args.stage == "apollo_handoff_waypoint" and args.bootstrap_onnx is None:
+        raise ValueError("apollo_handoff_waypoint requires --bootstrap-onnx")
+    if args.stage == "apollo_handoff_waypoint" and args.entry_corpus is None:
+        raise ValueError("apollo_handoff_waypoint requires --entry-corpus")
+    if args.entry_corpus is not None and not args.entry_corpus.is_file():
+        raise FileNotFoundError(args.entry_corpus)
     if args.restore_checkpoint and args.bootstrap_onnx:
         raise ValueError("restore-checkpoint and bootstrap-onnx are mutually exclusive")
     if args.fixed_vx is not None and (
@@ -863,7 +918,14 @@ def main() -> None:
         stage_overrides["fixed_command"] = [args.fixed_vx, 0.0, 0.0]
     if phase_sampling is not None:
         stage_overrides["reference_phase_sampling_weights"] = phase_sampling["weights"]
-    if apollo_waypoint:
+    if args.stage == "apollo_handoff_waypoint":
+        env = ApolloHandoffWaypointRun(
+            entry_policy=load_apollo_walk_jax(args.bootstrap_onnx),
+            entry_corpus=args.entry_corpus,
+            config_overrides=stage_overrides,
+            contract=contract,
+        )
+    elif apollo_waypoint:
         env = ApolloWaypointRun(
             config_overrides=stage_overrides,
             contract=contract,
@@ -937,6 +999,12 @@ def main() -> None:
         ),
         "bootstrap_onnx_sha256": (
             _sha256(args.bootstrap_onnx) if args.bootstrap_onnx else None
+        ),
+        "entry_corpus": (
+            str(args.entry_corpus.resolve()) if args.entry_corpus else None
+        ),
+        "entry_corpus_sha256": (
+            _sha256(args.entry_corpus) if args.entry_corpus else None
         ),
         "teacher_parity_max_abs_error": teacher_parity_max_abs_error,
         "motion_reference": (
