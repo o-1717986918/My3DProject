@@ -82,8 +82,22 @@ class ApolloWalkCpu:
         )
         actor_input = self._session.get_inputs()[0]
         actor_output = self._session.get_outputs()[0]
-        if actor_input.shape != [1, 78] or actor_output.shape != [1, 23]:
-            raise ValueError("Apollo walk ONNX contract must be [1,78] -> [1,23]")
+        input_shape = actor_input.shape
+        output_shape = actor_output.shape
+        input_batch = input_shape[0] if len(input_shape) == 2 else None
+        output_batch = output_shape[0] if len(output_shape) == 2 else None
+        if (
+            len(input_shape) != 2
+            or input_shape[1] != 78
+            or input_batch not in (None, 1)
+            or len(output_shape) != 2
+            or output_shape[1] != 23
+            or output_batch not in (None, 1)
+        ):
+            raise ValueError(
+                "Apollo walk ONNX contract must have a static or dynamic "
+                "single-sample [batch,78] -> [batch,23] boundary"
+            )
         self._input_name = actor_input.name
 
     def target(
@@ -96,15 +110,25 @@ class ApolloWalkCpu:
 
         torso_rotation = data.site_xmat[self._torso_site].reshape(3, 3)
         gravity = torso_rotation.T @ np.array([0.0, 0.0, -1.0])
+        joint_position_offset = (
+            data.qpos[self._joint_qpos] - APOLLO_DEFAULT_POSE
+        ).copy()
+        joint_velocity = data.qvel[self._joint_dof].copy()
+        actor_previous_action = np.asarray(
+            previous_action, dtype=np.float64
+        ).copy()
+        # The C++ runner reserves both head joints for its visual tracker and
+        # always hides them from the locomotion actor.
+        joint_position_offset[:2] = 0.0
+        joint_velocity[:2] = 0.0
+        actor_previous_action[:2] = 0.0
         observation = apollo_walk_observation(
             angular_velocity=data.sensordata[self._gyro_slice],
             projected_gravity=gravity,
             velocity_command=velocity_command,
-            joint_position_offset=(
-                data.qpos[self._joint_qpos] - APOLLO_DEFAULT_POSE
-            ),
-            joint_velocity=data.qvel[self._joint_dof],
-            previous_action=previous_action,
+            joint_position_offset=joint_position_offset,
+            joint_velocity=joint_velocity,
+            previous_action=actor_previous_action,
         )
         action = self._session.run(
             None, {self._input_name: observation[None, :]}
