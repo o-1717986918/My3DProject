@@ -36,6 +36,10 @@ def default_config() -> config_dict.ConfigDict:
     config = kick_default_config()
     config.episode_length = 1000
     config.robot_distance_range = [0.55, 1.40]
+    # Bearing of the robot from the ball, relative to the requested ball travel
+    # direction.  pi reproduces the historical "already behind the ball"
+    # reset; focused reposition curricula may cover the full circle.
+    config.robot_bearing_range = [float(np.pi), float(np.pi)]
     config.robot_lateral_range = [-0.15, 0.15]
     config.robot_yaw_noise_range = [-0.20, 0.20]
     config.reset_joint_noise = 0.01
@@ -364,6 +368,9 @@ class LongHorizonStriker(DirectionalKick):
             mode_rng,
             target_distance_rng,
         ) = jax.random.split(rng, 10)
+        # Derive the optional full-circle reset independently without shifting
+        # the historical random-key sequence for existing curricula.
+        bearing_rng = jax.random.fold_in(distance_rng, 1)
         qpos = jp.asarray(self._mj_model.qpos0)
         qvel = jp.zeros(self._mj_model.nv)
         target_angle = jax.random.uniform(
@@ -384,9 +391,20 @@ class LongHorizonStriker(DirectionalKick):
             maxval=self._config.robot_lateral_range[1],
         )
         ball_pos = jp.array([0.0, 0.0, 0.11])
+        robot_bearing = jax.random.uniform(
+            bearing_rng,
+            minval=self._config.robot_bearing_range[0],
+            maxval=self._config.robot_bearing_range[1],
+        )
+        robot_direction = jp.array(
+            [
+                jp.cos(target_angle + robot_bearing),
+                jp.sin(target_angle + robot_bearing),
+            ]
+        )
         robot_xy = (
             ball_pos[:2]
-            - target_world * robot_distance
+            + robot_direction * robot_distance
             + target_left * robot_lateral
         )
         robot_yaw = target_angle + jax.random.uniform(
@@ -468,6 +486,7 @@ class LongHorizonStriker(DirectionalKick):
             "goal_world": goal_world,
             "initial_ball_xy": ball_pos[:2],
             "initial_robot_distance": robot_distance,
+            "initial_robot_bearing": robot_bearing,
             "initial_robot_lateral": robot_lateral,
             "initial_robot_yaw_error": robot_yaw - target_angle,
             "initial_target_angle": target_angle,

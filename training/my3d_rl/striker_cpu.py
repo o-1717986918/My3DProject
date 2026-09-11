@@ -351,6 +351,14 @@ class StrikerCpuEvaluator:
         target_world = np.array([np.cos(target_angle), np.sin(target_angle)])
         target_left = np.array([-target_world[1], target_world[0]])
         robot_distance = float(rng.uniform(*cfg["robot_distance_range"]))
+        bearing_min, bearing_max = cfg.get(
+            "robot_bearing_range", [float(np.pi), float(np.pi)]
+        )
+        robot_bearing = (
+            float(bearing_min)
+            if float(bearing_min) == float(bearing_max)
+            else float(rng.uniform(bearing_min, bearing_max))
+        )
         robot_lateral = float(rng.uniform(*cfg["robot_lateral_range"]))
         yaw_error = float(rng.uniform(*cfg["robot_yaw_noise_range"]))
         robot_yaw = target_angle + yaw_error
@@ -369,7 +377,15 @@ class StrikerCpuEvaluator:
         data = mujoco.MjData(teacher.model)
         ball_qpos = teacher._ball_qpos
         data.qpos[ball_qpos : ball_qpos + 3] = np.array([0.0, 0.0, 0.11])
-        robot_xy = -target_world * robot_distance + target_left * robot_lateral
+        robot_direction = np.array(
+            [
+                np.cos(target_angle + robot_bearing),
+                np.sin(target_angle + robot_bearing),
+            ]
+        )
+        robot_xy = (
+            robot_direction * robot_distance + target_left * robot_lateral
+        )
         data.qpos[teacher._root_qpos : teacher._root_qpos + 2] = robot_xy
         data.qpos[teacher._root_qpos + 3 : teacher._root_qpos + 7] = np.array(
             [np.cos(0.5 * robot_yaw), 0.0, 0.0, np.sin(0.5 * robot_yaw)]

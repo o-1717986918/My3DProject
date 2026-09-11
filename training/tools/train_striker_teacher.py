@@ -44,6 +44,23 @@ STAGES: dict[str, dict[str, Any]] = {
         "kick_prior_enabled": False,
         "learned_approach_residual_floor": 1.0,
     },
+    # The original local chase reset always placed the robot behind the ball.
+    # That misses the match failure where the active player starts beside or
+    # ahead of the ball and must perform a short large-angle reposition.  Keep
+    # this as a separate pre-contact stage so it cannot dilute long-distance
+    # chase or directional-kick evidence.
+    "ball_reposition": {
+        "robot_distance_range": [0.35, 1.25],
+        "robot_bearing_range": [-3.141593, 3.141593],
+        "robot_lateral_range": [0.0, 0.0],
+        "robot_yaw_noise_range": [-3.141593, 3.141593],
+        "target_angle_range": [-3.141593, 3.141593],
+        "target_distance_range": [2.0, 5.0],
+        "reset_joint_noise": 0.02,
+        "reset_root_velocity_noise": 0.06,
+        "kick_prior_enabled": False,
+        "learned_approach_residual_floor": 1.0,
+    },
     # Stage 2 resumes the chase teacher and enables a direction-conditioned
     # contact prior.  A non-zero residual floor makes approach and strike one
     # continuous policy instead of teaching only a narrow release window.

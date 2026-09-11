@@ -19,6 +19,7 @@ FINAL_SCORE = re.compile(
 ILLEGAL_DEFENSE = re.compile(
     r"Illegal defense: penalizing .* from (?P<side>left|right) goalie area"
 )
+REBUILD_PLAY_ON_MODE = "4"
 
 
 def _fields(line: str) -> dict[str, str]:
@@ -75,6 +76,24 @@ def _step_distribution(samples: list[float]) -> dict[str, object]:
     }
 
 
+def _closest_ball_distance(
+    distance_by_observation: dict[int, list[float]],
+) -> dict[str, object]:
+    distances = [
+        min(samples)
+        for _, samples in sorted(distance_by_observation.items())
+        if samples
+    ]
+    return {
+        "observation_buckets": len(distances),
+        "minimum_m": min(distances) if distances else None,
+        "median_m": statistics.median(distances) if distances else None,
+        "within_1_1_m_buckets": sum(value <= 1.10 for value in distances),
+        "within_1_5_m_buckets": sum(value <= 1.50 for value in distances),
+        "within_2_0_m_buckets": sum(value <= 2.00 for value in distances),
+    }
+
+
 def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
     server_path = run_dir / "server.log"
     if not server_path.is_file():
@@ -113,6 +132,7 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
     visible_ball_x_by_observation: dict[int, list[float]] = {}
     fresh_ball_x_by_observation: dict[int, list[float]] = {}
     bounded_ball_x_by_observation: dict[int, list[float]] = {}
+    visible_ball_dist_by_observation: dict[int, list[float]] = {}
     player_get_up_samples = Counter[str]()
     player_get_up_episodes = Counter[str]()
     get_up_entries_by_previous_motion = Counter[str]()
@@ -125,6 +145,9 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
     near_ball_low_command_samples = 0
     near_ball_pure_turn_samples = 0
     near_ball_idle_samples = 0
+    near_ball_valid_command_low_speed_samples = 0
+    near_ball_stationary_ball_low_speed_samples = 0
+    near_ball_role = Counter[str]()
     status_samples = 0
     for log_path in sorted(run_dir.glob(f"{current_team}-*.log")):
         player = log_path.stem.rsplit("-", 1)[-1]
@@ -185,32 +208,48 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                     and all(math.isfinite(value) for value in tactical_target)
                 ):
                     previous_tactical_target = tactical_target
-                if values.get("ball_position_valid") == "1" and (
-                    "server_time" in values or "cycle" in values
+                ball_visible = values.get("ball_visible") == "1"
+                ball_position_valid = (
+                    values.get("ball_position_valid") == "1"
+                    or ("ball_position_valid" not in values and ball_visible)
+                )
+                if ball_position_valid and (
+                    "server_time" in values
+                    or "t" in values
+                    or "cycle" in values
                 ) and "ball_x" in values:
                     try:
                         ball_x = float(values["ball_x"])
                         ball_age_s = float(values.get("ball_position_age", "inf"))
-                        if "server_time" in values:
+                        if "server_time" in values or "t" in values:
                             # Clients start on staggered cycles.  A 100 ms
                             # server-time bucket merges near-simultaneous team
                             # observations without pretending local cycle ids
                             # describe the same world instant.
                             observation = int(round(
-                                float(values["server_time"]) * 10.0))
+                                float(values.get("server_time", values["t"]))
+                                * 10.0))
                         else:
                             observation = int(values["cycle"])
                     except ValueError:
                         pass
                     else:
                         if math.isfinite(ball_x):
-                            visible = values.get("ball_visible") == "1"
+                            visible = ball_visible
                             near_contact = (
                                 values.get("ball_near_contact_track") == "1"
                             )
                             if visible:
                                 visible_ball_x_by_observation.setdefault(
                                     observation, []).append(ball_x)
+                                try:
+                                    ball_dist = float(values["ball_dist"])
+                                except (KeyError, ValueError):
+                                    pass
+                                else:
+                                    if math.isfinite(ball_dist):
+                                        visible_ball_dist_by_observation.setdefault(
+                                            observation, []).append(ball_dist)
                             if visible or ball_age_s <= 0.75:
                                 fresh_ball_x_by_observation.setdefault(
                                     observation, []).append(ball_x)
@@ -222,11 +261,15 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                                 bounded_ball_x_by_observation.setdefault(
                                     observation, []).append(ball_x)
                 try:
-                    fresh_near_ball = (
+                    play_on = (
                         values.get("play_on") == "1"
-                        and values.get("ball_position_valid") == "1"
+                        or values.get("mode") == REBUILD_PLAY_ON_MODE
+                    )
+                    fresh_near_ball = (
+                        play_on
+                        and ball_position_valid
                         and (
-                            values.get("ball_visible") == "1"
+                            ball_visible
                             or float(values.get("ball_position_age", "inf"))
                             <= 0.75
                         )
@@ -239,12 +282,15 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                     fresh_near_ball = False
                 if fresh_near_ball:
                     near_ball_samples += 1
+                    near_ball_role[values.get("role", "Unknown")] += 1
                     if values.get("duty") == "Formation":
                         near_ball_formation_samples += 1
                     if values.get("duty") == "Pressure":
                         near_ball_pressure_samples += 1
                     try:
-                        if values.get("walk_target_absolute") == "1":
+                        if "walk_target_norm" in values:
+                            command_norm = float(values["walk_target_norm"])
+                        elif values.get("walk_target_absolute") == "1":
                             command_norm = math.dist(
                                 (float(values["x"]), float(values["y"])),
                                 (
@@ -288,6 +334,16 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                         or (command_norm <= 0.10 and yaw_error_deg <= 5.0)
                     ):
                         near_ball_idle_samples += 1
+                    try:
+                        self_speed = float(values["self_speed"])
+                        ball_speed = float(values.get("ball_speed", "inf"))
+                    except (KeyError, ValueError):
+                        pass
+                    else:
+                        if command_norm > 0.10 and self_speed <= 0.10:
+                            near_ball_valid_command_low_speed_samples += 1
+                            if 0.0 <= ball_speed <= 0.15:
+                                near_ball_stationary_ball_low_speed_samples += 1
                 previous_status_motion = values.get("motion")
             elif line.startswith("MY3D_KICK_SETUP"):
                 values = _fields(line)
@@ -323,7 +379,7 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
             developed_illegal_defense = illegal_defense["right"]
             opponent_illegal_defense = illegal_defense["left"]
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "run_dir": str(run_dir.resolve()),
         "score": score,
         "server": {
@@ -352,6 +408,8 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
             "strategy_motion": dict(strategy_motion.most_common()),
             "visible_ball_progress": _ball_progress(
                 visible_ball_x_by_observation),
+            "closest_visible_ball_distance": _closest_ball_distance(
+                visible_ball_dist_by_observation),
             "fresh_ball_progress": _ball_progress(
                 fresh_ball_x_by_observation),
             "bounded_ball_track_progress": _ball_progress(
@@ -378,6 +436,13 @@ def analyze(run_dir: Path, current_team: str) -> dict[str, object]:
                 ),
                 "pure_turn_samples": near_ball_pure_turn_samples,
                 "neutral_or_idle_command_samples": near_ball_idle_samples,
+                "valid_translation_but_low_self_speed_samples": (
+                    near_ball_valid_command_low_speed_samples
+                ),
+                "stationary_ball_valid_translation_low_self_speed_samples": (
+                    near_ball_stationary_ball_low_speed_samples
+                ),
+                "role": dict(near_ball_role.most_common()),
             },
         },
         "interpretation_limits": [

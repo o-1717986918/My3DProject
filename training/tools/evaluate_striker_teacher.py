@@ -64,6 +64,26 @@ def _apply_optional_trigger_threshold(
     return result
 
 
+def _stage_success_mask(
+    stage: str,
+    setup_reached: np.ndarray,
+    task_succeeded: np.ndarray,
+) -> np.ndarray:
+    """Use pre-contact setup, not an impossible kick, for chase stages."""
+    if stage in {"ball_chase", "ball_reposition"}:
+        return setup_reached
+    return task_succeeded
+
+
+def _setup_ready_mask(
+    settled_steps: Any,
+    contacted: Any,
+    confirmation_steps: int,
+) -> Any:
+    """Accept a stable pre-contact setup, never a post-contact recovery."""
+    return (settled_steps >= confirmation_steps) & ~contacted
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("kick_prior_manifest", type=Path)
@@ -142,10 +162,22 @@ def main() -> None:
             actions, _ = policy(current.obs, key)
         candidate = batched_step(current, actions)
         active = ~already_done
+        setup_ready = _setup_ready_mask(
+            candidate.info["kick_settled_steps"],
+            candidate.info["contacted"],
+            env._config.kick_settled_confirmation_steps,
+        )
+        stage_setup_done = (
+            setup_ready
+            if args.stage in {"ball_chase", "ball_reposition"}
+            else jp.zeros_like(setup_ready)
+        )
         next_state = jax.tree.map(
             lambda old, new: _keep_active(old, new, active), current, candidate
         )
-        newly_done = active & candidate.done.astype(bool)
+        newly_done = active & (
+            candidate.done.astype(bool) | stage_setup_done
+        )
         event = jp.stack(
             [
                 candidate.metrics["event/contact"],
@@ -153,7 +185,8 @@ def main() -> None:
                 candidate.metrics["event/success"],
                 candidate.metrics["cost/fall"],
                 candidate.metrics["cost/miss"],
-                candidate.done,
+                jp.maximum(candidate.done, stage_setup_done),
+                setup_ready.astype(jp.float32),
             ],
             axis=-1,
         ) * active[:, None]
@@ -174,6 +207,7 @@ def main() -> None:
     fall = events_np[:, :, 3] > 0
     miss = events_np[:, :, 4] > 0
     done_event = events_np[:, :, 5] > 0
+    setup = events_np[:, :, 6] > 0
     first_success = _first_event(success, args.episode_length)
     first_fall = _first_event(fall, args.episode_length)
     first_done = _first_event(done_event, args.episode_length)
@@ -185,9 +219,18 @@ def main() -> None:
     contacted = contact.any(axis=0)
     triggered = trigger.any(axis=0)
     succeeded = success.any(axis=0)
+    setup_reached = setup.any(axis=0)
+    stage_succeeded = _stage_success_mask(
+        args.stage, setup_reached, succeeded
+    )
     fallen = fall.any(axis=0)
     missed = miss.any(axis=0)
-    timed_out = done_event.any(axis=0) & ~succeeded & ~fallen & ~missed
+    timed_out = (
+        done_event.any(axis=0)
+        & ~stage_succeeded
+        & ~fallen
+        & ~missed
+    )
     final_contact_distance = np.asarray(
         final_state.metrics["diagnostic/contact_distance"]
     )
@@ -215,12 +258,16 @@ def main() -> None:
         "triggered": int(triggered.sum()),
         "contacted": int(contacted.sum()),
         "succeeded": int(succeeded.sum()),
+        "setup_reached": int(setup_reached.sum()),
+        "stage_succeeded": int(stage_succeeded.sum()),
         "fallen": int(fallen.sum()),
         "missed": int(missed.sum()),
         "timed_out": int(timed_out.sum()),
         "trigger_rate": float(triggered.mean()),
         "contact_rate": float(contacted.mean()),
         "success_rate": float(succeeded.mean()),
+        "setup_rate": float(setup_reached.mean()),
+        "stage_success_rate": float(stage_succeeded.mean()),
         "fall_rate": float(fallen.mean()),
         "mean_episode_steps": float(episode_steps.mean()),
         "maximum_directional_speed_mean_mps": float(
@@ -239,7 +286,7 @@ def main() -> None:
             final_torso_planar_speed.max()
         ),
         "gate_passed": bool(
-            succeeded.mean() >= 0.90 and not fallen.any()
+            stage_succeeded.mean() >= 0.90 and not fallen.any()
         ),
     }
     rollout_records = []
@@ -247,6 +294,7 @@ def main() -> None:
         name: np.asarray(final_state.info[name])
         for name in (
             "initial_robot_distance",
+            "initial_robot_bearing",
             "initial_robot_lateral",
             "initial_robot_yaw_error",
             "initial_target_angle",
@@ -264,6 +312,8 @@ def main() -> None:
                 "triggered": bool(triggered[index]),
                 "contacted": bool(contacted[index]),
                 "succeeded": bool(succeeded[index]),
+                "setup_reached": bool(setup_reached[index]),
+                "stage_succeeded": bool(stage_succeeded[index]),
                 "fallen": bool(fallen[index]),
                 "missed": bool(missed[index]),
                 "timed_out": bool(timed_out[index]),
@@ -272,6 +322,9 @@ def main() -> None:
                 ),
                 "first_contact_step": int(
                     _first_event(contact, args.episode_length)[index]
+                ),
+                "first_setup_step": int(
+                    _first_event(setup, args.episode_length)[index]
                 ),
                 "episode_steps": int(episode_steps[index]),
                 "maximum_directional_speed_mps": float(
@@ -312,11 +365,26 @@ def main() -> None:
         ),
         "environment_config": env._config.to_dict(),
         "success_definition": {
+            "stage_metric": (
+                "bounded_pre_contact_setup"
+                if args.stage in {"ball_chase", "ball_reposition"}
+                else "directional_ball_arrival"
+            ),
             "goal_radius_m": float(env._config.success_radius),
             "arrival_speed_tolerance_mps": float(
                 env._config.arrival_speed_tolerance
             ),
-            "requires_contact": True,
+            "requires_contact": args.stage not in {
+                "ball_chase", "ball_reposition"
+            },
+            "setup_distance_m": float(env._config.kick_settled_distance),
+            "setup_heading_rad": float(env._config.kick_settled_heading),
+            "setup_planar_speed_mps": float(
+                env._config.kick_settled_planar_speed
+            ),
+            "setup_confirmation_steps": int(
+                env._config.kick_settled_confirmation_steps
+            ),
         },
         "summary": summary,
         "rollouts": rollout_records,

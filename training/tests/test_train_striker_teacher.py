@@ -29,12 +29,17 @@ def test_striker_curriculum_expands_without_changing_stage_order():
 
 def test_t1_striker_curriculum_separates_chase_from_directional_contact():
     chase = STAGES["ball_chase"]
+    reposition = STAGES["ball_reposition"]
     release = STAGES["contact_release_2m"]
     kick = STAGES["directional_kick"]
 
     assert chase["robot_distance_range"] == [1.0, 4.0]
     assert chase["kick_prior_enabled"] is False
     assert chase["learned_approach_residual_floor"] == 1.0
+    assert reposition["robot_bearing_range"] == [-3.141593, 3.141593]
+    assert reposition["robot_distance_range"] == [0.35, 1.25]
+    assert reposition["kick_prior_enabled"] is False
+    assert reposition["learned_approach_residual_floor"] == 1.0
     assert kick["kick_prior_enabled"] is True
     assert 0.0 < kick["learned_approach_residual_floor"] < 1.0
     assert kick["robot_distance_range"][1] < chase["robot_distance_range"][1]

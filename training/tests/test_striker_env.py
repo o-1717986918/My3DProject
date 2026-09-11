@@ -64,6 +64,29 @@ def test_striker_default_release_gate_is_bounded_but_not_perfect_pose_only():
     assert config.kick_settled_planar_speed == 0.35
     assert config.kick_trigger_requires_settle is False
     assert config.learned_approach_residual_floor == 0.0
+    np.testing.assert_allclose(config.robot_bearing_range, [np.pi, np.pi])
+
+
+def test_striker_reset_can_place_robot_ahead_of_ball_for_reposition_training():
+    env = LongHorizonStriker(
+        config_overrides={
+            "episode_length": 2,
+            "robot_distance_range": [0.55, 0.55],
+            "robot_bearing_range": [0.0, 0.0],
+            "robot_lateral_range": [0.0, 0.0],
+            "robot_yaw_noise_range": [0.0, 0.0],
+            "target_angle_range": [0.0, 0.0],
+            "target_distance_range": [2.0, 2.0],
+            "reset_joint_noise": 0.0,
+            "reset_root_velocity_noise": 0.0,
+        }
+    )
+
+    state = env.reset(jax.random.PRNGKey(31))
+
+    assert np.isclose(float(state.info["initial_robot_bearing"]), 0.0)
+    assert np.isclose(float(state.data.qpos[env._root_qpos]), 0.55, atol=1e-5)
+    assert float(state.metrics["diagnostic/contact_distance"]) > 0.80
 
 
 def test_numpy_and_jax_approach_controllers_match():
