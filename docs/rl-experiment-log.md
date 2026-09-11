@@ -1673,7 +1673,18 @@ The exact-control 100-step CPU MuJoCo versus MJX/Warp check passed for the new
 direct-joint stage. Maximum joint-position error was `5.52e-6 rad`, root
 position error `2.72e-6 m`, and ball-position error `5.46e-4 m`; the report is
 `/home/win98/rl_runs/striker-parity/walk-clone-ball-chase-warp-s20261505.json`.
-The checkpoint remains unmounted and unexported. The next decision point is a
-fresh, parity-gated longer run from the original Walk clone, followed by
-multi-seed independent evaluation; a failure to widen the small aggregate
-gain will reject the candidate without adding deployment code.
+The initial checkpoint remained unmounted and unexported. A parity-gated repeat
+using the same training seed then failed to reproduce the smoke result: it
+reached only 479/512 setup successes against the clone's 478/512, with zero
+falls on both sides, and changed mean termination time only from 218.6 to 217.2
+control steps. The repeat is stored in
+`/home/win98/rl_runs/striker/walk-clone-ball-chase-formal-short-s20261501-v1`.
+
+A fresh 1,048,576-step run did not rescue the route. Its final checkpoint
+produced 3/128 falls on the first independent seed; the 786,432-step checkpoint
+also produced a fall on the second seed. Those checkpoints are under
+`/home/win98/rl_runs/striker/walk-clone-ball-chase-formal-s20261506-v1`.
+The radial chase task was already 93.36% solved by the Walk clone, while PPO
+either changed the result at noise scale or sacrificed the clone's zero-fall
+property. The experimental stage, controller mode, CPU branch, parity CLI
+extension and tests were therefore removed. No model was exported or mounted.

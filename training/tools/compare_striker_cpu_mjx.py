@@ -16,7 +16,7 @@ import numpy as np
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.sim_parity import generate_action_sequence, quaternion_angle_error
 from my3d_rl.striker_env import DEFAULT_CONTRACT, LongHorizonStriker
-from tools.train_striker_teacher import STAGES, _load_kick_prior_bank
+from tools.train_striker_teacher import _load_kick_prior_bank
 
 
 def _snapshot(data: Any, env: LongHorizonStriker, target: np.ndarray) -> dict[str, Any]:
@@ -104,7 +104,6 @@ def main() -> int:
         "--kick-prior-bank-manifest", action="append", type=Path, default=[]
     )
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
-    parser.add_argument("--stage", choices=tuple(STAGES), default="closed_loop")
     parser.add_argument("--implementation", choices=("jax", "warp"), default="warp")
     parser.add_argument("--pattern", choices=("zero", "sine", "random"), default="sine")
     parser.add_argument("--amplitude", type=float, default=0.25)
@@ -127,7 +126,6 @@ def main() -> int:
     )
     env = LongHorizonStriker(
         config_overrides={
-            **STAGES[args.stage],
             "impl": args.implementation,
             "episode_length": max(args.steps + 1, 120),
             "robot_distance_range": [0.31, 0.31],
@@ -214,8 +212,6 @@ def main() -> int:
         "accelerated_implementation": args.implementation,
         "jax_backend": jax.default_backend(),
         "contract": str(args.contract.resolve()),
-        "stage": args.stage,
-        "environment_config": env._config.to_dict(),
         "kick_prior": prior_metadata,
         "pattern": args.pattern,
         "amplitude": args.amplitude,

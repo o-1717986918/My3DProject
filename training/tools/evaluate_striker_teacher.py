@@ -70,12 +70,7 @@ def _stage_success_mask(
     task_succeeded: np.ndarray,
 ) -> np.ndarray:
     """Use pre-contact setup, not an impossible kick, for chase stages."""
-    if stage in {
-        "ball_chase",
-        "ball_reposition",
-        "walk_clone_ball_chase",
-        "walk_clone_pre_kick",
-    }:
+    if stage in {"ball_chase", "ball_reposition", "walk_clone_pre_kick"}:
         return setup_reached
     return task_succeeded
 
@@ -177,7 +172,6 @@ def main() -> None:
             if args.stage in {
                 "ball_chase",
                 "ball_reposition",
-                "walk_clone_ball_chase",
                 "walk_clone_pre_kick",
             }
             else jp.zeros_like(setup_ready)
@@ -380,7 +374,6 @@ def main() -> None:
                 if args.stage in {
                     "ball_chase",
                     "ball_reposition",
-                    "walk_clone_ball_chase",
                     "walk_clone_pre_kick",
                 }
                 else "directional_ball_arrival"
@@ -392,7 +385,6 @@ def main() -> None:
             "requires_contact": args.stage not in {
                 "ball_chase",
                 "ball_reposition",
-                "walk_clone_ball_chase",
                 "walk_clone_pre_kick",
             },
             "setup_distance_m": float(env._config.kick_settled_distance),

@@ -216,19 +216,10 @@ class StrikerCpuEvaluator:
         ball_local_vel_xy = world_to_yaw @ (
             ball_world_vel[:2] - torso_world_vel[:2]
         )
-        approach_mode = self.config.get("approach_mode", "behind_ball")
-        if approach_mode == "ball_chase":
-            control_target_local = ball_local_xy / max(
-                float(np.linalg.norm(ball_local_xy)), 1.0e-6
-            )
-        elif approach_mode == "behind_ball":
-            control_target_local = target_local
-        else:
-            raise ValueError("unsupported approach_mode")
         command, activation, contact_error, heading_error = (
             closed_loop_approach_control_numpy(
                 ball_local_xy,
-                control_target_local,
+                target_local,
                 standoff=float(self.config["approach_standoff"]),
                 ball_lateral=float(self.config["approach_ball_lateral"]),
                 position_gain=float(self.config["approach_position_gain"]),

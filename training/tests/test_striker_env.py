@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jp
-import mujoco
 import numpy as np
 
 from my3d_rl.contract import load_policy_contract
@@ -67,7 +66,6 @@ def test_striker_default_release_gate_is_bounded_but_not_perfect_pose_only():
     assert config.kick_trigger_requires_settle is False
     assert config.learned_approach_residual_floor == 0.0
     assert config.control_decoder == "walk_residual"
-    assert config.approach_mode == "behind_ball"
     np.testing.assert_allclose(config.robot_bearing_range, [np.pi, np.pi])
 
 
@@ -105,73 +103,6 @@ def test_striker_reset_can_place_robot_ahead_of_ball_for_reposition_training():
     assert np.isclose(float(state.info["initial_robot_bearing"]), 0.0)
     assert np.isclose(float(state.data.qpos[env._root_qpos]), 0.55, atol=1e-5)
     assert float(state.metrics["diagnostic/contact_distance"]) > 0.80
-
-
-def test_ball_chase_mode_turns_before_advancing_when_ball_is_behind():
-    env = LongHorizonStriker(
-        config_overrides={
-            "episode_length": 2,
-            "approach_mode": "ball_chase",
-            "approach_standoff": 0.45,
-            "approach_ball_lateral": 0.0,
-            "approach_max_forward_speed": 1.20,
-            "approach_max_backward_speed": 0.0,
-            "approach_max_lateral_speed": 0.0,
-            "approach_max_yaw_speed": 1.60,
-            "robot_distance_range": [1.0, 1.0],
-            "robot_bearing_range": [0.0, 0.0],
-            "robot_lateral_range": [0.0, 0.0],
-            "robot_yaw_noise_range": [0.0, 0.0],
-            "target_angle_range": [0.0, 0.0],
-            "target_distance_range": [2.0, 2.0],
-            "reset_joint_noise": 0.0,
-            "reset_root_velocity_noise": 0.0,
-        }
-    )
-
-    state = env.reset(jax.random.PRNGKey(37))
-    features = env._task_features(state.data, state.info["goal_world"])
-
-    np.testing.assert_allclose(features["command"][:2], [0.0, 0.0], atol=1e-6)
-    assert np.isclose(float(features["command"][2]), 1.60, atol=1e-6)
-    assert np.isclose(float(features["contact_distance"]), 0.55, atol=1e-5)
-
-
-def test_exact_cpu_uses_the_same_ball_chase_target_selection():
-    contract = load_policy_contract(DEFAULT_CONTRACT)
-    config = default_config()
-    config.approach_mode = "ball_chase"
-    config.approach_standoff = 0.45
-    config.approach_ball_lateral = 0.0
-    config.approach_max_forward_speed = 1.20
-    config.approach_max_backward_speed = 0.0
-    config.approach_max_lateral_speed = 0.0
-    config.approach_max_yaw_speed = 1.60
-    evaluator = StrikerCpuEvaluator(
-        contract,
-        np.zeros((2, contract.action_size), dtype=np.float32),
-        config.to_dict(),
-        prefix="test_ball_chase_cpu_",
-    )
-    data = mujoco.MjData(evaluator._teacher.model)
-    data.qpos[evaluator._teacher._ball_qpos : evaluator._teacher._ball_qpos + 3] = [
-        0.0,
-        0.0,
-        0.11,
-    ]
-    data.qpos[
-        evaluator._teacher._root_qpos : evaluator._teacher._root_qpos + 2
-    ] = [1.0, 0.0]
-    data.qpos[
-        evaluator._teacher._root_qpos + 3 : evaluator._teacher._root_qpos + 7
-    ] = [1.0, 0.0, 0.0, 0.0]
-    mujoco.mj_forward(evaluator._teacher.model, data)
-
-    features = evaluator._features(data, np.array([2.0, 0.0]))
-
-    np.testing.assert_allclose(features["command"][:2], [0.0, 0.0], atol=1e-6)
-    assert np.isclose(float(features["command"][2]), 1.60, atol=1e-6)
-    assert np.isclose(float(features["contact_distance"]), 0.55, atol=1e-5)
 
 
 def test_numpy_and_jax_approach_controllers_match():
