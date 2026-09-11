@@ -25,6 +25,7 @@ rebuild_side=${REBUILD_SIDE:-left}
 kickoff_side=${MATCH_KICKOFF_SIDE:-left}
 forced_goal_kick_side=${MATCH_FORCE_GOAL_KICK_SIDE:-}
 force_near_ball=${MATCH_FORCE_NEAR_BALL:-0}
+force_goalkeeper_shot=${MATCH_FORCE_GOALKEEPER_SHOT:-0}
 near_ball_x=${MATCH_NEAR_BALL_X:-0}
 near_ball_y=${MATCH_NEAR_BALL_Y:-0}
 near_ball_robot_x=${MATCH_NEAR_BALL_ROBOT_X:--0.55}
@@ -33,6 +34,9 @@ near_ball_robot_qw=${MATCH_NEAR_BALL_ROBOT_QW:-1}
 near_ball_robot_qz=${MATCH_NEAR_BALL_ROBOT_QZ:-0}
 near_ball_opponent_gk_x=${MATCH_NEAR_BALL_OPPONENT_GK_X:-26}
 near_ball_opponent_field_x=${MATCH_NEAR_BALL_OPPONENT_FIELD_X:-18}
+goalkeeper_shot_x=${MATCH_GOALKEEPER_SHOT_X:-18}
+goalkeeper_shot_y=${MATCH_GOALKEEPER_SHOT_Y:-0.7}
+goalkeeper_shot_speed=${MATCH_GOALKEEPER_SHOT_SPEED:-5.0}
 run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-rebuild-vs-base-$(date +%Y%m%d-%H%M%S)-$rebuild_side}
 
 server_pid=
@@ -57,6 +61,11 @@ case "$rebuild_side" in left|right) ;; *) echo "REBUILD_SIDE must be left or rig
 case "$kickoff_side" in left|right) ;; *) echo "MATCH_KICKOFF_SIDE must be left or right" >&2; exit 2 ;; esac
 case "$forced_goal_kick_side" in ""|left|right) ;; *) echo "MATCH_FORCE_GOAL_KICK_SIDE must be left or right" >&2; exit 2 ;; esac
 case "$force_near_ball" in 0|1) ;; *) echo "MATCH_FORCE_NEAR_BALL must be 0 or 1" >&2; exit 2 ;; esac
+case "$force_goalkeeper_shot" in 0|1) ;; *) echo "MATCH_FORCE_GOALKEEPER_SHOT must be 0 or 1" >&2; exit 2 ;; esac
+if [[ "$force_near_ball" == 1 && "$force_goalkeeper_shot" == 1 ]]; then
+    echo "MATCH_FORCE_NEAR_BALL and MATCH_FORCE_GOALKEEPER_SHOT are mutually exclusive" >&2
+    exit 2
+fi
 if [[ "${APOLLO_REBUILD_STATUS_INTERVAL:-0}" != 0 ]]; then
     if ! [[ "$APOLLO_REBUILD_STATUS_INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
         echo "APOLLO_REBUILD_STATUS_INTERVAL must be a positive integer" >&2
@@ -216,6 +225,71 @@ if [[ -n "$forced_goal_kick_side" ]]; then
         --port "$monitor_port" \
         --delay 0.1 \
         "(ball (pos $goal_line_x 8.0 0.11) (vel 0 0 0))"
+fi
+
+if [[ "$force_goalkeeper_shot" == 1 ]]; then
+    # Mirror one canonical shot toward the rebuild team's own goal. The ball is
+    # first held at the release point long enough for every agent's teleport
+    # guard and velocity filter to acquire it, then receives the test velocity.
+    if [[ "$rebuild_side" == left ]]; then
+        shot_x=-${goalkeeper_shot_x#-}
+        shot_y=${goalkeeper_shot_y#-}
+        shot_vx=-${goalkeeper_shot_speed#-}
+        keeper_x=-27
+        keeper_qw=1
+        keeper_qz=0
+        left_keeper_x=$keeper_x
+        left_keeper_qw=$keeper_qw
+        left_keeper_qz=$keeper_qz
+        right_keeper_x=20
+        right_keeper_qw=0
+        right_keeper_qz=1
+    else
+        shot_x=${goalkeeper_shot_x#-}
+        shot_y=-${goalkeeper_shot_y#-}
+        shot_vx=${goalkeeper_shot_speed#-}
+        keeper_x=27
+        keeper_qw=0
+        keeper_qz=1
+        left_keeper_x=-20
+        left_keeper_qw=1
+        left_keeper_qz=0
+        right_keeper_x=$keeper_x
+        right_keeper_qw=$keeper_qw
+        right_keeper_qz=$keeper_qz
+    fi
+
+    "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        --delay 0.05 \
+        "(ball (pos $shot_x $shot_y 0.11) (vel 0 0 0))" \
+        "(dropBall)"
+    sleep 0.2
+    "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        --delay 0.02 \
+        "(agent (unum 1) (team $left_name) (move3d $left_keeper_x 0 0.8 $left_keeper_qw 0 0 $left_keeper_qz))" \
+        "(agent (unum 1) (team $right_name) (move3d $right_keeper_x 0 0.8 $right_keeper_qw 0 0 $right_keeper_qz))" \
+        "(agent (unum 2) (team $left_name) (move3d -5 -12 0.8 1 0 0 0))" \
+        "(agent (unum 3) (team $left_name) (move3d -5 -9 0.8 1 0 0 0))" \
+        "(agent (unum 4) (team $left_name) (move3d -5 -6 0.8 1 0 0 0))" \
+        "(agent (unum 5) (team $left_name) (move3d -5 6 0.8 1 0 0 0))" \
+        "(agent (unum 6) (team $left_name) (move3d -5 9 0.8 1 0 0 0))" \
+        "(agent (unum 7) (team $left_name) (move3d -5 12 0.8 1 0 0 0))" \
+        "(agent (unum 2) (team $right_name) (move3d 5 -12 0.8 0 0 0 1))" \
+        "(agent (unum 3) (team $right_name) (move3d 5 -9 0.8 0 0 0 1))" \
+        "(agent (unum 4) (team $right_name) (move3d 5 -6 0.8 0 0 0 1))" \
+        "(agent (unum 5) (team $right_name) (move3d 5 6 0.8 0 0 0 1))" \
+        "(agent (unum 6) (team $right_name) (move3d 5 9 0.8 0 0 0 1))" \
+        "(agent (unum 7) (team $right_name) (move3d 5 12 0.8 0 0 0 1))" \
+        "(ball (pos $shot_x $shot_y 0.11) (vel 0 0 0))"
+    sleep 2.5
+    "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
+        --host 127.0.0.1 \
+        --port "$monitor_port" \
+        "(ball (pos $shot_x $shot_y 0.11) (vel $shot_vx 0 0))"
 fi
 
 sleep "$wall_seconds"
