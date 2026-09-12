@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -454,6 +455,8 @@ void WorldState::update_from_perception(
         last_opponent_position_m_[idx] = filtered;
         last_opponent_time_[idx] = snapshot_.server_time;
     }
+
+    refresh_ball_position_metadata();
 }
 
 void WorldState::set_team_comm_snapshot(const comm::TeamCommSnapshot& comm_snapshot) {
@@ -615,6 +618,22 @@ void WorldState::set_team_comm_snapshot(const comm::TeamCommSnapshot& comm_snaps
         opponent.position_m = position_m;
         snapshot_.shared_opponents.push_back(opponent);
     }
+
+    // Team communication can replace a blind local estimate after the
+    // perception update, so freshness metadata must be refreshed here too.
+    refresh_ball_position_metadata();
+}
+
+void WorldState::refresh_ball_position_metadata() {
+    constexpr double kMaximumUsableBallAgeS = 2.0;
+    if (last_known_ball_time_ > 0.0) {
+        snapshot_.ball.position_age_s =
+            std::max(0.0, snapshot_.server_time - last_known_ball_time_);
+    } else {
+        snapshot_.ball.position_age_s = std::numeric_limits<double>::infinity();
+    }
+    snapshot_.ball.position_valid = snapshot_.ball.visible ||
+        snapshot_.ball.position_age_s <= kMaximumUsableBallAgeS;
 }
 
 std::string WorldState::normalize_joint_name(const std::string& name) {

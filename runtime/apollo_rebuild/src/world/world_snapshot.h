@@ -7,6 +7,7 @@
 #include "src/world/frame_normalizer.h"
 #include "src/world/play_mode.h"
 
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -31,6 +32,8 @@ struct SelfState {
 /// Best available ball estimate in the canonical team frame.
 struct BallState {
     bool visible{false};
+    bool position_valid{false};
+    double position_age_s{std::numeric_limits<double>::infinity()};
     Vec3 position_m{0.0, 0.0, 0.0};
     Vec3 velocity_mps{0.0, 0.0, 0.0};
     bool velocity_valid{false};

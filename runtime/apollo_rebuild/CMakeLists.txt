@@ -98,6 +98,7 @@ add_library(decision_core
 )
 
 add_library(behavior_core
+    src/behavior/dynamic_pass_runner.cc
     src/behavior/getup_runner.cc
     src/behavior/keyframe_runner.cc
     src/behavior/motion_manager.cc
@@ -223,5 +224,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(goal_kick_behavior_test PRIVATE decision_core)
     add_test(NAME goal_kick_behavior_test COMMAND goal_kick_behavior_test)
+
+    add_executable(dynamic_pass_runner_test
+        tests/dynamic_pass_runner_test.cc
+    )
+    target_link_libraries(dynamic_pass_runner_test PRIVATE behavior_core)
+    add_test(NAME dynamic_pass_runner_test COMMAND dynamic_pass_runner_test)
 
 endif()

@@ -73,6 +73,11 @@ if [[ "${APOLLO_REBUILD_STATUS_INTERVAL:-0}" != 0 ]]; then
     fi
     rebuild_args+=(--status-interval "$APOLLO_REBUILD_STATUS_INTERVAL")
 fi
+case "${APOLLO_REBUILD_ENABLE_DYNAMIC_PASS:-0}" in
+    0) ;;
+    1) rebuild_args+=(--enable-dynamic-pass) ;;
+    *) echo "APOLLO_REBUILD_ENABLE_DYNAMIC_PASS must be 0 or 1" >&2; exit 2 ;;
+esac
 if [[ ! -x "$server_python" || ! -x "$server_binary" ]]; then
     echo "RCSSServerMJ environment is missing" >&2
     exit 2

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "src/app/runtime_config.h"
+#include "src/behavior/dynamic_pass_runner.h"
 #include "src/decision/high_level_command.h"
 #include "src/behavior/getup_runner.h"
 #include "src/behavior/keyframe_runner.h"
@@ -12,6 +13,7 @@
 #include "src/world/world_snapshot.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace behavior {
@@ -34,6 +36,11 @@ public:
         const decision::HighLevelCommand& command,
         bool reset);
 
+    bool dynamic_pass_release_candidate() const;
+    float dynamic_pass_max_probability() const;
+    int dynamic_pass_max_confirmation_streak() const;
+    int dynamic_pass_best_prototype_rollout_id() const;
+
 private:
     enum class GetUpPhase : std::uint8_t {
         Idle,
@@ -46,7 +53,9 @@ private:
     WalkRunner walk_runner_;
     KeyframeRunner neutral_runner_;
     GetupRunner getup_runner_;
+    std::unique_ptr<DynamicPassRunner> dynamic_pass_runner_;
     GetUpPhase get_up_phase_{GetUpPhase::Idle};
+    bool walk_reset_pending_{false};
     bool get_up_phase_reset_pending_{false};
     double get_up_start_time_{0.0};
 
@@ -57,6 +66,7 @@ private:
         GetUpPhase phase,
         double server_time);
     void reset_get_up_state();
+    void reset_dynamic_pass_state();
 };
 
 }  // namespace behavior

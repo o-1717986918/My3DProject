@@ -47,6 +47,8 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
         } else if (arg == "--status-interval") {
             config.status_interval = std::stoull(
                 require_value("--status-interval"));
+        } else if (arg == "--enable-dynamic-pass") {
+            config.enable_dynamic_pass = true;
         }
     }
 

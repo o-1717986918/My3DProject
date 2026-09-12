@@ -52,6 +52,7 @@ private:
     Vec3 corner_anchor_position_m_{0.0, 0.0, 0.0};
     double corner_probe_start_time_{-1.0};
 
+    void refresh_ball_position_metadata();
     static std::string normalize_joint_name(const std::string& name);
 };
 

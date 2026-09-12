@@ -167,6 +167,8 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                    decision_manager_.blackboard())
             << " ball_dist=" << math::planar_dist(self, ball)
             << " ball_visible=" << (snapshot.ball.visible ? 1 : 0)
+            << " ball_position_valid=" << (snapshot.ball.position_valid ? 1 : 0)
+            << " ball_position_age=" << snapshot.ball.position_age_s
             << " ball_x=" << snapshot.ball.position_m[0]
             << " ball_y=" << snapshot.ball.position_m[1]
             << " x=" << snapshot.self.position_m[0]
@@ -181,6 +183,14 @@ std::string AgentApp::process_perception_message(const std::string& message) {
                          snapshot.ball.velocity_mps[1]})
                    : -1.0)
             << " motion=" << last_active_motion_
+            << " dynamic_pass_candidate="
+            << (motion_manager_.dynamic_pass_release_candidate() ? 1 : 0)
+            << " dynamic_pass_score="
+            << motion_manager_.dynamic_pass_max_probability()
+            << " dynamic_pass_streak="
+            << motion_manager_.dynamic_pass_max_confirmation_streak()
+            << " dynamic_pass_best_rollout="
+            << motion_manager_.dynamic_pass_best_prototype_rollout_id()
             << " walk_target_norm=" << walk_target_norm
             << " walk_target_x=" << walk_target_x
             << " walk_target_y=" << walk_target_y

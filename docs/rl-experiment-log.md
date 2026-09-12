@@ -1784,3 +1784,41 @@ runtime prototype must reproduce the training executor by overlaying the
 14-parameter trajectory on the current Walk target. The old procedural runner
 instead fades a captured measured pose toward zero and is not an equivalent
 executor, so it will not be copied along with the old `KickCommand` stack.
+
+## Frozen dynamic-pass RCSSServerMJ integration — 2026-09-12
+
+The authorized selector was integrated behind the default-off
+`--enable-dynamic-pass` flag without importing `KickCommand` or the previous
+strategy stack. Its 98-element observation, ten frozen outputs, 14-parameter
+teacher trajectories and two-stage joint bounds match the audited CPU
+executor. The selected delta is overlaid on the live Apollo Walk target rather
+than on a captured measured pose.
+
+The first enabled server replay did not trigger. Runtime telemetry showed that
+the local ball observation alternated visible/invisible every 0.02 seconds,
+which reset the two-frame selector streak on every blind visual tick. The world
+snapshot now publishes whether its ball position is valid and the age of the
+last real or communicated observation. Dynamic-pass release accepts the last
+position for at most 0.10 seconds; older estimates still reject. A unit test
+covers both the fresh invisible frame and the stale rejection.
+
+Two new enabled 12-second fixed-near-ball runs then triggered the frozen action
+for 184 and 124 sampled cycles, selecting `DynamicPass-r4`; all 14 agents
+remained alive and the executor did not fall. Their first-contact outcomes were
+compared with two baseline runs from the same fixed initial geometry:
+
+| run | forward progress | lateral error | direction error | peak ball speed | contact time | fall |
+|---|---:|---:|---:|---:|---:|---:|
+| Walk baseline 1 | 4.886 m | 0.494 m | 5.78° | 2.769 m/s | 1.09 s | no |
+| Walk baseline 2 | 4.116 m | 1.526 m | 20.34° | 2.458 m/s | 1.09 s | no |
+| dynamic candidate 1 | 2.385 m | 1.393 m | 30.29° | 1.708 m/s | 1.27 s | no |
+| dynamic candidate 2 | 2.350 m | 1.264 m | 28.27° | 1.737 m/s | 1.23 s | no |
+
+The candidate is closer to its nominal 2 m range, but its 1.26--1.39 m lateral
+miss does not constitute a usable straight pass, and it reduces direct forward
+progress and ball speed. It is therefore retained only as an isolated runtime
+and training candidate, disabled by default. This is useful executor evidence:
+the ONNX route can now receive real dynamic approach states, while future
+training has a concrete target—direction/contact quality—rather than another
+upper-layer release relaxation. Logs are under
+`/home/win98/rl_runs/dynamic-pass-server`.

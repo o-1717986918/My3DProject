@@ -148,6 +148,11 @@ Stop the complete team with:
 | `--host` | `-h` | `127.0.0.1` | RCSSServerMJ host |
 | `--port` | `-p` | `60000` | RCSSServerMJ agent port |
 | `--asset-root` | — | `assets` | Root directory for runtime motion assets |
+| `--enable-dynamic-pass` | — | disabled | Enable the experimental, narrow 2 m straight-pass selector |
+
+`--enable-dynamic-pass` is an A/B-only candidate. It applies only to the active
+player during `PlayOn`; all other commands and roles retain the baseline path.
+It must not be described as general passing, dribbling, or shooting support.
 
 ## Package for Deployment
 
@@ -208,9 +213,11 @@ server ──► world ──► decision ──► behavior ──► motor act
 
 - `assets/networks/walk/policy.onnx` — learned walking policy.
 - `assets/networks/getup/policy.onnx` — learned get-up policy.
+- `assets/networks/dynamic_pass/selector.onnx` — experimental frozen selector,
+  loaded only with `--enable-dynamic-pass`.
 - `assets/keyframes/neutral.yaml` — neutral-pose keyframe.
 
-All three assets are included in deployment archives produced by `pack.sh`.
+All runtime assets are included in deployment archives produced by `pack.sh`.
 
 ## Contributing
 
