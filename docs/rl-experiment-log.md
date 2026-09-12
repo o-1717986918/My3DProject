@@ -1822,3 +1822,24 @@ the ONNX route can now receive real dynamic approach states, while future
 training has a concrete target—direction/contact quality—rather than another
 upper-layer release relaxation. Logs are under
 `/home/win98/rl_runs/dynamic-pass-server`.
+
+## Frozen dynamic-pass prototype screen — 2026-09-12
+
+The ten frozen action prototypes were each forced once from the same
+RCSSServerMJ near-ball state. This was a temporary diagnostic override, not a
+new team capability. Nine runs stayed upright; rollout 99 fell and produced 54
+sampled GetUp cycles.
+
+Rollouts 4 and 79 had the best single outcomes, so each was repeated twice:
+
+| rollout | forward progress over three runs | direction error over three runs | falls |
+|---|---:|---:|---:|
+| 4 | 6.875 / 1.492 / 0.729 m | 6.3° / 41.4° / 46.1° | 0 |
+| 79 | 5.730 / 4.470 / 2.999 m | 6.4° / 30.9° / 17.2° | 0 |
+
+Neither apparent improvement reproduced. A fixed prototype therefore cannot
+replace the state-conditioned selector, and the temporary force option was
+removed. The useful result is a narrower training target: learn contact timing
+and action choice jointly from live approach state, with explicit forward and
+lateral ball-outcome terms. Logs remain under
+`/home/win98/rl_runs/dynamic-pass-server/prototype-screen-*`.
