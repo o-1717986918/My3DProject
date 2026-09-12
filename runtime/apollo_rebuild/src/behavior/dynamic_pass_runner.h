@@ -36,7 +36,9 @@ struct DynamicPassStepResult {
 /// This deliberately does not import the old KickCommand or strategy stack.
 class DynamicPassRunner {
 public:
-    explicit DynamicPassRunner(const std::filesystem::path& selector_path);
+    explicit DynamicPassRunner(
+        const std::filesystem::path& selector_path,
+        int forced_rollout_id = -1);
 
     DynamicPassActivation consider(
         const world::WorldSnapshot& snapshot,
@@ -80,6 +82,7 @@ private:
     bool release_candidate_{false};
     float max_probability_{-1.0F};
     int best_prototype_rollout_id_{-1};
+    int forced_prototype_index_{-1};
 };
 
 }  // namespace behavior

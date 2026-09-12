@@ -33,7 +33,20 @@ def test_pairs_release_observation_with_measured_result(tmp_path: Path) -> None:
     assert len(outcomes) == 1
     assert outcomes[0].rollout_id == 79
     assert outcomes[0].straight_2m_success
-    assert summarize(outcomes)["straight_2m_success_count"] == 1
+    summary = summarize(outcomes)
+    assert summary["straight_2m_success_count"] == 1
+    assert summary["rollout_summaries"] == {
+        "79": {
+            "outcome_count": 1,
+            "completed_count": 1,
+            "upright_count": 1,
+            "straight_2m_success_count": 1,
+            "median_ball_dx_m": 1.9,
+            "median_abs_ball_dy_m": 0.2,
+            "median_ball_displacement_m": 1.91,
+            "median_peak_ball_speed_mps": 2.1,
+        }
+    }
 
     output = tmp_path / "outcomes.npz"
     save_npz(output, outcomes)

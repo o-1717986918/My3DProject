@@ -6,6 +6,8 @@
 
 #include <cassert>
 #include <cmath>
+#include <filesystem>
+#include <stdexcept>
 
 namespace {
 
@@ -112,5 +114,25 @@ int main() {
         base, contact, robot_model);
     assert(near(math::deg_to_rad(composed[17].q_deg), -0.55));
     assert(near(math::deg_to_rad(composed[20].q_deg), 0.85));
+
+    const auto selector_path = std::filesystem::path(
+        APOLLO_CODE_BASE_PROJECT_SOURCE_DIR) /
+        "assets/networks/dynamic_pass/selector.onnx";
+    behavior::DynamicPassRunner forced(selector_path, 65);
+    const auto first_activation = forced.consider(snapshot, true);
+    assert(!first_activation.started);
+    snapshot.server_time += 0.02;
+    const auto second_activation = forced.consider(snapshot, true);
+    assert(second_activation.started);
+    assert(second_activation.prototype_rollout_id == 65);
+    assert(forced.active());
+
+    bool rejected_unknown_rollout = false;
+    try {
+        behavior::DynamicPassRunner invalid(selector_path, 9999);
+    } catch (const std::invalid_argument&) {
+        rejected_unknown_rollout = true;
+    }
+    assert(rejected_unknown_rollout);
     return 0;
 }

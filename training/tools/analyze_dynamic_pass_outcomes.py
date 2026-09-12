@@ -123,27 +123,47 @@ def summarize(outcomes: list[DynamicPassOutcome]) -> dict[str, object]:
     if not outcomes:
         return {"outcome_count": 0}
 
-    def median(name: str) -> float:
-        return float(np.median([getattr(outcome, name) for outcome in outcomes]))
+    def subset_summary(
+        subset: list[DynamicPassOutcome],
+    ) -> dict[str, int | float]:
+        def median(name: str) -> float:
+            return float(np.median([getattr(outcome, name) for outcome in subset]))
+
+        return {
+            "outcome_count": len(subset),
+            "completed_count": sum(outcome.completed for outcome in subset),
+            "upright_count": sum(outcome.upright for outcome in subset),
+            "straight_2m_success_count": sum(
+                outcome.straight_2m_success for outcome in subset
+            ),
+            "median_ball_dx_m": median("ball_dx_m"),
+            "median_abs_ball_dy_m": float(
+                np.median([abs(outcome.ball_dy_m) for outcome in subset])
+            ),
+            "median_ball_displacement_m": median("ball_displacement_m"),
+            "median_peak_ball_speed_mps": median("peak_ball_speed_mps"),
+        }
+
+    rollout_ids = sorted({outcome.rollout_id for outcome in outcomes})
+    overall = subset_summary(outcomes)
 
     return {
-        "outcome_count": len(outcomes),
-        "completed_count": sum(outcome.completed for outcome in outcomes),
-        "upright_count": sum(outcome.upright for outcome in outcomes),
-        "straight_2m_success_count": sum(
-            outcome.straight_2m_success for outcome in outcomes
-        ),
-        "median_ball_dx_m": median("ball_dx_m"),
-        "median_abs_ball_dy_m": float(
-            np.median([abs(outcome.ball_dy_m) for outcome in outcomes])
-        ),
-        "median_ball_displacement_m": median("ball_displacement_m"),
-        "median_peak_ball_speed_mps": median("peak_ball_speed_mps"),
+        **overall,
         "rollout_counts": {
             str(rollout_id): sum(
                 outcome.rollout_id == rollout_id for outcome in outcomes
             )
-            for rollout_id in sorted({outcome.rollout_id for outcome in outcomes})
+            for rollout_id in rollout_ids
+        },
+        "rollout_summaries": {
+            str(rollout_id): subset_summary(
+                [
+                    outcome
+                    for outcome in outcomes
+                    if outcome.rollout_id == rollout_id
+                ]
+            )
+            for rollout_id in rollout_ids
         },
     }
 

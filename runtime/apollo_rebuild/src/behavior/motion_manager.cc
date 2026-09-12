@@ -17,7 +17,8 @@ MotionManager::MotionManager(const app::RuntimeConfig& config)
       getup_runner_(config.resolve_asset_path("networks/getup/policy.onnx")) {
     if (config.enable_dynamic_pass) {
         dynamic_pass_runner_ = std::make_unique<DynamicPassRunner>(
-            config.resolve_asset_path("networks/dynamic_pass/selector.onnx"));
+            config.resolve_asset_path("networks/dynamic_pass/selector.onnx"),
+            config.dynamic_pass_forced_rollout_id);
     }
 }
 

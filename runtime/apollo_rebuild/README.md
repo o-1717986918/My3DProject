@@ -159,6 +159,7 @@ The match uses the default-on dynamic-pass selector. Set
 | `--asset-root` | — | `assets` | Root directory for runtime motion assets |
 | `--enable-dynamic-pass` | — | enabled | Enable the narrow 2 m straight-pass selector |
 | `--disable-dynamic-pass` | — | — | Disable the selector for baseline and side-swapped A/B matches |
+| `--dynamic-pass-force-rollout <id>` | — | — | Experiment only: execute one known prototype after the normal release geometry and two-frame confirmation |
 | `--enable-goalkeeper-intercept` | — | enabled | Track reachable incoming goal-line crossings with the existing Walk |
 | `--disable-goalkeeper-intercept` | — | — | Restore the upstream fixed-centre goalkeeper hold |
 
@@ -180,6 +181,26 @@ PYTHONPATH=training python training/tools/analyze_dynamic_pass_outcomes.py \
   --match-dir /home/win98/rl_runs/<match> [...] \
   --output-npz /home/win98/rl_runs/<match>/dynamic_pass_outcomes.npz
 ```
+
+Controlled data collection may set `--dynamic-pass-force-rollout` to one of
+`302,117,4,84,99,107,43,79,65,17`. This preserves the same ball geometry and
+two-frame release confirmation but bypasses the selector choice so every
+prototype can be measured on comparable server states. It is an experimental
+sampling switch, not a match configuration; without it the default selector
+path is unchanged. The analyzer reports both aggregate and per-rollout outcome
+summaries.
+
+Collect a balanced server bank sequentially (avoiding the activation failures
+seen when several 14-agent matches compete for CPU) with:
+
+```bash
+bash scripts/collect_dynamic_pass_server_bank.sh 3 7
+```
+
+The first argument is repetitions per prototype and the second is wall seconds
+per match. Logs, `summary.json`, and `outcomes.npz` are written under
+`/home/win98/rl_runs` by default. `DYNAMIC_PASS_ROLLOUT_IDS="65 84"` may be used
+for a smaller diagnostic subset.
 
 The goalkeeper intercept is also enabled by default. It changes only the
 goalkeeper during `PlayOn`: a fresh, reliably incoming ball whose predicted

@@ -106,8 +106,23 @@ std::array<double, kJointCount> raw_keyframe(
 
 }  // namespace
 
-DynamicPassRunner::DynamicPassRunner(const std::filesystem::path& selector_path)
-    : selector_(selector_path, OnnxModelContract{{1, 98}, {1, 10}}) {}
+DynamicPassRunner::DynamicPassRunner(
+    const std::filesystem::path& selector_path,
+    int forced_rollout_id)
+    : selector_(selector_path, OnnxModelContract{{1, 98}, {1, 10}}) {
+    if (forced_rollout_id < 0) {
+        return;
+    }
+    const auto found = std::find(
+        kPrototypeRolloutIds.begin(),
+        kPrototypeRolloutIds.end(),
+        forced_rollout_id);
+    if (found == kPrototypeRolloutIds.end()) {
+        throw std::invalid_argument("unknown dynamic-pass rollout id");
+    }
+    forced_prototype_index_ = static_cast<int>(
+        std::distance(kPrototypeRolloutIds.begin(), found));
+}
 
 bool DynamicPassRunner::release_geometry(const world::WorldSnapshot& snapshot) {
     const bool ball_fresh = snapshot.ball.position_valid &&
@@ -253,16 +268,26 @@ DynamicPassActivation DynamicPassRunner::consider(
         max_probability_ = *best;
         best_prototype_rollout_id_ = kPrototypeRolloutIds[best_index];
         for (std::size_t i = 0; i < kPrototypeCount; ++i) {
-            streak_[i] = std::isfinite(probabilities[i]) &&
-                    probabilities[i] >= kSelectorThreshold
-                ? streak_[i] + 1
-                : 0;
+            const bool confirmed = forced_prototype_index_ >= 0
+                ? i == static_cast<std::size_t>(forced_prototype_index_)
+                : std::isfinite(probabilities[i]) &&
+                      probabilities[i] >= kSelectorThreshold;
+            streak_[i] = confirmed ? streak_[i] + 1 : 0;
         }
         std::size_t choice = kPrototypeCount;
-        for (std::size_t i = 0; i < kPrototypeCount; ++i) {
-            if (streak_[i] >= kConfirmationFrames &&
-                (choice == kPrototypeCount || probabilities[i] > probabilities[choice])) {
-                choice = i;
+        if (forced_prototype_index_ >= 0) {
+            const std::size_t forced = static_cast<std::size_t>(
+                forced_prototype_index_);
+            if (streak_[forced] >= kConfirmationFrames) {
+                choice = forced;
+            }
+        } else {
+            for (std::size_t i = 0; i < kPrototypeCount; ++i) {
+                if (streak_[i] >= kConfirmationFrames &&
+                    (choice == kPrototypeCount ||
+                     probabilities[i] > probabilities[choice])) {
+                    choice = i;
+                }
             }
         }
         if (choice == kPrototypeCount) {

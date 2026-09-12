@@ -20,6 +20,7 @@ struct RuntimeConfig {
     std::string log_level{"info"};
     std::size_t status_interval{0};
     bool enable_dynamic_pass{true};
+    int dynamic_pass_forced_rollout_id{-1};
     bool enable_goalkeeper_intercept{true};
 
     /// Parses supported command-line options and preserves unspecified defaults.
