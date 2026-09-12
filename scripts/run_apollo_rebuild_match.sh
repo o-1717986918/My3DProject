@@ -78,6 +78,11 @@ case "${APOLLO_REBUILD_ENABLE_DYNAMIC_PASS:-1}" in
     1) rebuild_args+=(--enable-dynamic-pass) ;;
     *) echo "APOLLO_REBUILD_ENABLE_DYNAMIC_PASS must be 0 or 1" >&2; exit 2 ;;
 esac
+case "${APOLLO_REBUILD_ENABLE_GOALKEEPER_INTERCEPT:-1}" in
+    0) rebuild_args+=(--disable-goalkeeper-intercept) ;;
+    1) rebuild_args+=(--enable-goalkeeper-intercept) ;;
+    *) echo "APOLLO_REBUILD_ENABLE_GOALKEEPER_INTERCEPT must be 0 or 1" >&2; exit 2 ;;
+esac
 if [[ ! -x "$server_python" || ! -x "$server_binary" ]]; then
     echo "RCSSServerMJ environment is missing" >&2
     exit 2

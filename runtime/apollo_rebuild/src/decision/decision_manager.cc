@@ -5,7 +5,8 @@
 
 namespace decision {
 
-DecisionManager::DecisionManager() = default;
+DecisionManager::DecisionManager(bool enable_goalkeeper_intercept)
+    : behavior_tree_(enable_goalkeeper_intercept) {}
 
 HighLevelCommand DecisionManager::decide(const world::WorldSnapshot& snapshot) {
     return behavior_tree_.evaluate(snapshot, blackboard_, role_manager_);

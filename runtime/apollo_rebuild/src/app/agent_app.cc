@@ -52,12 +52,14 @@ void normalize_frame_for_team(server::PerceptionFrame& frame, bool is_left_team)
 AgentApp::AgentApp(RuntimeConfig config)
     : config_(std::move(config)),
       world_state_(config_.team_name, config_.player_number, 7),
+      decision_manager_(config_.enable_goalkeeper_intercept),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name) {}
 
 AgentApp::AgentApp(RuntimeConfig config, std::unique_ptr<server::TcpLpmClient> client)
     : config_(std::move(config)),
       world_state_(config_.team_name, config_.player_number, 7),
+      decision_manager_(config_.enable_goalkeeper_intercept),
       motion_manager_(config_),
       team_comm_manager_(config_.team_name),
       client_(std::move(client)) {}

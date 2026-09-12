@@ -13,10 +13,16 @@ namespace decision {
 /// Evaluates match state, set plays, and role behavior into one command.
 class BehaviorTree {
 public:
+    explicit BehaviorTree(bool enable_goalkeeper_intercept = false)
+        : enable_goalkeeper_intercept_(enable_goalkeeper_intercept) {}
+
     HighLevelCommand evaluate(
         const world::WorldSnapshot& snapshot,
         Blackboard& blackboard,
         RoleManager& role_manager) const;
+
+private:
+    bool enable_goalkeeper_intercept_{false};
 };
 
 }  // namespace decision

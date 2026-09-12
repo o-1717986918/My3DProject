@@ -159,6 +159,8 @@ The match uses the default-on dynamic-pass selector. Set
 | `--asset-root` | — | `assets` | Root directory for runtime motion assets |
 | `--enable-dynamic-pass` | — | enabled | Enable the narrow 2 m straight-pass selector |
 | `--disable-dynamic-pass` | — | — | Disable the selector for baseline and side-swapped A/B matches |
+| `--enable-goalkeeper-intercept` | — | enabled | Track reachable incoming goal-line crossings with the existing Walk |
+| `--disable-goalkeeper-intercept` | — | — | Restore the upstream fixed-centre goalkeeper hold |
 
 The dynamic-pass selector is enabled by default and applies only to the active
 player during `PlayOn`; all other commands and roles retain the baseline path.
@@ -178,6 +180,12 @@ PYTHONPATH=training python training/tools/analyze_dynamic_pass_outcomes.py \
   --match-dir /home/win98/rl_runs/<match> [...] \
   --output-npz /home/win98/rl_runs/<match>/dynamic_pass_outcomes.npz
 ```
+
+The goalkeeper intercept is also enabled by default. It changes only the
+goalkeeper during `PlayOn`: a fresh, reliably incoming ball whose predicted
+crossing is inside the goal mouth latches a lateral Walk target through brief
+velocity-confidence gaps. Goal kicks, get-up, and the upstream centre hold are
+unchanged. This is a walk-reachable low-ball capability, not a dive policy.
 
 ## Package for Deployment
 

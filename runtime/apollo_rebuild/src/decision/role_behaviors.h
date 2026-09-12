@@ -29,6 +29,13 @@ struct APState {
     double previous_ball_distance{0.0};
 };
 
+/// Short-lived goalkeeper intent retained across noisy ball-velocity frames.
+struct GKState {
+    bool intercept_active{false};
+    double intercept_target_y_m{0.0};
+    double intercept_until_s{-1.0};
+};
+
 /// Generates the active-player command and set-play handoff state.
 class APBehavior final {
 public:
@@ -67,7 +74,13 @@ public:
     HighLevelCommand make_command(
         const world::WorldSnapshot& snapshot,
         const Blackboard& blackboard) const override;
-    void reset_state() const {}
+    HighLevelCommand make_command(
+        const world::WorldSnapshot& snapshot,
+        const Blackboard& blackboard,
+        bool enable_intercept) const;
+    void reset_state() const { state_ = {}; }
+private:
+    mutable GKState state_;
 };
 
 /// Clears persistent state owned by all role behavior instances.
@@ -79,6 +92,7 @@ int current_role_from_blackboard(const Blackboard& blackboard);
 std::optional<HighLevelCommand> select_role_behavior(
     const world::WorldSnapshot& snapshot,
     const Blackboard& blackboard,
-    RoleManager& role_manager);
+    RoleManager& role_manager,
+    bool enable_goalkeeper_intercept = false);
 
 }  // namespace decision

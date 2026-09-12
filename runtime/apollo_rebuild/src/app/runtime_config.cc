@@ -51,6 +51,10 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
             config.enable_dynamic_pass = true;
         } else if (arg == "--disable-dynamic-pass") {
             config.enable_dynamic_pass = false;
+        } else if (arg == "--enable-goalkeeper-intercept") {
+            config.enable_goalkeeper_intercept = true;
+        } else if (arg == "--disable-goalkeeper-intercept") {
+            config.enable_goalkeeper_intercept = false;
         }
     }
 

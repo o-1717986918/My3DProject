@@ -35,6 +35,12 @@ constexpr double kDribbleSideClearanceM = 0.55;
 constexpr double kDribbleSideStepBehindThresholdM = 0.1;
 constexpr double kDribbleMaxLateralOffsetM = 0.4;
 constexpr double kDribbleMaxAheadM = 0.15;
+constexpr double kGkInterceptMinIncomingSpeedMps = 0.4;
+constexpr double kGkInterceptMinTimeS = 0.05;
+constexpr double kGkInterceptMaxTimeS = 3.0;
+constexpr double kGkInterceptReleaseMarginS = 0.25;
+constexpr double kGkInterceptMaxBallAgeS = 0.25;
+constexpr double kGkInterceptFrameMarginM = 0.25;
 
 bool is_our_set_play(const world::WorldSnapshot& snapshot) {
     return snapshot.play_mode_group == world::PlayModeGroup::OurKick;
@@ -177,12 +183,11 @@ using APNodePtr = bt::NodePtr<APDecisionContext>;
 
 struct GKDecisionContext {
     const world::WorldSnapshot& snapshot;
+    GKState& state;
     std::array<double, 2> ball{0.0, 0.0};
     std::array<double, 2> self{0.0, 0.0};
     double ball_distance{0.0};
 };
-
-using GKNodePtr = bt::NodePtr<GKDecisionContext>;
 
 WalkCommand make_dribble_command(
     APDecisionContext& context,
@@ -300,6 +305,67 @@ HighLevelCommand make_gk_hold_position(GKDecisionContext& /*context*/) {
     command.orientation_absolute = true;
     command.role_id = RoleManager::ROLE_GK;
     return command;
+}
+
+bool update_gk_intercept(GKDecisionContext& context, bool enabled) {
+    const auto& snapshot = context.snapshot;
+    const double hold_x =
+        -field_geometry::kActualHalfLengthM + field_geometry::kGkHoldDepthM;
+
+    if (!enabled || snapshot.play_mode != world::PlayMode::PlayOn ||
+        snapshot.self.position_m[2] < world::kFallenHeightThresholdM ||
+        !snapshot.ball.position_valid ||
+        snapshot.ball.position_age_s > kGkInterceptMaxBallAgeS) {
+        context.state = {};
+        return false;
+    }
+
+    if (snapshot.ball.velocity_valid) {
+        const double vx = snapshot.ball.velocity_mps[0];
+        if (vx <= -kGkInterceptMinIncomingSpeedMps) {
+            const double crossing_time_s = (hold_x - context.ball[0]) / vx;
+            const double crossing_y_m =
+                context.ball[1] + snapshot.ball.velocity_mps[1] * crossing_time_s;
+            if (crossing_time_s >= kGkInterceptMinTimeS &&
+                crossing_time_s <= kGkInterceptMaxTimeS &&
+                std::abs(crossing_y_m) <=
+                    field_geometry::kGoalHalfWidthM + kGkInterceptFrameMarginM) {
+                context.state.intercept_active = true;
+                context.state.intercept_target_y_m = std::clamp(
+                    crossing_y_m,
+                    -field_geometry::kGoalHalfWidthM,
+                    field_geometry::kGoalHalfWidthM);
+                context.state.intercept_until_s = snapshot.server_time +
+                    crossing_time_s + kGkInterceptReleaseMarginS;
+            }
+        } else if (vx >= kGkInterceptMinIncomingSpeedMps) {
+            context.state = {};
+        }
+    }
+
+    if (!context.state.intercept_active ||
+        snapshot.server_time > context.state.intercept_until_s ||
+        context.ball[0] < hold_x - 0.5) {
+        context.state = {};
+        return false;
+    }
+    return true;
+}
+
+WalkCommand make_gk_intercept_command(GKDecisionContext& context) {
+    const std::array<double, 2> target{
+        -field_geometry::kActualHalfLengthM + field_geometry::kGkHoldDepthM,
+        context.state.intercept_target_y_m,
+    };
+    return make_walk_command_avoiding(
+        target,
+        context.snapshot,
+        std::nullopt,
+        true,
+        true,
+        RoleManager::ROLE_GK,
+        true,
+        false);
 }
 
 const APBehavior& ap_behavior_instance() {
@@ -431,43 +497,53 @@ bool GKBehavior::matches(const Blackboard& blackboard) const {
 
 HighLevelCommand GKBehavior::make_command(
     const world::WorldSnapshot& snapshot,
-    const Blackboard& /*blackboard*/) const {
-    static const GKNodePtr gk_tree = bt::fallback<GKDecisionContext>({
-        bt::sequence<GKDecisionContext>({
-            bt::condition<GKDecisionContext>(is_gk_our_goal_kick),
-            bt::command<GKDecisionContext>(make_gk_walk_to_ball),
-        }),
-        bt::command<GKDecisionContext>(make_gk_hold_position),
-    });
+    const Blackboard& blackboard) const {
+    return make_command(snapshot, blackboard, false);
+}
 
+HighLevelCommand GKBehavior::make_command(
+    const world::WorldSnapshot& snapshot,
+    const Blackboard& /*blackboard*/,
+    bool enable_intercept) const {
     GKDecisionContext context{
         snapshot,
+        state_,
         {snapshot.ball.position_m[0], snapshot.ball.position_m[1]},
         {snapshot.self.position_m[0], snapshot.self.position_m[1]},
         0.0};
     context.ball_distance = math::planar_dist(context.ball, context.self);
 
-    const auto result = gk_tree->tick(context);
-    return result.command.value_or(NeutralCommand{});
+    if (is_gk_our_goal_kick(context)) {
+        state_ = {};
+        return make_gk_walk_to_ball(context);
+    }
+    if (update_gk_intercept(context, enable_intercept)) {
+        return make_gk_intercept_command(context);
+    }
+    return make_gk_hold_position(context);
 }
 
 std::optional<HighLevelCommand> select_role_behavior(
     const world::WorldSnapshot& snapshot,
     const Blackboard& blackboard,
-    RoleManager& role_manager) {
+    RoleManager& role_manager,
+    bool enable_goalkeeper_intercept) {
     // AP is the only behavior that needs RoleManager (to latch the set-play
     // push); dispatch it directly and let the other behaviors share the
     // 2-param base interface.
     if (ap_behavior_instance().matches(blackboard)) {
         return ap_behavior_instance().make_command(snapshot, blackboard, role_manager);
     }
-    static const std::array<const RoleBehavior*, 6> behaviors{
+    if (gk_behavior_instance().matches(blackboard)) {
+        return gk_behavior_instance().make_command(
+            snapshot, blackboard, enable_goalkeeper_intercept);
+    }
+    static const std::array<const RoleBehavior*, 5> behaviors{
         &cbm_behavior_instance(),
         &st_behavior_instance(),
         &cbl_behavior_instance(),
         &cbr_behavior_instance(),
         &cdm_behavior_instance(),
-        &gk_behavior_instance(),
     };
 
     for (const auto* behavior : behaviors) {

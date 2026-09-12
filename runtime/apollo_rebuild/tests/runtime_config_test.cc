@@ -27,5 +27,11 @@ int main() {
     assert(parse({"ApolloCodeBase", "--disable-dynamic-pass",
                   "--enable-dynamic-pass"})
                .enable_dynamic_pass);
+    assert(parse({"ApolloCodeBase"}).enable_goalkeeper_intercept);
+    assert(parse({"ApolloCodeBase", "--enable-goalkeeper-intercept"})
+               .enable_goalkeeper_intercept);
+    assert(!parse({"ApolloCodeBase", "--enable-goalkeeper-intercept",
+                   "--disable-goalkeeper-intercept"})
+                .enable_goalkeeper_intercept);
     return 0;
 }
