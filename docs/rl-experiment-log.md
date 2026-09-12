@@ -1816,8 +1816,9 @@ compared with two baseline runs from the same fixed initial geometry:
 
 The candidate is closer to its nominal 2 m range, but its 1.26--1.39 m lateral
 miss does not constitute a usable straight pass, and it reduces direct forward
-progress and ball speed. It is therefore retained only as an isolated runtime
-and training candidate, disabled by default. This is useful executor evidence:
+progress and ball speed. At the time it was therefore retained as an isolated
+runtime/training candidate and disabled by default; it is now default-on by
+explicit product decision with a clean disable switch. This is useful executor evidence:
 the ONNX route can now receive real dynamic approach states, while future
 training has a concrete target—direction/contact quality—rather than another
 upper-layer release relaxation. Logs are under
@@ -1901,3 +1902,26 @@ single score cannot be attributed to the selector and is not a side-swapped
 /A/B result. It establishes only that default-on execution completes a full
 match without a client failure. Logs are under
 `/home/win98/rl_runs/apollo-vs-base-web-match-20260912-101815`.
+
+## Dynamic-pass server outcome closure — 2026-09-12
+
+The rebuild now pairs every exact 98-element selector release observation with
+one measured server result. The result includes normal/early termination,
+selected rollout and confidence, start/peak/final planar ball speed, canonical
+forward/lateral displacement, peak height and the executor's final upright
+state. `training/tools/analyze_dynamic_pass_outcomes.py` converts per-player
+logs into a compact NPZ corpus and reports the narrow 2 m straight-pass
+contract; unmatched or interrupted records remain explicit rather than being
+silently counted as successful labels.
+
+A 15-second fixed-near-ball server smoke produced two completed actions
+(`r79`, `r302`). Two subsequent natural 30-second matches placed the rebuild on
+each side and added six outcomes. Across all eight releases, seven completed,
+all eight executors remained upright, and none met the straight 2 m contract.
+Median canonical forward displacement was `0.750 m`, median absolute lateral
+error was `0.493 m`, and median peak ball speed was `1.912 m/s`. This confirms
+that current work should improve state-conditioned direction/contact quality,
+not further relax the release geometry. The merged corpus is
+`/home/win98/rl_runs/dynamic-pass-server-outcomes-s20260912-v1.npz`; source
+logs are in the adjacent `apollo-rebuild-vs-base-20260912-110539-left` and
+`dynamic-pass-natural-outcomes{,-right}-s20260912-v1` directories.

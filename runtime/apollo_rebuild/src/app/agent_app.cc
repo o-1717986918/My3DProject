@@ -62,6 +62,94 @@ AgentApp::AgentApp(RuntimeConfig config, std::unique_ptr<server::TcpLpmClient> c
       team_comm_manager_(config_.team_name),
       client_(std::move(client)) {}
 
+void AgentApp::update_dynamic_pass_trace(
+    const world::WorldSnapshot& snapshot,
+    bool motion_active,
+    bool motion_started) {
+    if (motion_started) {
+        dynamic_pass_trace_ = {};
+        dynamic_pass_trace_.active = true;
+        dynamic_pass_trace_.start_time_s = snapshot.server_time;
+        dynamic_pass_trace_.start_ball_position_m = snapshot.ball.position_m;
+        dynamic_pass_trace_.peak_ball_height_m = snapshot.ball.position_m[2];
+        dynamic_pass_trace_.selector_confidence =
+            motion_manager_.dynamic_pass_max_probability();
+        dynamic_pass_trace_.motion = last_active_motion_;
+        if (snapshot.ball.velocity_valid) {
+            dynamic_pass_trace_.start_ball_speed_mps = math::norm2({
+                snapshot.ball.velocity_mps[0], snapshot.ball.velocity_mps[1]});
+            dynamic_pass_trace_.peak_ball_speed_mps =
+                dynamic_pass_trace_.start_ball_speed_mps;
+        }
+    }
+
+    if (!dynamic_pass_trace_.active) {
+        return;
+    }
+    if (snapshot.ball.position_valid) {
+        dynamic_pass_trace_.peak_ball_height_m = std::max(
+            dynamic_pass_trace_.peak_ball_height_m,
+            snapshot.ball.position_m[2]);
+    }
+    if (snapshot.ball.velocity_valid) {
+        dynamic_pass_trace_.peak_ball_speed_mps = std::max(
+            dynamic_pass_trace_.peak_ball_speed_mps,
+            math::norm2({
+                snapshot.ball.velocity_mps[0], snapshot.ball.velocity_mps[1]}));
+    }
+    if (motion_active) {
+        return;
+    }
+
+    const double duration_s = std::max(
+        0.0, snapshot.server_time - dynamic_pass_trace_.start_time_s);
+    const double ball_dx_m = snapshot.ball.position_m[0] -
+        dynamic_pass_trace_.start_ball_position_m[0];
+    const double ball_dy_m = snapshot.ball.position_m[1] -
+        dynamic_pass_trace_.start_ball_position_m[1];
+    const double ball_displacement_m = snapshot.ball.position_valid
+        ? math::norm2({ball_dx_m, ball_dy_m})
+        : -1.0;
+    const double final_ball_speed_mps = snapshot.ball.velocity_valid
+        ? math::norm2({
+              snapshot.ball.velocity_mps[0], snapshot.ball.velocity_mps[1]})
+        : -1.0;
+    // The primitive has a nominal 1.20 s horizon. Allow one normal 50 Hz
+    // server interval of tolerance before classifying an early decision/motion
+    // switch as an interruption.
+    constexpr double kCompletedDurationS = 1.18;
+    std::cerr << std::setprecision(9)
+              << "APOLLO_REBUILD_DYNAMIC_PASS_RESULT"
+              << " t=" << snapshot.server_time
+              << " player=" << snapshot.player_number
+              << " motion=" << dynamic_pass_trace_.motion
+              << " termination="
+              << (duration_s >= kCompletedDurationS ? "completed" : "interrupted")
+              << " duration=" << duration_s
+              << " selector_confidence="
+              << dynamic_pass_trace_.selector_confidence
+              << " start_ball_speed="
+              << dynamic_pass_trace_.start_ball_speed_mps
+              << " peak_ball_speed="
+              << dynamic_pass_trace_.peak_ball_speed_mps
+              << " final_ball_speed=" << final_ball_speed_mps
+              << " ball_dx=" << ball_dx_m
+              << " ball_dy=" << ball_dy_m
+              << " ball_displacement=" << ball_displacement_m
+              << " peak_ball_height="
+              << dynamic_pass_trace_.peak_ball_height_m
+              << " end_ball_valid="
+              << (snapshot.ball.position_valid ? 1 : 0)
+              << " end_ball_age=" << snapshot.ball.position_age_s
+              << " upright="
+              << (snapshot.self.position_m[2] >
+                      world::kFallenHeightThresholdM
+                      ? 1
+                      : 0)
+              << '\n';
+    dynamic_pass_trace_ = {};
+}
+
 int AgentApp::run() {
     return run_for_cycles(std::numeric_limits<std::size_t>::max());
 }
@@ -133,10 +221,13 @@ std::string AgentApp::process_perception_message(const std::string& message) {
         }
     }
 
+    const bool dynamic_pass_active =
+        last_active_motion_.rfind("DynamicPass-r", 0) == 0;
     const bool dynamic_pass_started =
-        last_active_motion_.rfind("DynamicPass-r", 0) == 0 &&
+        dynamic_pass_active &&
         previous_active_motion.rfind("DynamicPass-r", 0) != 0;
     const bool dynamic_pass_candidate_sample =
+        !dynamic_pass_active &&
         motion_manager_.dynamic_pass_release_candidate() &&
         config_.status_interval > 0 &&
         (processed_frames_ + 1U) % config_.status_interval == 0U;
@@ -165,6 +256,8 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             // must never turn that safe rejection into an agent crash.
         }
     }
+    update_dynamic_pass_trace(
+        snapshot, dynamic_pass_active, dynamic_pass_started);
 
     ++processed_frames_;
     if (config_.status_interval > 0 &&

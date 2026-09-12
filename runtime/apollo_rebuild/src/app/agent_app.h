@@ -13,6 +13,7 @@
 #include "src/robot/t1_robot_model.h"
 #include "src/world/world_state.h"
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -38,6 +39,22 @@ public:
     const std::string& last_active_motion() const;
 
 private:
+    struct DynamicPassTrace {
+        bool active{false};
+        double start_time_s{0.0};
+        std::array<double, 3> start_ball_position_m{0.0, 0.0, 0.0};
+        double start_ball_speed_mps{-1.0};
+        double peak_ball_speed_mps{-1.0};
+        double peak_ball_height_m{0.0};
+        double selector_confidence{-1.0};
+        std::string motion;
+    };
+
+    void update_dynamic_pass_trace(
+        const world::WorldSnapshot& snapshot,
+        bool motion_active,
+        bool motion_started);
+
     RuntimeConfig config_;
     bool shutdown_requested_{false};
     bool init_sent_{false};
@@ -51,6 +68,7 @@ private:
     std::size_t last_command_variant_index_{static_cast<std::size_t>(-1)};
     std::size_t processed_frames_{0};
     std::string last_active_motion_{"Neutral"};
+    DynamicPassTrace dynamic_pass_trace_;
 };
 
 }  // namespace app

@@ -168,7 +168,16 @@ evaluation, not general passing, dribbling, or shooting support. Use
 independently controlled head joints, matching its training contract. With
 status telemetry enabled, candidate and activation states emit
 `APOLLO_REBUILD_DYNAMIC_PASS_CANDIDATE/START` lines containing the exact
-98-element observation for offline domain-shift audits.
+98-element observation for offline domain-shift audits. Each activation also
+emits one `APOLLO_REBUILD_DYNAMIC_PASS_RESULT` record with termination, ball
+velocity/displacement/height and final upright state. Pair and export these
+records for training with:
+
+```bash
+PYTHONPATH=training python training/tools/analyze_dynamic_pass_outcomes.py \
+  --match-dir /home/win98/rl_runs/<match> [...] \
+  --output-npz /home/win98/rl_runs/<match>/dynamic_pass_outcomes.npz
+```
 
 ## Package for Deployment
 
