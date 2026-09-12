@@ -32,8 +32,8 @@ near_ball_robot_x=${MATCH_NEAR_BALL_ROBOT_X:--0.55}
 near_ball_robot_y=${MATCH_NEAR_BALL_ROBOT_Y:-0}
 near_ball_robot_qw=${MATCH_NEAR_BALL_ROBOT_QW:-1}
 near_ball_robot_qz=${MATCH_NEAR_BALL_ROBOT_QZ:-0}
-near_ball_opponent_gk_x=${MATCH_NEAR_BALL_OPPONENT_GK_X:-26}
-near_ball_opponent_field_x=${MATCH_NEAR_BALL_OPPONENT_FIELD_X:-18}
+near_ball_opponent_gk_x=${MATCH_NEAR_BALL_OPPONENT_GK_X:-}
+near_ball_opponent_field_x=${MATCH_NEAR_BALL_OPPONENT_FIELD_X:-}
 goalkeeper_shot_x=${MATCH_GOALKEEPER_SHOT_X:-18}
 goalkeeper_shot_y=${MATCH_GOALKEEPER_SHOT_Y:-0.7}
 goalkeeper_shot_speed=${MATCH_GOALKEEPER_SHOT_SPEED:-5.0}
@@ -205,27 +205,66 @@ if [[ "$force_near_ball" == 1 ]]; then
     # Let every client observe PlayOn before moving the actors. This also keeps
     # a final BeforeKickOff Beam from overwriting the fixed release pose.
     sleep 0.2
-    # Put the left striker just behind a stationary ball and keep every other
-    # player out of the lane. This is a repeatable contact-delay probe, not a
-    # different decision or motion path.
+    # Put the rebuild striker just behind a stationary ball and keep every
+    # other player out of the lane. Mirror the fixture when the rebuild runs on
+    # the right; previously this block always moved the left-side player and a
+    # right-side rebuild therefore never received the intended ball state.
+    if [[ "$rebuild_side" == left ]]; then
+        near_actor_name=$left_name
+        near_other_name=$right_name
+        actor_gk_x=-26
+        actor_back_x=-12
+        actor_mid_x=-9
+        actor_front_x=-6
+        actor_y2=-7
+        actor_y3=7
+        actor_y4=-5
+        actor_y5=5
+        actor_qw=1
+        actor_qz=0
+        other_qw=0
+        other_qz=1
+        near_ball_opponent_gk_x=${near_ball_opponent_gk_x:-26}
+        near_ball_opponent_field_x=${near_ball_opponent_field_x:-18}
+    else
+        near_actor_name=$right_name
+        near_other_name=$left_name
+        actor_gk_x=26
+        actor_back_x=12
+        actor_mid_x=9
+        actor_front_x=6
+        actor_y2=7
+        actor_y3=-7
+        actor_y4=5
+        actor_y5=-5
+        actor_qw=0
+        actor_qz=1
+        other_qw=1
+        other_qz=0
+        near_ball_opponent_gk_x=${near_ball_opponent_gk_x:--26}
+        near_ball_opponent_field_x=${near_ball_opponent_field_x:--18}
+    fi
+
+    # Coordinates and the player-7 quaternion are server-global values so a
+    # caller can place an exact release pose on either side.
     "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
         --host 127.0.0.1 \
         --port "$monitor_port" \
         --delay 0.02 \
-        "(agent (unum 1) (team $left_name) (move3d -26 0 0.8 1 0 0 0))" \
-        "(agent (unum 2) (team $left_name) (move3d -12 -7 0.8 1 0 0 0))" \
-        "(agent (unum 3) (team $left_name) (move3d -12 7 0.8 1 0 0 0))" \
-        "(agent (unum 4) (team $left_name) (move3d -9 -5 0.8 1 0 0 0))" \
-        "(agent (unum 5) (team $left_name) (move3d -9 5 0.8 1 0 0 0))" \
-        "(agent (unum 6) (team $left_name) (move3d -6 0 0.8 1 0 0 0))" \
-        "(agent (unum 7) (team $left_name) (move3d $near_ball_robot_x $near_ball_robot_y 0.8 $near_ball_robot_qw 0 0 $near_ball_robot_qz))" \
-        "(agent (unum 1) (team $right_name) (move3d $near_ball_opponent_gk_x 0 0.8 0 0 0 1))" \
-        "(agent (unum 2) (team $right_name) (move3d $near_ball_opponent_field_x -7 0.8 0 0 0 1))" \
-        "(agent (unum 3) (team $right_name) (move3d $near_ball_opponent_field_x -5 0.8 0 0 0 1))" \
-        "(agent (unum 4) (team $right_name) (move3d $near_ball_opponent_field_x -3 0.8 0 0 0 1))" \
-        "(agent (unum 5) (team $right_name) (move3d $near_ball_opponent_field_x 3 0.8 0 0 0 1))" \
-        "(agent (unum 6) (team $right_name) (move3d $near_ball_opponent_field_x 5 0.8 0 0 0 1))" \
-        "(agent (unum 7) (team $right_name) (move3d $near_ball_opponent_field_x 7 0.8 0 0 0 1))" \
+        "(agent (unum 1) (team $near_actor_name) (move3d $actor_gk_x 0 0.8 $actor_qw 0 0 $actor_qz))" \
+        "(agent (unum 2) (team $near_actor_name) (move3d $actor_back_x $actor_y2 0.8 $actor_qw 0 0 $actor_qz))" \
+        "(agent (unum 3) (team $near_actor_name) (move3d $actor_back_x $actor_y3 0.8 $actor_qw 0 0 $actor_qz))" \
+        "(agent (unum 4) (team $near_actor_name) (move3d $actor_mid_x $actor_y4 0.8 $actor_qw 0 0 $actor_qz))" \
+        "(agent (unum 5) (team $near_actor_name) (move3d $actor_mid_x $actor_y5 0.8 $actor_qw 0 0 $actor_qz))" \
+        "(agent (unum 6) (team $near_actor_name) (move3d $actor_front_x 0 0.8 $actor_qw 0 0 $actor_qz))" \
+        "(agent (unum 7) (team $near_actor_name) (move3d $near_ball_robot_x $near_ball_robot_y 0.8 $near_ball_robot_qw 0 0 $near_ball_robot_qz))" \
+        "(agent (unum 1) (team $near_other_name) (move3d $near_ball_opponent_gk_x 0 0.8 $other_qw 0 0 $other_qz))" \
+        "(agent (unum 2) (team $near_other_name) (move3d $near_ball_opponent_field_x -7 0.8 $other_qw 0 0 $other_qz))" \
+        "(agent (unum 3) (team $near_other_name) (move3d $near_ball_opponent_field_x -5 0.8 $other_qw 0 0 $other_qz))" \
+        "(agent (unum 4) (team $near_other_name) (move3d $near_ball_opponent_field_x -3 0.8 $other_qw 0 0 $other_qz))" \
+        "(agent (unum 5) (team $near_other_name) (move3d $near_ball_opponent_field_x 3 0.8 $other_qw 0 0 $other_qz))" \
+        "(agent (unum 6) (team $near_other_name) (move3d $near_ball_opponent_field_x 5 0.8 $other_qw 0 0 $other_qz))" \
+        "(agent (unum 7) (team $near_other_name) (move3d $near_ball_opponent_field_x 7 0.8 $other_qw 0 0 $other_qz))" \
         "(ball (pos $near_ball_x $near_ball_y 0.11) (vel 0 0 0))"
 fi
 

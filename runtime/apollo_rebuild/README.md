@@ -138,6 +138,10 @@ scripts/run_web_match_apollo_rebuild_vs_base.sh 120000
 
 The match uses the default-on dynamic-pass selector. Set
 `APOLLO_REBUILD_ENABLE_DYNAMIC_PASS=0` to run the clean A/B baseline.
+The headless `scripts/run_apollo_rebuild_match.sh` fixture also supports
+`REBUILD_SIDE=right`; its optional `MATCH_NEAR_BALL_*` coordinates are always
+server-global, while the script mirrors which team and supporting players it
+places around the scene.
 
 ### Run a single agent
 
