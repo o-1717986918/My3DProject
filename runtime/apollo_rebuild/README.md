@@ -211,6 +211,10 @@ goalkeeper during `PlayOn`: a fresh, reliably incoming ball whose predicted
 crossing is inside the goal mouth latches a lateral Walk target through brief
 velocity-confidence gaps. Goal kicks, get-up, and the upstream centre hold are
 unchanged. This is a walk-reachable low-ball capability, not a dive policy.
+For a repeatable server shot, set `MATCH_FORCE_GOALKEEPER_SHOT=1` when running
+`scripts/run_apollo_rebuild_match.sh`. `MATCH_GOALKEEPER_SHOT_Y` is signed in
+the rebuild team's canonical frame; changing its sign tests the other side of
+the same goalkeeper, while `REBUILD_SIDE=right` mirrors the whole fixture.
 
 ## Package for Deployment
 

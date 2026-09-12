@@ -283,12 +283,15 @@ if [[ -n "$forced_goal_kick_side" ]]; then
 fi
 
 if [[ "$force_goalkeeper_shot" == 1 ]]; then
-    # Mirror one canonical shot toward the rebuild team's own goal. The ball is
-    # first held at the release point long enough for every agent's teleport
-    # guard and velocity filter to acquire it, then receives the test velocity.
+    # Mirror one canonical shot toward the rebuild team's own goal.  The Y
+    # input is signed in the rebuild team's canonical frame, so negative and
+    # positive values exercise both keeper directions and side swapping keeps
+    # the same logical shot.  The ball is first held at the release point long
+    # enough for every agent's teleport guard and velocity filter to acquire it,
+    # then receives the test velocity.
     if [[ "$rebuild_side" == left ]]; then
         shot_x=-${goalkeeper_shot_x#-}
-        shot_y=${goalkeeper_shot_y#-}
+        shot_y=$goalkeeper_shot_y
         shot_vx=-${goalkeeper_shot_speed#-}
         keeper_x=-27
         keeper_qw=1
@@ -301,7 +304,11 @@ if [[ "$force_goalkeeper_shot" == 1 ]]; then
         right_keeper_qz=1
     else
         shot_x=${goalkeeper_shot_x#-}
-        shot_y=-${goalkeeper_shot_y#-}
+        if [[ "$goalkeeper_shot_y" == -* ]]; then
+            shot_y=${goalkeeper_shot_y#-}
+        else
+            shot_y=-$goalkeeper_shot_y
+        fi
         shot_vx=${goalkeeper_shot_speed#-}
         keeper_x=27
         keeper_qw=0
