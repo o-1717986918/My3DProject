@@ -22,6 +22,7 @@ from my3d_rl.policy_symmetry import (
 from my3d_rl.rcss_scene import build_single_t1_soccer_model
 from my3d_rl.reference_dynamics import circular_interpolate
 from my3d_rl.run_env import NOMINAL_TRAINING_POSE, TRAIN_TO_SERVER_SIGN
+from my3d_rl.t1_control import APOLLO_DEFAULT_POSE, apollo_joint_gains
 
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
@@ -160,6 +161,11 @@ def main() -> None:
         PHASE_CONTRACT if actor_size == 80 else DEFAULT_CONTRACT
     )
     contract = load_policy_contract(contract_path)
+    apollo_runtime = contract.gain_profile == "apollo_runtime_per_joint"
+    if apollo_runtime and (args.symmetry_ensemble or args.mirror_policy):
+        raise ValueError(
+            "Apollo runtime observations do not use the legacy triplet mirror layout"
+        )
     reference_centered = (
         contract.control_mode == "motion_reference_residual_joint_position"
     )
@@ -213,9 +219,17 @@ def main() -> None:
             else 0.0
         )
         reference_velocity_scale = gait_frequency / reference_nominal_frequency
-    mirror_source, mirror_factor = training_mirror_map(
-        contract.joint_order, TRAIN_TO_SERVER_SIGN
+    nominal = (
+        APOLLO_DEFAULT_POSE.astype(np.float64)
+        if apollo_runtime
+        else NOMINAL_TRAINING_POSE.astype(np.float64)
     )
+    sign = (
+        np.ones(contract.action_size, dtype=np.float64)
+        if apollo_runtime
+        else TRAIN_TO_SERVER_SIGN.astype(np.float64)
+    )
+    mirror_source, mirror_factor = training_mirror_map(contract.joint_order, sign)
     if contract.action_scale is None and args.action_scale is None:
         raise ValueError("run policy contract must declare action_scale")
     action_scale = (
@@ -259,15 +273,23 @@ def main() -> None:
     uppers = np.array(
         [model.joint(prefix + name).range[1] for name in contract.joint_order]
     )
-    nominal = NOMINAL_TRAINING_POSE.astype(np.float64)
-    sign = TRAIN_TO_SERVER_SIGN.astype(np.float64)
     nominal_physical = np.clip(nominal * sign, lowers, uppers)
-    if contract.kp is None or contract.kd is None:
-        raise ValueError("run policy contract must declare PD gains")
-    model.actuator_gainprm[pos_actuator, 0] = contract.kp
-    model.actuator_biasprm[pos_actuator, 1] = -contract.kp
-    model.actuator_gainprm[vel_actuator, 0] = contract.kd
-    model.actuator_biasprm[vel_actuator, 2] = -contract.kd
+    if apollo_runtime:
+        gains = np.asarray(
+            [apollo_joint_gains(name) for name in contract.joint_order],
+            dtype=np.float64,
+        )
+        model.actuator_gainprm[pos_actuator, 0] = gains[:, 0]
+        model.actuator_biasprm[pos_actuator, 1] = -gains[:, 0]
+        model.actuator_gainprm[vel_actuator, 0] = gains[:, 1]
+        model.actuator_biasprm[vel_actuator, 2] = -gains[:, 1]
+    else:
+        if contract.kp is None or contract.kd is None:
+            raise ValueError("run policy contract must declare PD gains")
+        model.actuator_gainprm[pos_actuator, 0] = contract.kp
+        model.actuator_biasprm[pos_actuator, 1] = -contract.kp
+        model.actuator_gainprm[vel_actuator, 0] = contract.kd
+        model.actuator_biasprm[vel_actuator, 2] = -contract.kd
 
     rng = np.random.default_rng(args.seed)
     command = np.array([args.vx, args.vy, args.yaw_rate], dtype=np.float32)
@@ -386,25 +408,50 @@ def main() -> None:
             else:
                 reference_position_training = nominal
                 reference_velocity_training = np.zeros(contract.action_size)
-            joint_triplets = np.stack(
-                [
-                    (joint_position_training - reference_position_training) / 4.6,
-                    (joint_velocity_training - reference_velocity_training) / 110.0,
-                    previous_action / 10.0,
-                ],
-                axis=1,
-            ).reshape(-1)
             projected_gravity = data.site_xmat[torso_site].reshape(3, 3).T @ np.array(
                 [0.0, 0.0, -1.0]
             )
-            observation = np.concatenate(
-                [
-                    joint_triplets,
-                    data.sensordata[gyro_slice] / 50.0,
-                    command,
-                    projected_gravity,
-                ]
-            ).astype(np.float32)
+            if apollo_runtime:
+                joint_position_offset = (
+                    joint_position_training - reference_position_training
+                ).copy()
+                joint_velocity = (
+                    joint_velocity_training - reference_velocity_training
+                ).copy()
+                actor_previous_action = previous_action.copy()
+                # The C++ runner masks the separately controlled head joints.
+                joint_position_offset[:2] = 0.0
+                joint_velocity[:2] = 0.0
+                actor_previous_action[:2] = 0.0
+                observation = np.concatenate(
+                    [
+                        data.sensordata[gyro_slice],
+                        projected_gravity,
+                        command,
+                        joint_position_offset,
+                        joint_velocity,
+                        actor_previous_action,
+                    ]
+                ).astype(np.float32)
+            else:
+                joint_triplets = np.stack(
+                    [
+                        (joint_position_training - reference_position_training)
+                        / 4.6,
+                        (joint_velocity_training - reference_velocity_training)
+                        / 110.0,
+                        previous_action / 10.0,
+                    ],
+                    axis=1,
+                ).reshape(-1)
+                observation = np.concatenate(
+                    [
+                        joint_triplets,
+                        data.sensordata[gyro_slice] / 50.0,
+                        command,
+                        projected_gravity,
+                    ]
+                ).astype(np.float32)
             if actor_size == 80:
                 moving = float(gait_frequency > 1.0e-8)
                 angle = 2.0 * np.pi * gait_phase
@@ -563,7 +610,14 @@ def main() -> None:
         "action_scale_source": (
             "policy_contract" if args.action_scale is None else "cli_override"
         ),
-        "pd_gains": {"kp": contract.kp, "kd": contract.kd},
+        "pd_gains": (
+            {"profile": contract.gain_profile}
+            if apollo_runtime
+            else {"kp": contract.kp, "kd": contract.kd}
+        ),
+        "observation_layout": (
+            "apollo_runtime" if apollo_runtime else "legacy_run_triplets"
+        ),
         "gait_frequency_hz": (gait_frequency if actor_size == 80 else None),
         "gait_frequency_source": (
             "speed_scaled_motion_reference" if reference_centered else "cli"

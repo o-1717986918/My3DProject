@@ -9,6 +9,7 @@ from brax.training.acme import running_statistics
 
 from my3d_rl.apollo_run_env import (
     ApolloHandoffWaypointRun,
+    ApolloRuntimeRun,
     ApolloWaypointRun,
     apollo_waypoint_command,
 )
@@ -115,6 +116,26 @@ def test_apollo_waypoint_environment_uses_runtime_pose_gains_and_observation():
     expected_kp, expected_kd = apollo_joint_gains(hip_name)
     assert np.isclose(env.mj_model.actuator_gainprm[position_id, 0], expected_kp)
     assert np.isclose(env.mj_model.actuator_gainprm[velocity_id, 0], expected_kd)
+
+
+def test_apollo_runtime_environment_accepts_direct_lateral_command():
+    env = ApolloRuntimeRun(
+        config_overrides={
+            "use_fixed_command": True,
+            "fixed_command": [0.0, 0.5, 0.0],
+            "reset_joint_noise": 0.0,
+            "reset_root_velocity_noise": 0.0,
+            "reset_yaw_range": 0.0,
+        }
+    )
+    state = jax.jit(env.reset)(jax.random.PRNGKey(20_261_406))
+    observation = np.asarray(state.obs["state"])
+
+    assert env.observation_size == {"state": (78,), "privileged_state": (84,)}
+    np.testing.assert_allclose(observation[6:9], [0.0, 0.5, 0.0], atol=1.0e-7)
+    np.testing.assert_allclose(observation[9:11], 0.0, atol=1.0e-7)
+    np.testing.assert_allclose(observation[32:34], 0.0, atol=1.0e-7)
+    np.testing.assert_allclose(observation[55:57], 0.0, atol=1.0e-7)
 
 
 def test_apollo_waypoint_step_recomputes_command_and_is_finite():

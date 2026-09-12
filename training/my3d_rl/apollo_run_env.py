@@ -72,8 +72,8 @@ def apollo_waypoint_command(
     return jp.where(distance <= stop_radius_m, jp.zeros(3), command)
 
 
-class ApolloWaypointRun(DirectionalRun):
-    """Fine-tune the frozen Apollo actor on its real closed-loop command use."""
+class ApolloRuntimeRun(DirectionalRun):
+    """Apollo-native actor boundary, pose and gains for command-level tasks."""
 
     def __init__(
         self,
@@ -86,9 +86,9 @@ class ApolloWaypointRun(DirectionalRun):
     ) -> None:
         contract = contract or load_policy_contract(DEFAULT_CONTRACT)
         if contract.policy_name != "apollo_walk_policy_v1":
-            raise ValueError("ApolloWaypointRun requires apollo_walk_policy_v1")
+            raise ValueError("ApolloRuntimeRun requires apollo_walk_policy_v1")
         super().__init__(
-            config=default_config() if config is None else config,
+            config=run_default_config() if config is None else config,
             config_overrides=config_overrides,
             contract=contract,
             resource_root=resource_root,
@@ -99,23 +99,6 @@ class ApolloWaypointRun(DirectionalRun):
         self._nominal_physical = jp.clip(
             self._nominal_training, self._lowers, self._uppers
         )
-        distance_range = np.asarray(
-            self._config.waypoint_distance_range, dtype=np.float64
-        )
-        bearing_range = np.asarray(
-            self._config.waypoint_bearing_range, dtype=np.float64
-        )
-        if (
-            distance_range.shape != (2,)
-            or bearing_range.shape != (2,)
-            or not np.isfinite(distance_range).all()
-            or not np.isfinite(bearing_range).all()
-            or distance_range[0] <= 0.0
-            or distance_range[0] > distance_range[1]
-            or bearing_range[0] > bearing_range[1]
-            or not 0.0 < self._config.waypoint_arrival_radius < distance_range[0]
-        ):
-            raise ValueError("waypoint curriculum ranges are invalid")
 
     def _supports_gain_profile(self, profile: str) -> bool:
         return profile == "apollo_runtime_per_joint"
@@ -160,10 +143,49 @@ class ApolloWaypointRun(DirectionalRun):
         actor = jp.nan_to_num(actor, nan=0.0, posinf=10.0, neginf=-10.0)
         actor = jp.clip(actor, -10.0, 10.0)
         local_velocity, yaw_rate, upright, torso_height = self._base_diagnostics(data)
-        privileged = jp.concatenate(
-            [actor, local_velocity[:2], jp.array([yaw_rate, upright, torso_height, data.qvel[self._root_dof + 2]])]
+        diagnostics = jp.array(
+            [yaw_rate, upright, torso_height, data.qvel[self._root_dof + 2]]
         )
+        privileged = jp.concatenate([actor, local_velocity[:2], diagnostics])
         return {"state": actor, "privileged_state": privileged}
+
+
+class ApolloWaypointRun(ApolloRuntimeRun):
+    """Fine-tune the frozen Apollo actor on its real closed-loop command use."""
+
+    def __init__(
+        self,
+        config: config_dict.ConfigDict | None = None,
+        config_overrides: dict[str, Any] | None = None,
+        *,
+        contract: PolicyContract | None = None,
+        resource_root: Path = DEFAULT_RESOURCE_ROOT,
+        prefix: str = "train_",
+    ) -> None:
+        super().__init__(
+            config=default_config() if config is None else config,
+            config_overrides=config_overrides,
+            contract=contract,
+            resource_root=resource_root,
+            prefix=prefix,
+        )
+        distance_range = np.asarray(
+            self._config.waypoint_distance_range, dtype=np.float64
+        )
+        bearing_range = np.asarray(
+            self._config.waypoint_bearing_range, dtype=np.float64
+        )
+        if (
+            distance_range.shape != (2,)
+            or bearing_range.shape != (2,)
+            or not np.isfinite(distance_range).all()
+            or not np.isfinite(bearing_range).all()
+            or distance_range[0] <= 0.0
+            or distance_range[0] > distance_range[1]
+            or bearing_range[0] > bearing_range[1]
+            or not 0.0 < self._config.waypoint_arrival_radius < distance_range[0]
+        ):
+            raise ValueError("waypoint curriculum ranges are invalid")
 
     def _waypoint_command(self, data, waypoint_xy):
         current_yaw = jp.arctan2(
