@@ -49,6 +49,8 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
                 require_value("--status-interval"));
         } else if (arg == "--enable-dynamic-pass") {
             config.enable_dynamic_pass = true;
+        } else if (arg == "--disable-dynamic-pass") {
+            config.enable_dynamic_pass = false;
         }
     }
 

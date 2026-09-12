@@ -130,6 +130,15 @@ Stop the complete team with:
 ./kill.sh
 ```
 
+Run a browser-rendered 7v7 against the frozen pristine Apollo checkout with:
+
+```bash
+scripts/run_web_match_apollo_rebuild_vs_base.sh 120000
+```
+
+The match uses the default-on dynamic-pass selector. Set
+`APOLLO_REBUILD_ENABLE_DYNAMIC_PASS=0` to run the clean A/B baseline.
+
 ### Run a single agent
 
 ```bash
@@ -148,11 +157,18 @@ Stop the complete team with:
 | `--host` | `-h` | `127.0.0.1` | RCSSServerMJ host |
 | `--port` | `-p` | `60000` | RCSSServerMJ agent port |
 | `--asset-root` | — | `assets` | Root directory for runtime motion assets |
-| `--enable-dynamic-pass` | — | disabled | Enable the experimental, narrow 2 m straight-pass selector |
+| `--enable-dynamic-pass` | — | enabled | Enable the narrow 2 m straight-pass selector |
+| `--disable-dynamic-pass` | — | — | Disable the selector for baseline and side-swapped A/B matches |
 
-`--enable-dynamic-pass` is an A/B-only candidate. It applies only to the active
+The dynamic-pass selector is enabled by default and applies only to the active
 player during `PlayOn`; all other commands and roles retain the baseline path.
-It must not be described as general passing, dribbling, or shooting support.
+It remains a narrow 2 m straight-pass capability under continued match
+evaluation, not general passing, dribbling, or shooting support. Use
+`--disable-dynamic-pass` for a clean baseline. The selector masks both
+independently controlled head joints, matching its training contract. With
+status telemetry enabled, candidate and activation states emit
+`APOLLO_REBUILD_DYNAMIC_PASS_CANDIDATE/START` lines containing the exact
+98-element observation for offline domain-shift audits.
 
 ## Package for Deployment
 
@@ -213,8 +229,8 @@ server ──► world ──► decision ──► behavior ──► motor act
 
 - `assets/networks/walk/policy.onnx` — learned walking policy.
 - `assets/networks/getup/policy.onnx` — learned get-up policy.
-- `assets/networks/dynamic_pass/selector.onnx` — experimental frozen selector,
-  loaded only with `--enable-dynamic-pass`.
+- `assets/networks/dynamic_pass/selector.onnx` — frozen narrow-pass selector,
+  loaded by default unless `--disable-dynamic-pass` is supplied.
 - `assets/keyframes/neutral.yaml` — neutral-pose keyframe.
 
 All runtime assets are included in deployment archives produced by `pack.sh`.

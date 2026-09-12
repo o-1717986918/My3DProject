@@ -11,8 +11,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
@@ -108,6 +110,7 @@ std::string AgentApp::process_perception_message(const std::string& message) {
     const auto command = decision_manager_.decide(snapshot);
     const bool reset = last_command_variant_index_ != command.index();
     last_command_variant_index_ = command.index();
+    const std::string previous_active_motion = last_active_motion_;
 
     std::vector<std::string> nodes;
     if (const auto* beam = std::get_if<decision::BeamCommand>(&command)) {
@@ -127,6 +130,39 @@ std::string AgentApp::process_perception_message(const std::string& message) {
         if (motion_result.handled) {
             const auto motor_nodes = server::ActionEncoder::encode_motor_actions(motion_result.joint_targets, robot_model_);
             nodes.insert(nodes.end(), motor_nodes.begin(), motor_nodes.end());
+        }
+    }
+
+    const bool dynamic_pass_started =
+        last_active_motion_.rfind("DynamicPass-r", 0) == 0 &&
+        previous_active_motion.rfind("DynamicPass-r", 0) != 0;
+    const bool dynamic_pass_candidate_sample =
+        motion_manager_.dynamic_pass_release_candidate() &&
+        config_.status_interval > 0 &&
+        (processed_frames_ + 1U) % config_.status_interval == 0U;
+    if (config_.enable_dynamic_pass &&
+        (dynamic_pass_started || dynamic_pass_candidate_sample)) {
+        try {
+            const auto observation =
+                behavior::DynamicPassRunner::build_selector_observation(
+                    snapshot, robot_model_);
+            std::ostringstream trace;
+            trace << std::setprecision(9)
+                  << (dynamic_pass_started
+                          ? "APOLLO_REBUILD_DYNAMIC_PASS_START"
+                          : "APOLLO_REBUILD_DYNAMIC_PASS_CANDIDATE")
+                  << " t=" << snapshot.server_time
+                  << " player=" << snapshot.player_number
+                  << " motion=" << last_active_motion_
+                  << " observation=";
+            for (std::size_t index = 0; index < observation.size(); ++index) {
+                if (index > 0U) trace << ',';
+                trace << observation[index];
+            }
+            std::cerr << trace.str() << '\n';
+        } catch (const std::exception&) {
+            // The selector itself rejects incomplete joint state; telemetry
+            // must never turn that safe rejection into an agent crash.
         }
     }
 

@@ -231,4 +231,11 @@ if(BUILD_TESTING)
     target_link_libraries(dynamic_pass_runner_test PRIVATE behavior_core)
     add_test(NAME dynamic_pass_runner_test COMMAND dynamic_pass_runner_test)
 
+    add_executable(runtime_config_test
+        tests/runtime_config_test.cc
+        src/app/runtime_config.cc
+    )
+    target_include_directories(runtime_config_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME runtime_config_test COMMAND runtime_config_test)
+
 endif()

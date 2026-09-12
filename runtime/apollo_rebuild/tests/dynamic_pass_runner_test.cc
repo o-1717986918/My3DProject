@@ -30,10 +30,13 @@ world::WorldSnapshot make_snapshot(const robot::T1RobotModel& robot_model) {
     const auto& names = robot_model.readable_joint_names();
     for (std::size_t i = 0; i < names.size(); ++i) {
         double offset = 0.0;
+        if (i == 0U) offset = -0.35;
+        if (i == 1U) offset = 0.60;
         if (i == 17U) offset = 0.10;
         snapshot.self.joint_positions_deg[names[i]] =
             math::rad_to_deg(behavior::kDefaultPosRad[i] + offset);
-        snapshot.self.joint_velocities_deg_s[names[i]] = 0.0;
+        snapshot.self.joint_velocities_deg_s[names[i]] =
+            i < 2U ? math::rad_to_deg(2.0 + i) : 0.0;
     }
     return snapshot;
 }
@@ -62,7 +65,11 @@ int main() {
     assert(near(observation[1], -2.0));
     assert(near(observation[2], 0.5));
     assert(near(observation[5], -1.0));
+    assert(near(observation[6], 0.0));
+    assert(near(observation[7], 0.0));
     assert(near(observation[6 + 17], 0.10));
+    assert(near(observation[29], 0.0));
+    assert(near(observation[30], 0.0));
     assert(near(observation[75], 0.34375));
     assert(near(observation[76], 0.01));
     assert(near(observation[77], -0.49));

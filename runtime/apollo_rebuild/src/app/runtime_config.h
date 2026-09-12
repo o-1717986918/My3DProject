@@ -19,7 +19,7 @@ struct RuntimeConfig {
     std::string config_root{"config"};
     std::string log_level{"info"};
     std::size_t status_interval{0};
-    bool enable_dynamic_pass{false};
+    bool enable_dynamic_pass{true};
 
     /// Parses supported command-line options and preserves unspecified defaults.
     static RuntimeConfig from_args(int argc, char* argv[]);

@@ -1843,3 +1843,61 @@ removed. The useful result is a narrower training target: learn contact timing
 and action choice jointly from live approach state, with explicit forward and
 lateral ball-outcome terms. Logs remain under
 `/home/win98/rl_runs/dynamic-pass-server/prototype-screen-*`.
+
+## Dynamic-pass selector quality-ranking ablation — 2026-09-12
+
+The prototype bank already stores a continuous physical score that penalizes
+range, lateral and speed error, missed contact and falls. A temporary loss kept
+the hard success classifier intact and ranked only pairs for which both
+prototypes passed that hard contract.
+
+Using identical seed 10807, split, network and calibration settings, the ranked
+candidate improved the source blind split from 71/102 to 75/102 successes. It
+did not generalize:
+
+| independent corpus | binary selector | ranked selector | falls |
+|---|---:|---:|---:|
+| seed `10911` | 87/126 | 80/126 | 0 / 0 |
+| seed `10921` | 93/127 | 91/127 | 0 / 0 |
+
+The source-split gain was overfitting. The loss, CLI option and tests were
+removed, and no ONNX was mounted. Artifacts remain under
+`/home/win98/rl_runs/kick-switch-selector-binary-s10807*` and
+`/home/win98/rl_runs/kick-switch-selector-quality-rank025-s10807*`.
+The next kick experiment must use RCSSServerMJ release states and measured ball
+outcomes instead of adding another offline loss to the MuJoCo-only corpus.
+
+## Dynamic-pass live observation contract audit — 2026-09-12
+
+The runtime now emits the exact 98-element selector input for candidate and
+activation states. Four pre-fix RCSSServerMJ activations had normalized RMS
+values of 8.60, 10.44, 13.64 and 8.98; the training-corpus median is 0.49.
+Both live head joints dominated the mismatch. Apollo Walk already masks those
+fields because a separate tracker controls the head, while the dynamic selector
+had accidentally exposed them. The selector input now masks head position,
+velocity and previous action in the same way, with a regression test.
+
+After the correction, the same 12-second near-ball scene kept all 14 agents
+alive but no longer crossed the frozen 0.96 threshold; its maximum probability
+was 0.933. This shows the earlier activations were driven partly by an
+out-of-contract feature, so lowering the threshold would preserve the wrong
+behavior. Remaining candidate observations are still strongly out of
+distribution, especially ball height, leg velocities and the broad
+0.25--0.50 m by +/-0.15 m release geometry. Logs are under
+`/home/win98/rl_runs/dynamic-pass-server/observation-audit{,-head-mask}-s20260912-*`.
+The selector is now enabled by default by product decision, with
+`--disable-dynamic-pass` retained for clean A/B runs. This policy change does
+not remove the remaining domain shift; future work needs server-state outcome
+data, not another release relaxation.
+
+## Dynamic-pass default-on full-match smoke — 2026-09-12
+
+A natural 1,200-second `ssim26` 7v7 match ran the rebuild on the left with the
+selector explicitly enabled against pristine Apollo on the right. It reached
+GameOver at 7:1, with 73 `DynamicPass` activations, 606 sampled release-candidate
+cycles and 34 sampled `GetUp` cycles on the rebuild side. The rebuild recorded
+no illegal-defense event; pristine Apollo on the right recorded 106, so this
+single score cannot be attributed to the selector and is not a side-swapped
+/A/B result. It establishes only that default-on execution completes a full
+match without a client failure. Logs are under
+`/home/win98/rl_runs/apollo-vs-base-web-match-20260912-101815`.

@@ -145,6 +145,14 @@ std::vector<float> DynamicPassRunner::build_selector_observation(
     fill_joint_obs(
         positions.data(), velocities.data(), previous.data(), snapshot,
         robot_model, zero_action);
+    // Head joints are controlled by an independent ball tracker in the live
+    // agent. The frozen selector, like Apollo Walk, was trained with those
+    // actor fields masked.
+    for (std::size_t index = 0; index < 2U; ++index) {
+        positions[index] = 0.0F;
+        velocities[index] = 0.0F;
+        previous[index] = 0.0F;
+    }
     observation.insert(observation.end(), positions.begin(), positions.end());
     observation.insert(observation.end(), velocities.begin(), velocities.end());
     observation.insert(observation.end(), previous.begin(), previous.end());
