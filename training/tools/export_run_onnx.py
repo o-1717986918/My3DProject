@@ -44,9 +44,12 @@ def main() -> None:
     learned = policy_params["params"]
     legacy_layout = "fc1" in learned and "layer_norm" in learned
     apollo_layout = "fc1" in learned and "layer_norm" not in learned
+    apollo_adapter_layout = apollo_layout and "adapter_fc1" in learned
     standard_normal_layout = "MLP_0" in learned and "Dense_0" in learned
     if legacy_layout or apollo_layout:
-        actor_size = int(learned["fc1"]["kernel"].shape[0])
+        actor_size = int(
+            learned.get("adapter_fc1", learned["fc1"])["kernel"].shape[0]
+        )
     elif standard_normal_layout:
         actor_size = int(learned["MLP_0"]["hidden_0"]["kernel"].shape[0])
     else:
@@ -54,7 +57,7 @@ def main() -> None:
             "unsupported actor parameter layout; expected legacy fc layers or "
             "the standard Brax normal-policy MLP"
         )
-    if actor_size not in (78, 80):
+    if actor_size not in (78, 80, 84):
         raise ValueError(f"unsupported actor observation size {actor_size}")
     contract_name = profile.policy_contract
     contract = load_policy_contract(
@@ -94,6 +97,46 @@ def main() -> None:
             )
         )
         previous = "observations_normalized"
+    policy_input = previous
+
+    if apollo_adapter_layout:
+        base_actor_size = int(learned["fc1"]["kernel"].shape[0])
+        if actor_size != 84 or base_actor_size != 78:
+            raise ValueError(
+                "Apollo goalkeeper adapter requires an 84-value input and a "
+                "frozen 78-value base actor"
+            )
+        initializers.extend(
+            [
+                numpy_helper.from_array(
+                    np.array([0], dtype=np.int64), "base_slice_starts"
+                ),
+                numpy_helper.from_array(
+                    np.array([78], dtype=np.int64), "base_slice_ends"
+                ),
+                numpy_helper.from_array(
+                    np.array([1], dtype=np.int64), "base_slice_axes"
+                ),
+                numpy_helper.from_array(
+                    np.array([1], dtype=np.int64), "base_slice_steps"
+                ),
+            ]
+        )
+        nodes.append(
+            helper.make_node(
+                "Slice",
+                [
+                    policy_input,
+                    "base_slice_starts",
+                    "base_slice_ends",
+                    "base_slice_axes",
+                    "base_slice_steps",
+                ],
+                ["apollo_base_observations"],
+                name="apollo_base_observation_slice",
+            )
+        )
+        previous = "apollo_base_observations"
 
     if legacy_layout or apollo_layout:
         for layer in ("fc1", "fc2", "fc3", "fc4"):
@@ -213,6 +256,62 @@ def main() -> None:
             )
         )
 
+    actions_for_clip = "actions_raw"
+    if apollo_adapter_layout:
+        # Match ApolloGoalkeeperPolicyWithStd exactly: the frozen Apollo actor
+        # is clipped before the bounded residual is added, then the combined
+        # action is clipped once more below.
+        nodes.append(
+            helper.make_node(
+                "Clip",
+                ["actions_raw", "action_min", "action_max"],
+                ["apollo_base_actions_clipped"],
+                name="apollo_base_action_clip",
+            )
+        )
+        adapter_previous = policy_input
+        for layer in ("adapter_fc1", "adapter_fc2", "adapter_fc3"):
+            weight_name = f"{layer}.weight"
+            bias_name = f"{layer}.bias"
+            raw_name = f"{layer}_raw"
+            values = learned[layer]
+            initializers.extend(
+                [
+                    _tensor(weight_name, np.asarray(values["kernel"]).T),
+                    _tensor(bias_name, np.asarray(values["bias"])),
+                ]
+            )
+            nodes.append(
+                helper.make_node(
+                    "Gemm",
+                    [adapter_previous, weight_name, bias_name],
+                    [raw_name],
+                    name=f"{layer}_gemm",
+                    transB=1,
+                )
+            )
+            if layer != "adapter_fc3":
+                activated = f"{layer}_elu"
+                nodes.append(
+                    helper.make_node("Elu", [raw_name], [activated], name=activated)
+                )
+                adapter_previous = activated
+            else:
+                nodes.append(
+                    helper.make_node(
+                        "Tanh", [raw_name], ["adapter_residual"], name="adapter_tanh"
+                    )
+                )
+        nodes.append(
+            helper.make_node(
+                "Add",
+                ["apollo_base_actions_clipped", "adapter_residual"],
+                ["actions_with_adapter"],
+                name="goalkeeper_adapter_add",
+            )
+        )
+        actions_for_clip = "actions_with_adapter"
+
     initializers.extend(
         [
             _tensor("action_min", np.array(contract.action_clip[0], dtype=np.float32)),
@@ -222,7 +321,7 @@ def main() -> None:
     nodes.append(
         helper.make_node(
             "Clip",
-            ["actions_raw", "action_min", "action_max"],
+            [actions_for_clip, "action_min", "action_max"],
             ["actions"],
             name="action_clip",
         )

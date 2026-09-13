@@ -5,7 +5,7 @@ import onnx
 import onnxruntime as ort
 from onnx import TensorProto, helper, numpy_helper
 
-from my3d_rl.apollo_walk_jax import load_apollo_walk_jax
+from my3d_rl.apollo_walk_jax import ApolloWalkJax, load_apollo_walk_jax
 
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
@@ -108,3 +108,44 @@ def test_apollo_walk_jax_loads_fused_training_export(tmp_path: Path):
     )
     expected = session.run(None, {"observations": observations})[0]
     np.testing.assert_allclose(actual, expected, atol=2.0e-5, rtol=1.0e-5)
+
+
+def test_goalkeeper_adapter_uses_full_observation_and_78_value_base():
+    base_kernels = (
+        np.zeros((78, 512), dtype=np.float32),
+        np.zeros((512, 256), dtype=np.float32),
+        np.zeros((256, 128), dtype=np.float32),
+        np.zeros((128, 23), dtype=np.float32),
+    )
+    base_biases = tuple(
+        np.zeros(width, dtype=np.float32) for width in (512, 256, 128, 23)
+    )
+    adapter_kernels = (
+        np.zeros((84, 128), dtype=np.float32),
+        np.zeros((128, 64), dtype=np.float32),
+        np.zeros((64, 23), dtype=np.float32),
+    )
+    adapter_kernels[0][83, 0] = 1.0
+    adapter_kernels[1][0, 0] = 1.0
+    adapter_kernels[2][0, 0] = 1.0
+    policy = ApolloWalkJax(
+        kernels=base_kernels,
+        biases=base_biases,
+        observation_mean=np.zeros(84, dtype=np.float32),
+        observation_std=np.ones(84, dtype=np.float32),
+        layer_norm_scale=None,
+        layer_norm_bias=None,
+        adapter_kernels=adapter_kernels,
+        adapter_biases=tuple(
+            np.zeros(width, dtype=np.float32) for width in (128, 64, 23)
+        ),
+    )
+    observation = np.zeros((2, 84), dtype=np.float32)
+    observation[1, 83] = 1.0
+
+    actions = np.asarray(policy(observation))
+
+    assert policy.observation_size == 84
+    np.testing.assert_allclose(actions[0], 0.0)
+    assert actions[1, 0] > 0.7
+    np.testing.assert_allclose(actions[1, 1:], 0.0)

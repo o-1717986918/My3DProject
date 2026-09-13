@@ -83,6 +83,59 @@ class ApolloPolicyWithStd(linen.Module):
         return mean, jp.broadcast_to(std, mean.shape)
 
 
+class ApolloGoalkeeperPolicyWithStd(linen.Module):
+    """Frozen Apollo actor plus a trainable shot-conditioned residual adapter."""
+
+    init_noise_std: float = float(np.exp(-2.5))
+
+    @linen.compact
+    def __call__(self, observations: jp.ndarray) -> tuple[jp.ndarray, jp.ndarray]:
+        base_observation = observations[..., :78]
+        hidden = linen.elu(
+            linen.Dense(512, precision=lax.Precision.HIGHEST, name="fc1")(
+                base_observation
+            )
+        )
+        hidden = linen.elu(
+            linen.Dense(256, precision=lax.Precision.HIGHEST, name="fc2")(hidden)
+        )
+        hidden = linen.elu(
+            linen.Dense(128, precision=lax.Precision.HIGHEST, name="fc3")(hidden)
+        )
+        base_mean = linen.Dense(
+            23, precision=lax.Precision.HIGHEST, name="fc4"
+        )(hidden)
+        base_mean = lax.stop_gradient(jp.clip(base_mean, -5.0, 5.0))
+
+        adapter = linen.elu(
+            linen.Dense(
+                128,
+                precision=lax.Precision.HIGHEST,
+                name="adapter_fc1",
+            )(observations)
+        )
+        adapter = linen.elu(
+            linen.Dense(
+                64,
+                precision=lax.Precision.HIGHEST,
+                name="adapter_fc2",
+            )(adapter)
+        )
+        residual = linen.Dense(
+            23,
+            precision=lax.Precision.HIGHEST,
+            kernel_init=linen.initializers.zeros_init(),
+            bias_init=linen.initializers.zeros_init(),
+            name="adapter_fc3",
+        )(adapter)
+        mean = jp.clip(base_mean + jp.tanh(residual), -5.0, 5.0)
+        std = self.param(
+            "std",
+            lambda _: jp.full((23,), self.init_noise_std, dtype=jp.float32),
+        )
+        return mean, jp.broadcast_to(std, mean.shape)
+
+
 def make_legacy_ppo_networks(
     observation_size: types.ObservationSize,
     action_size: int,
@@ -153,9 +206,16 @@ def make_apollo_ppo_networks(
     if action_size != 23 or not isinstance(observation_size, Mapping):
         raise ValueError("Apollo policy requires mapped observations and 23 actions")
     actor_observation_size = observation_size["state"][-1]
-    if actor_observation_size != 78:
-        raise ValueError("Apollo policy requires the exact 78-value observation")
-    module = ApolloPolicyWithStd(init_noise_std=init_noise_std)
+    if actor_observation_size not in (78, 84):
+        raise ValueError(
+            "Apollo policy requires the 78-value Walk observation or the "
+            "84-value goalkeeper extension"
+        )
+    module = (
+        ApolloGoalkeeperPolicyWithStd(init_noise_std=init_noise_std)
+        if actor_observation_size == 84
+        else ApolloPolicyWithStd(init_noise_std=init_noise_std)
+    )
 
     def apply(processor_params: Any, policy_params: Any, observation: Any):
         actor_observation = preprocess_observations_fn(
@@ -270,11 +330,22 @@ def load_apollo_onnx_teacher_params(initial_params: Any, model_path: Path) -> An
         if destination == "fc1":
             bias = bias - (mean / scale) @ kernel
             kernel = kernel / scale[:, None]
-        if learned[destination]["kernel"].shape != kernel.shape:
-            raise ValueError(
-                f"Apollo {source} shape {kernel.shape} does not match initialized "
-                f"{destination} shape {learned[destination]['kernel'].shape}"
-            )
-        learned[destination]["kernel"] = jp.asarray(kernel)
+        initialized_kernel = learned[destination]["kernel"]
+        if destination == "fc1" and initialized_kernel.shape[0] > kernel.shape[0]:
+            if initialized_kernel.shape[1] != kernel.shape[1]:
+                raise ValueError(
+                    f"Apollo {source} width {kernel.shape[1]} does not match "
+                    f"initialized {destination} width {initialized_kernel.shape[1]}"
+                )
+            initialized_kernel = initialized_kernel.at[: kernel.shape[0]].set(kernel)
+            initialized_kernel = initialized_kernel.at[kernel.shape[0] :].set(0.0)
+            learned[destination]["kernel"] = initialized_kernel
+        else:
+            if initialized_kernel.shape != kernel.shape:
+                raise ValueError(
+                    f"Apollo {source} shape {kernel.shape} does not match initialized "
+                    f"{destination} shape {initialized_kernel.shape}"
+                )
+            learned[destination]["kernel"] = jp.asarray(kernel)
         learned[destination]["bias"] = jp.asarray(bias)
     return params

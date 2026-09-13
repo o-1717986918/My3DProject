@@ -305,6 +305,29 @@ PROFILES = {
         learning_rate_max=1.0e-5,
         init_noise_std=float(np.exp(-2.5)),
     ),
+    # Freeze Apollo's imported 78-value actor and add a zero-output residual
+    # adapter over the six goalkeeper task features and live body state.
+    "apollo_goalkeeper_warmstart_v1": PpoProfile(
+        name="apollo_goalkeeper_warmstart_v1",
+        policy_hidden_layer_sizes=(512, 256, 128),
+        value_hidden_layer_sizes=(512, 256, 128),
+        distribution_type="normal",
+        unroll_length=24,
+        batch_size=256,
+        num_minibatches=32,
+        num_updates_per_batch=2,
+        discounting=0.995,
+        entropy_cost=5.0e-4,
+        learning_rate=1.0e-4,
+        normalize_observations=False,
+        adaptive_kl=True,
+        factory_kind="apollo_teacher",
+        policy_contract="apollo_goalkeeper_policy_v1",
+        desired_kl=0.01,
+        learning_rate_min=1.0e-5,
+        learning_rate_max=3.0e-4,
+        init_noise_std=float(np.exp(-2.5)),
+    ),
     # Phase-aware extension of the exact legacy teacher.  The two new first
     # layer rows are initialized to zero, so bootstrap actions remain exactly
     # equal to the 78-value ONNX teacher before optimization.

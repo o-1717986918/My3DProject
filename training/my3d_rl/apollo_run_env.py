@@ -85,8 +85,11 @@ class ApolloRuntimeRun(DirectionalRun):
         prefix: str = "train_",
     ) -> None:
         contract = contract or load_policy_contract(DEFAULT_CONTRACT)
-        if contract.policy_name != "apollo_walk_policy_v1":
-            raise ValueError("ApolloRuntimeRun requires apollo_walk_policy_v1")
+        if contract.policy_name not in {
+            "apollo_walk_policy_v1",
+            "apollo_goalkeeper_policy_v1",
+        }:
+            raise ValueError("ApolloRuntimeRun requires an Apollo policy contract")
         super().__init__(
             config=run_default_config() if config is None else config,
             config_overrides=config_overrides,

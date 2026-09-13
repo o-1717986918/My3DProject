@@ -101,6 +101,7 @@ def default_config() -> config_dict.ConfigDict:
         sim_dt=0.005,
         episode_length=500,
         impl="jax",
+        warp_graph_mode="auto",
         naconmax=2048,
         njmax=256,
         kp=25.0,
@@ -261,7 +262,26 @@ class DirectionalRun(mjx_env.MjxEnv):
         )
         self._mj_model.opt.timestep = self.sim_dt
         self._configure_pd_actuators()
-        self._mjx_model = mjx.put_model(self._mj_model, impl=self._config.impl)
+        graph_mode = None
+        if self._config.impl == "warp":
+            graph_mode_name = str(self._config.warp_graph_mode).upper()
+            if graph_mode_name != "AUTO":
+                from mujoco.mjx.warp import types as mjxw_types
+
+                try:
+                    graph_mode = getattr(mjxw_types.GraphMode, graph_mode_name)
+                except AttributeError as exc:
+                    raise ValueError(
+                        "warp_graph_mode must be auto, none, jax, warp, or "
+                        "warp_staged"
+                    ) from exc
+        elif self._config.warp_graph_mode != "auto":
+            raise ValueError("warp_graph_mode requires impl='warp'")
+        self._mjx_model = mjx.put_model(
+            self._mj_model,
+            impl=self._config.impl,
+            graph_mode=graph_mode,
+        )
 
         self._joint_qpos = np.array(
             [
@@ -321,12 +341,13 @@ class DirectionalRun(mjx_env.MjxEnv):
         )
 
         if (
-            self.contract.observation_size not in (78, 80)
+            self.contract.observation_size not in (78, 80, 84)
             or self.contract.action_size != 23
         ):
             raise ValueError(
                 "run policies must preserve 23 actions and use the 78-value "
-                "legacy or 80-value phase-aware actor boundary"
+                "Apollo/legacy, 80-value phase-aware, or 84-value goalkeeper "
+                "actor boundary"
             )
         self._phase_observation = self.contract.observation_size == 80
         self._reference_centered = (

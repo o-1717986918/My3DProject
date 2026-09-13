@@ -166,6 +166,41 @@ both-sign 150-degree target evaluations; PPO aggregate reward is not an
 acceptance result.  The first 196,608-step experiment was rejected because it
 did not reduce falls in any of those three sets.
 
+Train and independently replay the Apollo-compatible goalkeeper task with:
+
+```bash
+PYTHONPATH=training python training/tools/train_run.py \
+  --stage apollo_goalkeeper_block --impl warp --warp-graph-mode none \
+  --num-envs 32 --num-timesteps 196608 --num-evals 2 \
+  --num-eval-envs 16 --network-profile apollo_goalkeeper_warmstart_v1 \
+  --bootstrap-onnx runtime/apollo_rebuild/assets/networks/walk/policy.onnx \
+  --goalkeeper-shot-speed-range 5.0 5.5 \
+  --goalkeeper-shot-lateral-range 0.5 0.9 \
+  --goalkeeper-shot-start-distance-range 8.0 9.0 \
+  --run-dir /home/win98/rl_runs/goalkeeper-block-<name>
+
+PYTHONPATH=training JAX_PLATFORMS=cpu \
+  python training/tools/export_run_onnx.py \
+  /home/win98/rl_runs/goalkeeper-block-<name>/checkpoints/<step> \
+  --network-profile apollo_goalkeeper_warmstart_v1 \
+  --output /home/win98/rl_runs/goalkeeper-block-<name>/policy.onnx \
+  --parity-output /home/win98/rl_runs/goalkeeper-block-<name>/onnx-parity.json
+
+PYTHONPATH=training python training/tools/evaluate_goalkeeper_block.py \
+  /home/win98/rl_runs/goalkeeper-block-<name>/policy.onnx \
+  --impl warp --warp-graph-mode none --episodes 64 \
+  --output /home/win98/rl_runs/goalkeeper-block-<name>/evaluation.json
+```
+
+The actor is 84 values: the frozen 78-value Apollo Walk branch plus six
+body-local incoming-ball values consumed by a zero-output residual adapter.
+The critic is 90 values. `--warp-graph-mode none` is the verified compatibility
+path for hosts that report Warp `unknown stream` during graph capture; leave it
+at `auto` where graph capture is stable. The first critic-only, direct
+zero-extension and residual-adapter policies were all rejected for no save-rate
+gain, so this command documents a reusable experiment path, not an accepted
+runtime goalkeeper model.
+
 The first broad `soccer_omni` run is a rejected baseline: random-command fall
 rate improved, but the frozen CPU suite stayed at 5/8. The follow-up must start
 again from the retained phase-v2 checkpoint and use axis-aligned sampling plus

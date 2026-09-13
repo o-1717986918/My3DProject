@@ -1,5 +1,6 @@
 import numpy as np
 
+from my3d_rl.goalkeeper_env import default_config as goalkeeper_default_config
 from my3d_rl.ppo_profile import get_ppo_profile
 from tools.train_run import STAGES, _compatible_num_evals, _effective_timesteps
 
@@ -30,6 +31,20 @@ def test_apollo_handoff_stage_uses_runtime_command_surface_and_continuity_cost()
     assert stage["reset_joint_velocity_noise"] == 0.0
     assert stage["reset_policy_action_noise"] == 0.0
     assert stage["reward.handoff_action"] < 0.0
+
+
+def test_goalkeeper_stage_keeps_apollo_actor_surface_and_valid_shot_region():
+    profile = get_ppo_profile("apollo_goalkeeper_warmstart_v1")
+    config = goalkeeper_default_config()
+
+    assert "apollo_goalkeeper_block" in STAGES
+    assert profile.policy_contract == "apollo_goalkeeper_policy_v1"
+    assert config.warp_graph_mode == "auto"
+    assert config.fixed_command == [0.0, 0.0, 0.0]
+    assert config.shot_speed_range == [5.0, 7.0]
+    assert config.shot_lateral_range == [1.2, 1.8]
+    assert config.shot_lateral_range[1] < config.goal_half_width_m
+    assert config.reward.goalkeeper_concede < 0.0
 
 
 def test_motion_reference_initialization_is_scoped_to_motion_stages():

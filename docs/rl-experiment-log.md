@@ -1925,3 +1925,86 @@ not further relax the release geometry. The merged corpus is
 `/home/win98/rl_runs/dynamic-pass-server-outcomes-s20260912-v1.npz`; source
 logs are in the adjacent `apollo-rebuild-vs-base-20260912-110539-left` and
 `dynamic-pass-natural-outcomes{,-right}-s20260912-v1` directories.
+
+## Dynamic-pass balanced server bank extension — 2026-09-13
+
+Two balanced forced-prototype collections added 113 complete RCSSServerMJ
+action outcomes across the ten frozen prototypes. 111 executors remained
+upright and seven outcomes met the narrow 2 m straight-pass label. Rollout 17
+had the best median canonical forward displacement (`1.43 m`); rollout 117 had
+the smallest median absolute lateral error (`0.14 m`) but only `1.06 m` median
+forward displacement. Rollout 302 produced only `0.43 m` median forward
+displacement and two of its 12 outcomes were not upright.
+
+The sparse positives and large within-prototype variance do not support fitting
+another 98-dimensional selector. The data are retained for prototype pruning
+and to define a server-grounded contact curriculum; no runtime default changed.
+Corpora and summaries are under
+`/home/win98/rl_runs/dynamic-pass-forced-bank-s20260913-v2` and
+`/home/win98/rl_runs/dynamic-pass-forced-bank-20260913-220420`.
+
+## Apollo-compatible goalkeeper block first formal run — 2026-09-13
+
+`ApolloGoalkeeperBlock` preserves the deployed Apollo Walk `78 -> 23` actor
+contract. It exposes incoming-ball state only to the 90-value privileged
+critic and asks the actor to respond through the existing lateral command.
+Starting from the frozen Apollo Walk ONNX, a JAX run completed 1,179,648 PPO
+steps and exported `goalkeeper-block-formal.onnx`; JAX/ONNX parity passed with
+maximum absolute error `1.67e-6`.
+
+The final model did not improve the held-out target distribution: 32/32 shots
+were conceded, with zero keeper contacts, zero saves and zero falls, matching
+the frozen-Walk failure count. The model is not mounted. Artifacts are under
+`/home/win98/rl_runs/goalkeeper-block-s20260913-v1/formal-conservative-s20261521-jax-v1`.
+The next attempt uses fixed-shot cells to find a learnable curriculum start
+before progressively expanding to the measured `5--7 m/s`, `1.2--1.8 m`
+server failure region.
+
+## Goalkeeper fixed cells and actor-visible attempts — 2026-09-13
+
+Fixed-cell replay first separated a usable curriculum start from shots that the
+current Walk cannot reach. At `5.0 m/s`, `8.5 m` start distance and `0.6 m`
+lateral offset, frozen Apollo Walk contacted all `16/16` shots and saved
+`12/16`, with no falls. At `0.9 m` and `1.2 m` it made no contact and conceded
+all `16/16` shots in each cell. A `4.0 m/s`, `1.2 m` cell was discarded because
+all shots stopped before reaching the goal plane. Reports are under
+`/home/win98/rl_runs/goalkeeper-block-s20260913-v1/fixed-cell-apollo-walk-v1`.
+
+The MJX Warp backend initially failed during graph capture with
+`RuntimeError: Warp error: unknown stream`. The training and evaluation CLIs
+now expose MuJoCo's graph mode explicitly; `--warp-graph-mode none` completed a
+full 196,608-step GPU smoke instead of relying on an XLA command-buffer
+workaround. That smoke preserved zero falls but reduced the evaluation from
+`2/16` saves and `6/16` contacts to `1/16` for both measures, so its model was
+rejected. The retained engineering artifact is the verified backend fallback,
+not the policy. Its run is
+`/home/win98/rl_runs/goalkeeper-block-s20260913-v1/progressive-easy-warp-none-s20261522-v1`.
+
+Two actor-visible designs then added six body-local ball values: position,
+velocity and time to the goal plane. Directly zero-extending Apollo's first
+layer still produced only `1/16` saves and contacts after 196,608 steps. A
+longer run remained at `1/16` through 393,216 steps; the new input-row norm was
+only `0.0016` while the imported first-layer norm was about `136`, showing that
+the conservative Apollo learning rate effectively froze the new signal. These
+runs are `progressive-easy-ball84-warp-none-s20261522-v1` and
+`progressive-easy-ball84-formal-warp-none-s20261522-v1` under the same
+goalkeeper experiment root.
+
+The replacement architecture freezes the complete 78-value Apollo actor and
+adds a trainable `84 -> 128 -> 64 -> 23` bounded residual adapter whose final
+layer starts at zero. Its initial action is exactly Apollo Walk, but the first
+196,608-step result again regressed from `2/16` saves and `6/16` contacts to
+`1/16` for both, with zero falls. The checkpoint exports as a real 84-input
+ONNX; JAX/ONNX parity passed on 256 samples with maximum absolute error
+`1.43e-6`. An independent fixed-speed ONNX replay then produced `0/16`
+contacts, `0/16` saves, `16/16` concessions and zero falls. The model is not
+mounted. Checkpoint, ONNX, parity and evaluation reports are in
+`/home/win98/rl_runs/goalkeeper-block-s20260913-v1/progressive-easy-adapter-warp-none-s20261522-v1`.
+
+This rejects both “hide ball state in the critic” and “short PPO adjustment of
+an otherwise frozen Walk” as immediate goalkeeper solutions. The reusable
+result is a tested 84-value task contract, frozen-base adapter, exact ONNX
+export, fixed-shot evaluator and stable Warp execution path. The next action
+candidate must introduce an explicit body-block or dive motion prior and train
+its transition/recovery, rather than extending the same lateral-Walk residual
+run.

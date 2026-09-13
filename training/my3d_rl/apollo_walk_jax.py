@@ -20,11 +20,23 @@ class ApolloWalkJax:
     observation_std: jp.ndarray
     layer_norm_scale: jp.ndarray | None
     layer_norm_bias: jp.ndarray | None
+    adapter_kernels: tuple[jp.ndarray, ...]
+    adapter_biases: tuple[jp.ndarray, ...]
+
+    @property
+    def observation_size(self) -> int:
+        return int(self.observation_mean.shape[0])
 
     def __call__(self, observation: jp.ndarray) -> jp.ndarray:
         normalized = (observation - self.observation_mean) / self.observation_std
+        # Goalkeeper exports keep Apollo's 78-value actor frozen and feed the
+        # complete 84-value observation only to the residual adapter.
         hidden = (
-            jp.matmul(normalized, self.kernels[0], precision=lax.Precision.HIGHEST)
+            jp.matmul(
+                normalized[..., : self.kernels[0].shape[0]],
+                self.kernels[0],
+                precision=lax.Precision.HIGHEST,
+            )
             + self.biases[0]
         )
         if self.layer_norm_scale is not None and self.layer_norm_bias is not None:
@@ -40,6 +52,25 @@ class ApolloWalkJax:
             jp.matmul(hidden, self.kernels[-1], precision=lax.Precision.HIGHEST)
             + self.biases[-1]
         )
+        if self.adapter_kernels:
+            adapter = normalized
+            for kernel, bias in zip(
+                self.adapter_kernels[:-1], self.adapter_biases[:-1], strict=True
+            ):
+                adapter = (
+                    jp.matmul(adapter, kernel, precision=lax.Precision.HIGHEST)
+                    + bias
+                )
+                adapter = jp.where(adapter > 0.0, adapter, jp.expm1(adapter))
+            adapter = (
+                jp.matmul(
+                    adapter,
+                    self.adapter_kernels[-1],
+                    precision=lax.Precision.HIGHEST,
+                )
+                + self.adapter_biases[-1]
+            )
+            output = output + jp.tanh(adapter)
         return jp.clip(output, -5.0, 5.0)
 
 
@@ -81,8 +112,11 @@ def load_apollo_walk_jax(model_path: Path) -> ApolloWalkJax:
         missing = required - arrays.keys()
         if missing:
             raise ValueError(f"Apollo walk ONNX is missing tensors: {sorted(missing)}")
-        observation_mean = jp.zeros(78, dtype=jp.float32)
-        observation_std = jp.ones(78, dtype=jp.float32)
+        actor_size = int(
+            arrays.get("adapter_fc1.weight", arrays["fc1.weight"]).shape[1]
+        )
+        observation_mean = jp.zeros(actor_size, dtype=jp.float32)
+        observation_std = jp.ones(actor_size, dtype=jp.float32)
         layer_norm_names = {"layer_norm.weight", "layer_norm.bias"}
         present_layer_norm_names = layer_norm_names.intersection(arrays)
         if present_layer_norm_names and present_layer_norm_names != layer_norm_names:
@@ -100,8 +134,38 @@ def load_apollo_walk_jax(model_path: Path) -> ApolloWalkJax:
         )
     kernels = tuple(jp.asarray(arrays[f"{name}.weight"].T) for name in layer_names)
     biases = tuple(jp.asarray(arrays[f"{name}.bias"]) for name in layer_names)
-    if kernels[0].shape != (78, 512) or kernels[-1].shape != (128, 23):
+    if (
+        kernels[0].shape not in ((78, 512), (84, 512))
+        or kernels[-1].shape != (128, 23)
+    ):
         raise ValueError("Apollo walk ONNX has an unsupported architecture")
+    adapter_layer_names = ("adapter_fc1", "adapter_fc2", "adapter_fc3")
+    adapter_required = {
+        f"{name}.{field}"
+        for name in adapter_layer_names
+        for field in ("weight", "bias")
+    }
+    adapter_present = adapter_required.intersection(arrays)
+    if adapter_present and adapter_present != adapter_required:
+        raise ValueError("Apollo goalkeeper ONNX has an incomplete adapter")
+    adapter_kernels = (
+        tuple(
+            jp.asarray(arrays[f"{name}.weight"].T) for name in adapter_layer_names
+        )
+        if adapter_present
+        else ()
+    )
+    adapter_biases = (
+        tuple(jp.asarray(arrays[f"{name}.bias"]) for name in adapter_layer_names)
+        if adapter_present
+        else ()
+    )
+    if adapter_kernels and (
+        adapter_kernels[0].shape != (84, 128)
+        or adapter_kernels[1].shape != (128, 64)
+        or adapter_kernels[2].shape != (64, 23)
+    ):
+        raise ValueError("Apollo goalkeeper ONNX has an unsupported adapter")
     return ApolloWalkJax(
         kernels=kernels,
         biases=biases,
@@ -109,4 +173,6 @@ def load_apollo_walk_jax(model_path: Path) -> ApolloWalkJax:
         observation_std=observation_std,
         layer_norm_scale=layer_norm_scale,
         layer_norm_bias=layer_norm_bias,
+        adapter_kernels=adapter_kernels,
+        adapter_biases=adapter_biases,
     )

@@ -23,6 +23,7 @@ import onnxruntime as ort
 
 from my3d_rl.apollo_run_env import ApolloHandoffWaypointRun, ApolloWaypointRun
 from my3d_rl.apollo_walk_jax import load_apollo_walk_jax
+from my3d_rl.goalkeeper_env import ApolloGoalkeeperBlock
 from my3d_rl.legacy_policy import (
     load_apollo_onnx_teacher_params,
     load_onnx_teacher_params,
@@ -38,6 +39,10 @@ from my3d_rl.training_schedule import (
 
 
 STAGES: dict[str, dict[str, Any]] = {
+    # Upright body block for the measured region beyond goalkeeper Walk
+    # coverage.  The frozen base actor keeps Apollo's exact 78 -> 23 contract;
+    # a zero-output residual adapter receives six additional ball-state values.
+    "apollo_goalkeeper_block": {},
     # Preserve Apollo's actor boundary while isolating WalkRunner's absolute-
     # target conversion.  This does not include the decision layer's planner,
     # braking, obstacle avoidance, or near-ball sequencing.
@@ -784,6 +789,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", choices=tuple(STAGES), default="fast_walk")
     parser.add_argument("--impl", choices=("jax", "warp"), default="warp")
+    parser.add_argument(
+        "--warp-graph-mode",
+        choices=("auto", "none", "jax", "warp", "warp_staged"),
+        default="auto",
+        help=(
+            "select MJX Warp CUDA graph ownership; 'none' is the compatibility "
+            "fallback for driver/stream capture failures"
+        ),
+    )
     parser.add_argument("--num-envs", type=int, default=64)
     parser.add_argument("--num-timesteps", type=int, default=1_048_576)
     parser.add_argument("--seed", type=int, default=17)
@@ -808,8 +822,32 @@ def main() -> None:
         type=float,
         help="override reference_residual forward speed for a staged curriculum",
     )
+    parser.add_argument(
+        "--goalkeeper-shot-speed-range",
+        type=float,
+        nargs=2,
+        metavar=("MIN_MPS", "MAX_MPS"),
+        help="override the goalkeeper curriculum's incoming shot-speed range",
+    )
+    parser.add_argument(
+        "--goalkeeper-shot-lateral-range",
+        type=float,
+        nargs=2,
+        metavar=("MIN_M", "MAX_M"),
+        help="override the goalkeeper curriculum's unsigned lateral range",
+    )
+    parser.add_argument(
+        "--goalkeeper-shot-start-distance-range",
+        type=float,
+        nargs=2,
+        metavar=("MIN_M", "MAX_M"),
+        help="override the goalkeeper curriculum's shot-distance range",
+    )
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
+
+    if args.impl != "warp" and args.warp_graph_mode != "auto":
+        raise ValueError("--warp-graph-mode requires --impl warp")
 
     if not args.run_dir.is_absolute() or args.run_dir.is_relative_to(Path.cwd()):
         raise ValueError("run-dir must live outside the repository")
@@ -818,20 +856,43 @@ def main() -> None:
         Path(__file__).parents[1] / "contracts" / f"{profile.policy_contract}.yaml"
     )
     contract = load_policy_contract(contract_path)
-    apollo_waypoint = args.stage in {
+    apollo_environment = args.stage in {
+        "apollo_goalkeeper_block",
         "apollo_waypoint",
         "apollo_handoff_waypoint",
     }
-    apollo_contract = contract.policy_name == "apollo_walk_policy_v1"
-    if apollo_waypoint != apollo_contract:
+    expected_apollo_contract = (
+        "apollo_goalkeeper_policy_v1"
+        if args.stage == "apollo_goalkeeper_block"
+        else "apollo_walk_policy_v1" if apollo_environment else None
+    )
+    is_apollo_contract = contract.policy_name in {
+        "apollo_walk_policy_v1",
+        "apollo_goalkeeper_policy_v1",
+    }
+    unexpected_apollo_profile = expected_apollo_contract is None and is_apollo_contract
+    mismatched_apollo_profile = (
+        expected_apollo_contract is not None
+        and contract.policy_name != expected_apollo_contract
+    )
+    if unexpected_apollo_profile or mismatched_apollo_profile:
         raise ValueError(
-            "Apollo waypoint stages require --network-profile "
-            "apollo_walk_warmstart_v1, and that profile is scoped to these stages"
+            "Apollo stages require their matching Apollo warm-start profile; "
+            "Apollo profiles are scoped to those stages"
         )
     if args.stage == "apollo_handoff_waypoint" and args.bootstrap_onnx is None:
         raise ValueError("apollo_handoff_waypoint requires --bootstrap-onnx")
     if args.stage == "apollo_handoff_waypoint" and args.entry_corpus is None:
         raise ValueError("apollo_handoff_waypoint requires --entry-corpus")
+    if (
+        args.stage == "apollo_goalkeeper_block"
+        and args.bootstrap_onnx is None
+        and args.restore_checkpoint is None
+    ):
+        raise ValueError(
+            "apollo_goalkeeper_block requires --bootstrap-onnx or "
+            "--restore-checkpoint"
+        )
     if args.entry_corpus is not None and not args.entry_corpus.is_file():
         raise FileNotFoundError(args.entry_corpus)
     if args.restore_checkpoint and args.bootstrap_onnx:
@@ -841,6 +902,17 @@ def main() -> None:
     ):
         raise ValueError(
             "fixed-vx must be in [0.2, 3.0] and requires reference_residual"
+        )
+    goalkeeper_range_arguments = {
+        "shot_speed_range": args.goalkeeper_shot_speed_range,
+        "shot_lateral_range": args.goalkeeper_shot_lateral_range,
+        "shot_start_distance_range": args.goalkeeper_shot_start_distance_range,
+    }
+    if args.stage != "apollo_goalkeeper_block" and any(
+        value is not None for value in goalkeeper_range_arguments.values()
+    ):
+        raise ValueError(
+            "goalkeeper shot-range overrides require apollo_goalkeeper_block"
         )
     if args.bootstrap_onnx and profile.factory_kind not in {
         "legacy_teacher",
@@ -910,22 +982,28 @@ def main() -> None:
     progress_path = args.run_dir / "progress.jsonl"
     stage_overrides = {
         "impl": args.impl,
+        "warp_graph_mode": args.warp_graph_mode,
         "naconmax": max(2048, 16 * args.num_envs),
         "action_clip": max(abs(value) for value in contract.action_clip),
         **STAGES[args.stage],
     }
     if args.fixed_vx is not None:
         stage_overrides["fixed_command"] = [args.fixed_vx, 0.0, 0.0]
+    for config_name, value in goalkeeper_range_arguments.items():
+        if value is not None:
+            stage_overrides[config_name] = value
     if phase_sampling is not None:
         stage_overrides["reference_phase_sampling_weights"] = phase_sampling["weights"]
-    if args.stage == "apollo_handoff_waypoint":
+    if args.stage == "apollo_goalkeeper_block":
+        env = ApolloGoalkeeperBlock(config_overrides=stage_overrides)
+    elif args.stage == "apollo_handoff_waypoint":
         env = ApolloHandoffWaypointRun(
             entry_policy=load_apollo_walk_jax(args.bootstrap_onnx),
             entry_corpus=args.entry_corpus,
             config_overrides=stage_overrides,
             contract=contract,
         )
-    elif apollo_waypoint:
+    elif apollo_environment:
         env = ApolloWaypointRun(
             config_overrides=stage_overrides,
             contract=contract,
@@ -967,7 +1045,11 @@ def main() -> None:
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "status": "running",
-        "purpose": "formal_fast_locomotion_training",
+        "purpose": (
+            "formal_goalkeeper_block_training"
+            if args.stage == "apollo_goalkeeper_block"
+            else "formal_fast_locomotion_training"
+        ),
         "stage": args.stage,
         "policy_contract": contract.policy_name,
         "network_profile": profile.name,

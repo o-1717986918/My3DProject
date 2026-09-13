@@ -251,3 +251,54 @@ def test_apollo_warmstart_import_matches_frozen_onnx_runtime():
     np.testing.assert_allclose(
         actual, np.clip(expected, -5.0, 5.0), atol=2.0e-5, rtol=1.0e-5
     )
+
+
+def test_goalkeeper_warmstart_zero_extends_frozen_apollo_actor():
+    profile = get_ppo_profile("apollo_goalkeeper_warmstart_v1")
+    networks = profile.network_factory()(
+        {"state": (84,), "privileged_state": (90,)},
+        23,
+        preprocess_observations_fn=brax_types.identity_observation_preprocessor,
+    )
+    params = networks.policy_network.init(jax.random.PRNGKey(20_261_405))
+    params = load_apollo_onnx_teacher_params(params, WALK_POLICY)
+    normalizer = running_statistics.init_state(
+        {
+            "state": jax.ShapeDtypeStruct((84,), jp.float32),
+            "privileged_state": jax.ShapeDtypeStruct((90,), jp.float32),
+        }
+    )
+    rng = np.random.default_rng(20_261_406)
+    base_observations = rng.normal(0.0, 0.25, size=(32, 78)).astype(np.float32)
+    goalkeeper_observations = np.concatenate(
+        [
+            base_observations,
+            rng.normal(0.0, 0.25, size=(32, 6)).astype(np.float32),
+        ],
+        axis=1,
+    )
+    actual = np.asarray(
+        networks.policy_network.apply(
+            normalizer,
+            params,
+            {
+                "state": jp.asarray(goalkeeper_observations),
+                "privileged_state": jp.zeros((32, 90), dtype=jp.float32),
+            },
+        )[0]
+    )
+
+    session = ort.InferenceSession(
+        str(WALK_POLICY), providers=["CPUExecutionProvider"]
+    )
+    input_name = session.get_inputs()[0].name
+    expected = np.concatenate(
+        [
+            session.run(None, {input_name: observation[None, :]})[0]
+            for observation in base_observations
+        ],
+        axis=0,
+    )
+    np.testing.assert_allclose(
+        actual, np.clip(expected, -5.0, 5.0), atol=2.0e-5, rtol=1.0e-5
+    )
