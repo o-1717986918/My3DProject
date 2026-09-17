@@ -136,13 +136,13 @@ Run a browser-rendered 7v7 against the frozen pristine Apollo checkout with:
 scripts/run_web_match_apollo_rebuild_vs_base.sh 120000
 ```
 
-The developed-team launcher currently enables the complete candidate action
-stack: dynamic pass, goalkeeper walk intercept, parameterized kick, the learned
-2 m kick transition, FastWalkV2, and RapidTurnV1 (including the exact mirrored
-right turn). The three ONNX files are selected from `/home/win98/rl_runs` and
-checked against locked SHA-256 values before any agent starts. These are
-integrated candidates, not a claim that every one improves match results. Set
-the corresponding environment variable to `0`/`off` to run an ablation:
+The developed-team launcher enables dynamic pass, goalkeeper walk intercept,
+parameterized kick, and the learned 2 m kick transition. FastWalkV2 and
+RapidTurnV1 remain integrated but default to off after the full-stack match
+showed excessive motion switching and recovery cost. Model files are selected
+from `/home/win98/rl_runs` and checked against locked SHA-256 values before any
+agent starts. Set the corresponding environment variables to run an ablation
+or explicitly restore a motion candidate:
 
 ```bash
 APOLLO_REBUILD_ENABLE_DYNAMIC_PASS=0 \
@@ -151,6 +151,13 @@ APOLLO_ENABLE_PARAMETERIZED_KICK=0 \
 APOLLO_LEARNED_KICK_MODE=off \
 APOLLO_ENABLE_FAST_WALK=0 \
 APOLLO_ENABLE_RAPID_TURN=0 \
+scripts/run_web_match_apollo_rebuild_vs_base.sh 120000
+```
+
+To re-enable either retained motion candidate explicitly:
+
+```bash
+APOLLO_ENABLE_FAST_WALK=1 APOLLO_ENABLE_RAPID_TURN=1 \
 scripts/run_web_match_apollo_rebuild_vs_base.sh 120000
 ```
 
