@@ -16,6 +16,8 @@
 namespace world {
 
 constexpr double kFallenHeightThresholdM = 0.3;
+inline constexpr double kBallPositionFreshLifetimeS = 0.20;
+inline constexpr double kNearContactBallTrackLifetimeS = 3.5;
 
 
 /// Estimated state of the controlled robot in the canonical team frame.
@@ -33,6 +35,7 @@ struct SelfState {
 struct BallState {
     bool visible{false};
     bool position_valid{false};
+    bool near_contact_track{false};
     double position_age_s{std::numeric_limits<double>::infinity()};
     Vec3 position_m{0.0, 0.0, 0.0};
     Vec3 velocity_mps{0.0, 0.0, 0.0};

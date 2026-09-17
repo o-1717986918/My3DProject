@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <optional>
 
 namespace decision {
@@ -24,6 +25,7 @@ constexpr double kWalkBrakeDecelMps2 = 1.0;
 constexpr double kWalkStopRadiusM = 0.15;
 constexpr double kWalkHeadingSlowStartDeg = 35.0;
 constexpr double kWalkHeadingStopDeg = 95.0;
+constexpr double kTurnFirstHeadingDeg = 50.0;
 // At or below this distance to the target a ball-facing player strafes (holds
 // ball-facing, no heading-error speed penalty) to fine-tune its slot; beyond it
 // the player turns to face its travel direction and runs forward at full speed.
@@ -35,6 +37,16 @@ constexpr double kDribbleSideClearanceM = 0.55;
 constexpr double kDribbleSideStepBehindThresholdM = 0.1;
 constexpr double kDribbleMaxLateralOffsetM = 0.4;
 constexpr double kDribbleMaxAheadM = 0.15;
+constexpr double kDiscreteKickReleaseDwellS = 0.10;
+constexpr double kDiscreteKickDurationS = 1.25;
+constexpr double kDiscreteKickCooldownS = 0.45;
+constexpr double kDiscreteKickBallLocalMinXM = 0.20;
+constexpr double kDiscreteKickBallLocalMaxXM = 0.44;
+constexpr double kDiscreteKickBallLocalMinYM = -0.11;
+constexpr double kDiscreteKickBallLocalMaxYM = 0.19;
+constexpr double kDiscreteKickMaximumHeadingErrorDeg = 15.0;
+constexpr double kDiscreteKickMaximumBallSpeedMps = 1.20;
+constexpr double kDiscreteKickMaximumBodySpeedMps = 1.20;
 constexpr double kGkInterceptMinIncomingSpeedMps = 0.4;
 constexpr double kGkInterceptMinTimeS = 0.05;
 constexpr double kGkInterceptMaxTimeS = 3.0;
@@ -153,6 +165,20 @@ WalkCommand make_walk_command_avoiding(
     // still clamps |vy| in every mode, so strafing stays within its safe cap.
     const bool strafe = suppress_heading_slowdown ||
                         (orient_to_ball && dist <= kStrafeMaxDistM);
+    if (!strafe && heading_error_abs_deg >= kTurnFirstHeadingDeg) {
+        // A large combined translation+yaw request traps the stable actor in
+        // slow lateral motion and prevents the dedicated rapid-turn policy from
+        // satisfying its near-zero-translation entry contract.  Turn in place
+        // first; the next decision cycles resume forward travel once aligned.
+        WalkCommand command;
+        command.target_2d_m = {0.0, 0.0};
+        command.target_absolute = false;
+        command.orientation_deg = plan.heading_deg;
+        command.orientation_absolute = true;
+        command.orientation_gain = 1.25;
+        command.role_id = role_id;
+        return command;
+    }
     const double speed =
         walk_speed_command(dist, strafe ? 0.0 : heading_error_abs_deg);
 
@@ -255,7 +281,123 @@ WalkCommand make_dribble_command(
         RoleManager::ROLE_AP, false, false);
 }
 
-WalkCommand make_ap_push_ball_to_goal(APDecisionContext& context) {
+std::optional<HighLevelCommand> maybe_make_discrete_ball_action(
+    APDecisionContext& context,
+    double absolute_direction_deg) {
+    const auto& snapshot = context.snapshot;
+    if (snapshot.play_mode != world::PlayMode::PlayOn ||
+        snapshot.server_time < context.state.kick_cooldown_until_s ||
+        !snapshot.ball.position_valid ||
+        snapshot.self.position_m[2] <= world::kFallenHeightThresholdM) {
+        context.state.kick_release_candidate_since_s = -1.0;
+        return std::nullopt;
+    }
+
+    const double yaw_deg =
+        world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+            snapshot.self.orientation_wxyz);
+    const auto ball_local = math::rotate_2d(
+        {
+            context.ball[0] - context.self[0],
+            context.ball[1] - context.self[1],
+        },
+        -yaw_deg);
+    const double heading_error_deg = std::abs(math::normalize_deg(
+        absolute_direction_deg - yaw_deg));
+    const double ball_speed_mps = snapshot.ball.velocity_valid
+        ? math::norm2({
+            snapshot.ball.velocity_mps[0], snapshot.ball.velocity_mps[1]})
+        : 0.0;
+    const double body_speed_mps = math::norm2(
+        {snapshot.self.lin_vel_b[0], snapshot.self.lin_vel_b[1]});
+    const bool release_ready =
+        ball_local[0] >= kDiscreteKickBallLocalMinXM &&
+        ball_local[0] <= kDiscreteKickBallLocalMaxXM &&
+        ball_local[1] >= kDiscreteKickBallLocalMinYM &&
+        ball_local[1] <= kDiscreteKickBallLocalMaxYM &&
+        heading_error_deg <= kDiscreteKickMaximumHeadingErrorDeg &&
+        ball_speed_mps <= kDiscreteKickMaximumBallSpeedMps &&
+        body_speed_mps <= kDiscreteKickMaximumBodySpeedMps;
+    if (!release_ready) {
+        context.state.kick_release_candidate_since_s = -1.0;
+        return std::nullopt;
+    }
+
+    if (context.state.kick_release_candidate_since_s < 0.0) {
+        context.state.kick_release_candidate_since_s = snapshot.server_time;
+    }
+    if (snapshot.server_time - context.state.kick_release_candidate_since_s <
+        kDiscreteKickReleaseDwellS) {
+        WalkCommand hold;
+        hold.target_2d_m = {0.0, 0.0};
+        hold.target_absolute = false;
+        hold.orientation_deg = absolute_direction_deg;
+        hold.orientation_absolute = true;
+        hold.orientation_gain = 1.5;
+        hold.role_id = RoleManager::ROLE_AP;
+        return HighLevelCommand{hold};
+    }
+
+    const std::array<double, 2> direction{
+        std::cos(math::deg_to_rad(absolute_direction_deg)),
+        std::sin(math::deg_to_rad(absolute_direction_deg)),
+    };
+    const auto target_at = [&](double distance_m) {
+        return std::array<double, 2>{
+            context.ball[0] + direction[0] * distance_m,
+            context.ball[1] + direction[1] * distance_m,
+        };
+    };
+    double nearest_opponent_m = std::numeric_limits<double>::infinity();
+    for (const auto& opponent : snapshot.opponents) {
+        if (!opponent.seen || opponent.fallen) continue;
+        nearest_opponent_m = std::min(
+            nearest_opponent_m,
+            math::planar_dist(
+                context.ball,
+                {opponent.position_m[0], opponent.position_m[1]}));
+    }
+    const double goal_distance_m = math::planar_dist(
+        context.ball, field_geometry::actual_their_goal_center_target());
+
+    KickCommand kick;
+    kick.action_id = context.state.next_kick_action_id++;
+    kick.allow_forward_contact_fallback = true;
+    if (context.ball[0] < -field_geometry::kActualHalfLengthM + 10.0) {
+        kick.mode = KickMode::Clear;
+        kick.target_point_m = target_at(6.0);
+        kick.requested_ball_speed_mps = 3.50;
+    } else if (goal_distance_m <= 6.5) {
+        kick.mode = KickMode::Shot;
+        kick.target_point_m = target_at(4.0);
+        kick.requested_ball_speed_mps = 2.50;
+    } else if (nearest_opponent_m <= 1.25) {
+        kick.mode = KickMode::DribbleTouch;
+        kick.target_point_m = target_at(0.55);
+        kick.requested_ball_speed_mps = 0.90;
+    } else {
+        kick.mode = KickMode::TargetedPass;
+        kick.target_point_m = target_at(2.0);
+        kick.requested_ball_speed_mps = 1.43;
+    }
+    context.state.active_kick_command = kick;
+    context.state.kick_active_until_s =
+        snapshot.server_time + kDiscreteKickDurationS;
+    context.state.kick_release_candidate_since_s = -1.0;
+    return HighLevelCommand{kick};
+}
+
+HighLevelCommand make_ap_push_ball_to_goal(APDecisionContext& context) {
+    if (context.state.active_kick_command.has_value()) {
+        if (context.snapshot.server_time <= context.state.kick_active_until_s) {
+            return *context.state.active_kick_command;
+        }
+        context.state.active_kick_command.reset();
+        context.state.kick_active_until_s = -1.0;
+        context.state.kick_cooldown_until_s =
+            context.snapshot.server_time + kDiscreteKickCooldownS;
+        context.state.dribble_ready = false;
+    }
     // During our-kick set plays push diagonally toward the relay teammate's
     // side (45° off the ball→goal axis) instead of straight at the opponent
     // goal — the relay takes the ball cleanly without the AP chasing its own
@@ -276,6 +418,10 @@ WalkCommand make_ap_push_ball_to_goal(APDecisionContext& context) {
     const double absolute_direction_deg = math::norm2(goal_direction) > 1e-6
         ? math::vector_angle_deg(goal_direction)
         : 0.0;
+    if (const auto action = maybe_make_discrete_ball_action(
+            context, absolute_direction_deg)) {
+        return *action;
+    }
     return make_dribble_command(context, absolute_direction_deg);
 }
 

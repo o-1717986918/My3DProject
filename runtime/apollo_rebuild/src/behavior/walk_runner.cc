@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace behavior {
@@ -37,14 +39,11 @@ std::optional<robot::T1RobotModel::HeadTargets> update_head_tracker(
     constexpr double sweep_max_deg = 90.0;
     constexpr double sweep_speed_deg_per_sec = 60.0;
     constexpr double sweep_pitch_deg = 0.0;
-    const bool active_player = role_id.has_value() &&
-        *role_id == decision::RoleManager::ROLE_AP;
 
-    // The active player must keep the ball observable during the final
-    // approach. Other field roles continue sweeping for situational awareness.
-    if (role_id.has_value() &&
-        *role_id != decision::RoleManager::ROLE_GK &&
-        *role_id != decision::RoleManager::ROLE_AP) {
+    // Only the GK (ROLE_GK = 0) tracks the ball with its head; every other
+    // role sweeps the field. Roles are 0..6 in this codebase (see
+    // decision::RoleManager), so there is no special "role 10" anymore.
+    if (role_id.has_value() && *role_id != decision::RoleManager::ROLE_GK) {
         const double sweep_range = sweep_max_deg - sweep_min_deg;
         const double period = sweep_range / sweep_speed_deg_per_sec * 2.0;
         const double t = std::fmod(snapshot.server_time, period);
@@ -59,14 +58,13 @@ std::optional<robot::T1RobotModel::HeadTargets> update_head_tracker(
         return robot_model.clamp_head_targets(yaw, sweep_pitch_deg);
     }
 
-    if (snapshot.ball.visible || active_player) {
+    if (snapshot.ball.visible) {
         const std::array<double, 3> ball_vec_world{
             snapshot.ball.position_m[0] - snapshot.self.position_m[0],
             snapshot.ball.position_m[1] - snapshot.self.position_m[1],
             snapshot.ball.position_m[2] - snapshot.self.position_m[2],
         };
-        if (!active_player &&
-            norm2({ball_vec_world[0], ball_vec_world[1]}) <= lock_distance) {
+        if (norm2({ball_vec_world[0], ball_vec_world[1]}) <= lock_distance) {
             if (!state.last_head_target_deg.has_value()) {
                 return std::nullopt;
             }
@@ -81,10 +79,8 @@ std::optional<robot::T1RobotModel::HeadTargets> update_head_tracker(
         }
         const double yaw = std::atan2(body_vec[1], body_vec[0]) * 180.0 / kPi;
         const double pitch = -std::atan2(body_vec[2], horiz) * 180.0 / kPi;
-        if (snapshot.ball.visible) {
-            state.last_ball_seen_time = snapshot.server_time;
-            state.last_head_target_deg = std::array<double, 2>{yaw, pitch};
-        }
+        state.last_ball_seen_time = snapshot.server_time;
+        state.last_head_target_deg = std::array<double, 2>{yaw, pitch};
         return robot_model.clamp_head_targets(yaw, pitch);
     }
 
@@ -106,8 +102,21 @@ std::optional<robot::T1RobotModel::HeadTargets> update_head_tracker(
 
 }  // namespace
 
-WalkRunner::WalkRunner(const std::filesystem::path& model_path)
+WalkRunner::WalkRunner(
+    const std::filesystem::path& model_path,
+    std::optional<std::filesystem::path> fast_walk_model_path,
+    std::optional<std::filesystem::path> rapid_turn_model_path)
     : session_(model_path, OnnxModelContract{{1, 78}, {1, 23}}) {
+    if (fast_walk_model_path.has_value()) {
+        fast_walk_session_.emplace(
+            *fast_walk_model_path,
+            OnnxModelContract{{1, 80}, {1, 23}});
+    }
+    if (rapid_turn_model_path.has_value()) {
+        rapid_turn_session_.emplace(
+            *rapid_turn_model_path,
+            OnnxModelContract{{1, 80}, {1, 23}});
+    }
     step_obs_dim_ = 9 + 3 * static_cast<int>(robot_model_.readable_joint_names().size());
     const auto& input_shape = session_.info().input_shape;
     history_length_ = static_cast<int>(input_shape.at(1) / step_obs_dim_);
@@ -117,6 +126,345 @@ WalkRunner::WalkRunner(const std::filesystem::path& model_path)
     previous_action_.assign(robot_model_.readable_joint_names().size(), 0.0F);
     observation_.assign(static_cast<std::size_t>(history_length_ * step_obs_dim_), 0.0F);
     step_obs_buffer_.assign(static_cast<std::size_t>(step_obs_dim_), 0.0F);
+    fast_previous_action_.assign(robot_model_.readable_joint_names().size(), 0.0F);
+    rapid_turn_previous_action_.assign(
+        robot_model_.readable_joint_names().size(), 0.0F);
+}
+
+bool WalkRunner::fast_walk_supported(
+    const world::WorldSnapshot& snapshot,
+    const decision::WalkCommand& command,
+    const std::array<float, 3>& stable_velocity_command) {
+    if (!fast_walk_session_.has_value() || fast_walk_disabled_ ||
+        snapshot.play_mode != world::PlayMode::PlayOn ||
+        snapshot.player_number == 1) {
+        fast_walk_active_ = false;
+        return false;
+    }
+    const double self_yaw_deg =
+        world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+            snapshot.self.orientation_wxyz);
+    std::array<double, 2> local_target = command.target_2d_m;
+    if (command.target_absolute) {
+        const std::array<double, 2> target_delta{
+            command.target_2d_m[0] - snapshot.self.position_m[0],
+            command.target_2d_m[1] - snapshot.self.position_m[1],
+        };
+        local_target = rotate_2d(target_delta, -self_yaw_deg);
+    }
+    const auto gravity_body = rotate_vec_by_quaternion(
+        {0.0, 0.0, -1.0}, quaternion_conjugate(snapshot.self.orientation_wxyz));
+    const double tilt_deg = math::rad_to_deg(std::acos(
+        std::clamp(-gravity_body[2], -1.0, 1.0)));
+    const double max_gyro = std::max({
+        std::abs(snapshot.self.gyro_deg_s[0]),
+        std::abs(snapshot.self.gyro_deg_s[1]),
+        std::abs(snapshot.self.gyro_deg_s[2]),
+    });
+    const double distance_m = command.target_absolute
+        ? math::norm2(local_target)
+        : std::numeric_limits<double>::infinity();
+    constexpr double kFastWalkEntryTiltDeg = 6.0;
+    constexpr double kFastWalkActiveTiltDeg = 11.0;
+    constexpr double kFastWalkEntryGyroDegS = 55.0;
+    constexpr double kFastWalkActiveGyroDegS = 110.0;
+    constexpr double kFastWalkMinimumHeightM = 0.55;
+    constexpr double kFastWalkRecoveryCooldownS = 4.0;
+    const bool was_fast_walk_active = fast_walk_active_;
+    int gate = 0;
+    const char* reason = "active";
+    if (snapshot.server_time < fast_walk_cooldown_until_s_) {
+        gate = 8;
+        reason = "recovery-cooldown";
+    } else if (snapshot.self.position_m[2] < kFastWalkMinimumHeightM) {
+        gate = 6;
+        reason = "height";
+    } else if (tilt_deg > (was_fast_walk_active
+                               ? kFastWalkActiveTiltDeg
+                               : kFastWalkEntryTiltDeg)) {
+        gate = 4;
+        reason = "tilt";
+    } else if (max_gyro > (was_fast_walk_active
+                               ? kFastWalkActiveGyroDegS
+                               : kFastWalkEntryGyroDegS)) {
+        gate = 5;
+        reason = "gyro";
+    } else if (command.target_absolute && distance_m < 2.0) {
+        gate = 1;
+        reason = "target-near";
+    } else if (stable_velocity_command[0] < 0.95F) {
+        gate = 2;
+        reason = "target-not-forward";
+    } else if (std::abs(stable_velocity_command[1]) > 0.04F) {
+        gate = 7;
+        reason = "lateral-command";
+    } else if (std::abs(stable_velocity_command[2]) > 0.12F) {
+        gate = 3;
+        reason = "turn-rate";
+    }
+    if (was_fast_walk_active && gate >= 4 && gate <= 6) {
+        fast_walk_cooldown_until_s_ = std::max(
+            fast_walk_cooldown_until_s_,
+            snapshot.server_time + kFastWalkRecoveryCooldownS);
+    }
+    if (gate != last_fast_walk_gate_) {
+        std::cerr
+            << "MY3D_FAST_WALK_GATE player=" << snapshot.player_number
+            << " state=" << reason
+            << " distance=" << distance_m
+            << " local_x=" << local_target[0]
+            << " local_y=" << local_target[1]
+            << " vx=" << stable_velocity_command[0]
+            << " vy=" << stable_velocity_command[1]
+            << " yaw_rate=" << stable_velocity_command[2]
+            << " tilt_deg=" << tilt_deg
+            << " gyro_deg_s=" << max_gyro
+            << " z=" << snapshot.self.position_m[2]
+            << " cooldown_remaining="
+            << std::max(
+                   0.0,
+                   fast_walk_cooldown_until_s_ - snapshot.server_time)
+            << '\n';
+        last_fast_walk_gate_ = gate;
+    }
+    fast_walk_active_ = gate == 0;
+    return fast_walk_active_;
+}
+
+std::vector<float> WalkRunner::build_run_policy_observation(
+    const world::WorldSnapshot& snapshot,
+    const std::array<float, 3>& velocity_command,
+    const std::vector<float>& previous_action,
+    double gait_phase) const {
+    std::vector<float> observation;
+    observation.reserve(80U);
+    const auto& names = robot_model_.readable_joint_names();
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        const auto pos = snapshot.self.joint_positions_deg.find(names[i]);
+        const auto vel = snapshot.self.joint_velocities_deg_s.find(names[i]);
+        const float position_server = static_cast<float>(math::deg_to_rad(
+            pos == snapshot.self.joint_positions_deg.end() ? 0.0 : pos->second));
+        const float velocity_server = static_cast<float>(math::deg_to_rad(
+            vel == snapshot.self.joint_velocities_deg_s.end() ? 0.0 : vel->second));
+        observation.push_back(
+            (position_server * kRunTrainingToServerSign[i] -
+             kRunNominalTrainingPoseRad[i]) / 4.6F);
+        observation.push_back(
+            velocity_server * kRunTrainingToServerSign[i] / 110.0F);
+        observation.push_back(previous_action[i] / 10.0F);
+    }
+    const auto imu = build_imu_obs(snapshot);
+    observation.push_back(imu[0] / 50.0F);
+    observation.push_back(imu[1] / 50.0F);
+    observation.push_back(imu[2] / 50.0F);
+    observation.push_back(velocity_command[0]);
+    observation.push_back(velocity_command[1]);
+    observation.push_back(velocity_command[2]);
+    observation.push_back(imu[3]);
+    observation.push_back(imu[4]);
+    observation.push_back(imu[5]);
+    const double phase_angle = 2.0 * kPi * gait_phase;
+    observation.push_back(static_cast<float>(std::cos(phase_angle)));
+    observation.push_back(static_cast<float>(std::sin(phase_angle)));
+    for (float& value : observation) {
+        value = std::clamp(std::isfinite(value) ? value : 0.0F, -10.0F, 10.0F);
+    }
+    return observation;
+}
+
+std::optional<robot::JointTargets> WalkRunner::step_fast_walk(
+    const world::WorldSnapshot& snapshot,
+    const decision::WalkCommand& command,
+    const std::array<float, 3>& stable_velocity_command,
+    const robot::JointTargets& stable_targets,
+    bool reset) {
+    if (!fast_walk_supported(snapshot, command, stable_velocity_command)) {
+        fast_walk_active_ = false;
+        std::fill(fast_previous_action_.begin(), fast_previous_action_.end(), 0.0F);
+        fast_gait_phase_ = 0.0;
+        return std::nullopt;
+    }
+    if (reset) {
+        std::fill(fast_previous_action_.begin(), fast_previous_action_.end(), 0.0F);
+        fast_gait_phase_ = 0.0;
+    }
+
+    constexpr float action_scale = 0.5F;
+    constexpr float gait_frequency_hz = 1.75F;
+
+    const auto& names = robot_model_.readable_joint_names();
+    const auto observation = build_run_policy_observation(
+        snapshot,
+        {1.5F,
+         std::clamp(stable_velocity_command[1], -0.1F, 0.1F),
+         std::clamp(stable_velocity_command[2], -0.2F, 0.2F)},
+        fast_previous_action_,
+        fast_gait_phase_);
+
+    try {
+        auto action = fast_walk_session_->run(observation);
+        if (action.size() != names.size()) {
+            throw std::runtime_error("fast-walk actor output size mismatch");
+        }
+        robot::JointTargets targets = stable_targets;
+        for (std::size_t i = 0; i < action.size(); ++i) {
+            if (!std::isfinite(action[i])) {
+                throw std::runtime_error("fast-walk actor returned non-finite action");
+            }
+            action[i] = std::clamp(action[i], -10.0F, 10.0F);
+            if (i < 2U) {
+                continue;
+            }
+            targets[i].q_deg = math::rad_to_deg(
+                decode_run_policy_target_rad(i, action[i], action_scale));
+            targets[i].kp = 25.0;
+            targets[i].kd = 0.6;
+        }
+        fast_previous_action_ = std::move(action);
+        fast_gait_phase_ = std::fmod(
+            fast_gait_phase_ + 0.02 * gait_frequency_hz, 1.0);
+        return targets;
+    } catch (const std::exception& error) {
+        std::cerr << "MY3D_FAST_WALK_DISABLED error=" << error.what() << '\n';
+        fast_walk_disabled_ = true;
+        fast_walk_active_ = false;
+        std::fill(fast_previous_action_.begin(), fast_previous_action_.end(), 0.0F);
+        fast_gait_phase_ = 0.0;
+        return std::nullopt;
+    }
+}
+
+bool WalkRunner::rapid_turn_supported(
+    const world::WorldSnapshot& snapshot,
+    const std::array<float, 3>& stable_velocity_command) {
+    // The mounted mirrored turn expert is 64/64 upright on both directions
+    // with about 7.5--8.0 cm median drift.  A 1.50 m exclusion forced the
+    // much slower generic gait to own almost every ball-side turn. Keep the
+    // expert out of the actual contact corridor, but allow it to win the race
+    // from a safe setup distance; precision kick release remains independently
+    // gated and will fall back to the stable actor inside this radius.
+    constexpr double kBallHandlingExclusionRadiusM = 0.70;
+    const bool near_actionable_ball = snapshot.ball.position_valid &&
+        math::planar_dist(
+            {snapshot.self.position_m[0], snapshot.self.position_m[1]},
+            {snapshot.ball.position_m[0], snapshot.ball.position_m[1]}) <=
+            kBallHandlingExclusionRadiusM;
+    if (!rapid_turn_session_.has_value() || rapid_turn_disabled_ ||
+        snapshot.play_mode != world::PlayMode::PlayOn ||
+        near_actionable_ball) {
+        // RapidTurn remains available for open-play navigation, but its
+        // measured forward drift makes it unsafe for a frozen restart or any
+        // near-ball precision setup.  Those domains stay on the original
+        // stable walk actor until a turn policy is trained with displacement
+        // and fall constraints.
+        rapid_turn_active_ = false;
+        return false;
+    }
+    const auto gravity_body = rotate_vec_by_quaternion(
+        {0.0, 0.0, -1.0}, quaternion_conjugate(snapshot.self.orientation_wxyz));
+    const double tilt_deg = math::rad_to_deg(std::acos(
+        std::clamp(-gravity_body[2], -1.0, 1.0)));
+    const double max_gyro = std::max({
+        std::abs(snapshot.self.gyro_deg_s[0]),
+        std::abs(snapshot.self.gyro_deg_s[1]),
+        std::abs(snapshot.self.gyro_deg_s[2]),
+    });
+    constexpr double kEntryTiltDeg = 8.0;
+    constexpr double kActiveTiltDeg = 14.0;
+    constexpr double kEntryGyroDegS = 70.0;
+    constexpr double kActiveGyroDegS = 130.0;
+    constexpr double kMinimumHeightM = 0.55;
+    constexpr double kRecoveryCooldownS = 3.0;
+    constexpr double kMaximumTranslationCommand = 0.08;
+    constexpr double kMinimumYawRateRadS = 0.30;
+    const bool was_active = rapid_turn_active_;
+    const bool unstable =
+        snapshot.self.position_m[2] < kMinimumHeightM ||
+        tilt_deg > (was_active ? kActiveTiltDeg : kEntryTiltDeg) ||
+        max_gyro > (was_active ? kActiveGyroDegS : kEntryGyroDegS);
+    if (was_active && unstable) {
+        rapid_turn_cooldown_until_s_ = std::max(
+            rapid_turn_cooldown_until_s_,
+            snapshot.server_time + kRecoveryCooldownS);
+    }
+    rapid_turn_active_ =
+        snapshot.server_time >= rapid_turn_cooldown_until_s_ && !unstable &&
+        std::hypot(stable_velocity_command[0], stable_velocity_command[1]) <=
+            kMaximumTranslationCommand &&
+        std::abs(stable_velocity_command[2]) >= kMinimumYawRateRadS;
+    return rapid_turn_active_;
+}
+
+std::optional<robot::JointTargets> WalkRunner::step_rapid_turn(
+    const world::WorldSnapshot& snapshot,
+    const std::array<float, 3>& stable_velocity_command,
+    const robot::JointTargets& stable_targets,
+    bool reset) {
+    if (!rapid_turn_supported(snapshot, stable_velocity_command)) {
+        std::fill(
+            rapid_turn_previous_action_.begin(),
+            rapid_turn_previous_action_.end(),
+            0.0F);
+        rapid_turn_gait_phase_ = 0.0;
+        return std::nullopt;
+    }
+    if (reset) {
+        std::fill(
+            rapid_turn_previous_action_.begin(),
+            rapid_turn_previous_action_.end(),
+            0.0F);
+        rapid_turn_gait_phase_ = 0.0;
+    }
+
+    constexpr float action_scale = 0.5F;
+    constexpr float gait_frequency_hz = 1.75F;
+    const bool mirror_right_turn = stable_velocity_command[2] < 0.0F;
+    auto observation = build_run_policy_observation(
+        snapshot,
+        {0.0F, 0.0F, stable_velocity_command[2]},
+        rapid_turn_previous_action_,
+        rapid_turn_gait_phase_);
+    if (mirror_right_turn) {
+        observation = mirror_run_policy_observation(observation);
+    }
+
+    try {
+        auto action = rapid_turn_session_->run(observation);
+        if (action.size() != robot_model_.readable_joint_names().size()) {
+            throw std::runtime_error("rapid-turn actor output size mismatch");
+        }
+        if (mirror_right_turn) {
+            action = mirror_run_policy_action(action);
+        }
+        robot::JointTargets targets = stable_targets;
+        for (std::size_t i = 0; i < action.size(); ++i) {
+            if (!std::isfinite(action[i])) {
+                throw std::runtime_error("rapid-turn actor returned non-finite action");
+            }
+            action[i] = std::clamp(action[i], -10.0F, 10.0F);
+            if (i < 2U) {
+                continue;
+            }
+            targets[i].q_deg = math::rad_to_deg(
+                decode_run_policy_target_rad(i, action[i], action_scale));
+            targets[i].kp = 25.0;
+            targets[i].kd = 0.6;
+        }
+        rapid_turn_previous_action_ = std::move(action);
+        rapid_turn_gait_phase_ = std::fmod(
+            rapid_turn_gait_phase_ + 0.02 * gait_frequency_hz, 1.0);
+        return targets;
+    } catch (const std::exception& error) {
+        std::cerr << "MY3D_RAPID_TURN_DISABLED error=" << error.what() << '\n';
+        rapid_turn_disabled_ = true;
+        rapid_turn_active_ = false;
+        std::fill(
+            rapid_turn_previous_action_.begin(),
+            rapid_turn_previous_action_.end(),
+            0.0F);
+        rapid_turn_gait_phase_ = 0.0;
+        return std::nullopt;
+    }
 }
 
 std::array<float, 3> WalkRunner::compute_velocity_command(
@@ -150,7 +498,13 @@ std::array<float, 3> WalkRunner::compute_velocity_command(
         rel_orientation_deg = math::normalize_deg(command.orientation_deg.value());
     }
 
-    velocity[2] = static_cast<float>(kOrientationToAngVelScale * deg_to_rad(rel_orientation_deg));
+    const double orientation_gain = std::clamp(
+        std::isfinite(command.orientation_gain) ? command.orientation_gain : 1.0,
+        0.0,
+        4.0);
+    velocity[2] = static_cast<float>(
+        kOrientationToAngVelScale * orientation_gain *
+        deg_to_rad(rel_orientation_deg));
     velocity[0] = std::clamp(velocity[0], -0.5F, 1.0F);
     velocity[1] = std::clamp(velocity[1], -0.5F, 0.5F);
     velocity[2] = std::clamp(velocity[2], -0.5F, 0.5F);
@@ -219,10 +573,32 @@ WalkStepResult WalkRunner::step(
     }
     previous_action_ = action;
 
+    auto stable_targets = decode_action(snapshot, action, role_id);
+    const auto rapid_turn_targets = step_rapid_turn(
+        snapshot, velocity_command, stable_targets, reset);
+    if (rapid_turn_targets.has_value()) {
+        fast_walk_active_ = false;
+        std::fill(
+            fast_previous_action_.begin(), fast_previous_action_.end(), 0.0F);
+        fast_gait_phase_ = 0.0;
+        return {
+            observation_,
+            action,
+            *rapid_turn_targets,
+            false,
+            true,
+            velocity_command[2] < 0.0F,
+        };
+    }
+    const auto fast_targets = step_fast_walk(
+        snapshot, command, velocity_command, stable_targets, reset);
     return {
         observation_,
         action,
-        decode_action(snapshot, action, role_id),
+        fast_targets.has_value() ? *fast_targets : std::move(stable_targets),
+        fast_targets.has_value(),
+        false,
+        false,
     };
 }
 

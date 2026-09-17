@@ -22,6 +22,14 @@ struct RuntimeConfig {
     bool enable_dynamic_pass{true};
     int dynamic_pass_forced_rollout_id{-1};
     bool enable_goalkeeper_intercept{true};
+    bool enable_parameterized_kick{false};
+    bool enable_fast_walk{false};
+    std::string fast_walk_model;
+    bool enable_rapid_turn{false};
+    std::string rapid_turn_model;
+    bool enable_learned_kick{false};
+    bool shadow_learned_kick{false};
+    std::string learned_kick_model;
 
     /// Parses supported command-line options and preserves unspecified defaults.
     static RuntimeConfig from_args(int argc, char* argv[]);

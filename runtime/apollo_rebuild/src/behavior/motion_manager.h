@@ -8,12 +8,17 @@
 #include "src/decision/high_level_command.h"
 #include "src/behavior/getup_runner.h"
 #include "src/behavior/keyframe_runner.h"
+#include "src/behavior/kick_execution_profile.h"
+#include "src/behavior/kick_residual_runner.h"
+#include "src/behavior/learned_kick_runner.h"
+#include "src/behavior/procedural_kick_runner.h"
 #include "src/behavior/walk_runner.h"
 #include "src/robot/joint_targets.h"
 #include "src/world/world_snapshot.h"
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace behavior {
@@ -51,6 +56,9 @@ private:
     static constexpr double kGetUpTimeoutS = 6.0;
 
     WalkRunner walk_runner_;
+    std::optional<KickResidualRunner> kick_residual_runner_;
+    std::optional<ProceduralKickRunner> procedural_kick_runner_;
+    std::optional<LearnedKickRunner> learned_kick_runner_;
     KeyframeRunner neutral_runner_;
     GetupRunner getup_runner_;
     std::unique_ptr<DynamicPassRunner> dynamic_pass_runner_;
@@ -58,14 +66,28 @@ private:
     bool walk_reset_pending_{false};
     bool get_up_phase_reset_pending_{false};
     double get_up_start_time_{0.0};
+    double kick_start_time_{0.0};
+    bool parameterized_kick_enabled_{false};
+    bool learned_kick_enabled_{false};
+    bool learned_kick_shadow_{false};
+    KickExecutionProfile kick_profile_;
+    bool kick_residual_active_{false};
+    bool procedural_kick_active_{false};
+    bool learned_kick_active_{false};
+    bool suppress_kick_until_variant_change_{false};
 
     MotionStepResult step_get_up(
         const world::WorldSnapshot& snapshot,
+        bool reset);
+    MotionStepResult step_kick(
+        const world::WorldSnapshot& snapshot,
+        const decision::KickCommand& command,
         bool reset);
     void enter_get_up_phase(
         GetUpPhase phase,
         double server_time);
     void reset_get_up_state();
+    void reset_kick_state();
     void reset_dynamic_pass_state();
 };
 

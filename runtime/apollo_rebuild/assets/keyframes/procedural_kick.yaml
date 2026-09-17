@@ -1,0 +1,242 @@
+schema_version: 1
+description: >-
+  Model-independent T1 kick anchors. Trajectory parameters retain their
+  exact-physics evidence, while the match runtime deliberately uses a broad
+  contact corridor until a phase-conditioned transition policy replaces the
+  static capture.
+anchors:
+  - name: right_dribble_055m_v1
+    mode: dribble
+    target_distance_m: 0.55
+    target_distance_tolerance_m: 0.30
+    target_angle_deg: 0.0
+    target_angle_tolerance_deg: 15.0
+    requested_speed_mps: 0.90
+    requested_speed_tolerance_mps: 0.20
+    ball_local_x_m: 0.32
+    ball_local_y_m: 0.04
+    ball_x_tolerance_m: 0.12
+    ball_y_tolerance_m: 0.15
+    kp: 150.0
+    kd: 1.0
+    base_pose: neutral
+    kicking_foot: right
+    key_times_s: [0.0, 0.18, 0.34, 0.54, 0.76, 1.20]
+    parameters:
+      - -0.005230483107572986
+      - -0.12490284935836007
+      - 0.10756802083474919
+      - -0.08088059340500209
+      - 0.282070709916575
+      - 0.15347690640652076
+      - 0.043456063854626026
+      - -0.32233818990986896
+      - 0.2453872232908769
+      - 0.07919615529244747
+      - -0.4328683451427111
+      - -0.0865765795896539
+      - -0.022804361366285903
+      - 0.3365781310929396
+    evidence:
+      simulator: exact_mujoco_rcssservermj_assets
+      nominal_progress_m: 0.5216432109316447
+      nominal_peak_speed_mps: 0.8727516427362522
+      nominal_minimum_torso_height_m: 0.6466808629361646
+      nominal_minimum_upright: 0.9706140903135335
+      heldout_ball_x_offset_range_m: [-0.020, 0.020]
+      heldout_ball_y_offset_range_m: [0.015, 0.065]
+      heldout_trials: 100
+      heldout_successes: 100
+      training_manifest_sha256: 010b8a1bafad57ad78ee3581de0f542815f39a27dd8e0188fc42172a69539463
+      heldout_manifest_sha256: 27bfba114fcda8ef495a541ffa37c91fac5bdfebecf23374580b12bf2982ee5b
+      server_status: contact_observed
+  - name: right_shot_4m_v1
+    mode: shot
+    target_distance_m: 4.0
+    target_distance_tolerance_m: 1.00
+    target_angle_deg: 0.0
+    target_angle_tolerance_deg: 15.0
+    requested_speed_mps: 2.50
+    requested_speed_tolerance_mps: 0.35
+    ball_local_x_m: 0.3260
+    ball_local_y_m: 0.0400
+    ball_x_tolerance_m: 0.1200
+    ball_y_tolerance_m: 0.1500
+    kp: 150.0
+    kd: 1.0
+    base_pose: neutral
+    kicking_foot: right
+    key_times_s: [0.0, 0.18, 0.34, 0.54, 0.76, 1.20]
+    parameters:
+      - -0.016044540895640516
+      - -0.184701461805373
+      - -0.3864857856516354
+      - -0.1353745083935506
+      - 0.5342339305008693
+      - 0.45723896957674315
+      - -0.5206092315097435
+      - -0.705290312048366
+      - 0.16443905929074193
+      - -0.15082022676782475
+      - -0.3391656487514725
+      - 0.1401582833055168
+      - -0.009735321151737725
+      - 0.165426101723688
+    evidence:
+      simulator: exact_mujoco_rcssservermj_assets
+      nominal_progress_m: 3.7118719430756406
+      nominal_lateral_error_m: 0.33819471086962094
+      nominal_peak_speed_mps: 2.7519227695713124
+      nominal_minimum_torso_height_m: 0.6127824653935606
+      nominal_minimum_upright: 0.8920924159604415
+      heldout_ball_x_offset_range_m: [-0.008, 0.020]
+      heldout_ball_y_offset_range_m: [-0.012, 0.012]
+      heldout_trials: 100
+      heldout_successes: 100
+      training_manifest_sha256: 2b6b40b78c3acb4b62c87b2a1145ea6ade0169043d1245707f5611aca063c978
+      heldout_manifest_sha256: 5cc692c8677a26f64e43a21f88cb0ccab46f744c33d06d7c6cc9dcda77fd183c
+      server_status: contact_observed
+      server_run: server-shot-s20261053-v1
+      server_cycles: 1200
+      server_decision_samples: 12
+      server_contact_events: 1
+      server_ordered_log_set_sha256: eea016cf3e76d383f81eca426e2457eb6616eff883963f5824efa674bc992aec
+  - name: right_clear_6m_v1
+    mode: clear
+    target_distance_m: 6.0
+    target_distance_tolerance_m: 1.00
+    target_angle_deg: 0.0
+    target_angle_tolerance_deg: 15.0
+    requested_speed_mps: 3.50
+    requested_speed_tolerance_mps: 0.35
+    ball_local_x_m: 0.3260
+    ball_local_y_m: 0.0400
+    ball_x_tolerance_m: 0.1200
+    ball_y_tolerance_m: 0.1500
+    kp: 150.0
+    kd: 1.0
+    base_pose: neutral
+    kicking_foot: right
+    key_times_s: [0.0, 0.18, 0.34, 0.54, 0.76, 1.20]
+    parameters:
+      - -0.004070249813699071
+      - -0.18490638062255374
+      - -0.6614885457382733
+      - -0.34731948567278437
+      - 0.5149913170850882
+      - 0.322115356727297
+      - -0.3596686716594586
+      - -0.6808267792848829
+      - 0.08243180868438905
+      - 0.023128576214443253
+      - -0.5
+      - 0.21149582256962046
+      - -0.1033253168125936
+      - 0.12424417220529549
+    evidence:
+      simulator: exact_mujoco_rcssservermj_assets
+      success_profile: clearance
+      minimum_progress_m: 4.5
+      corridor_half_width_m: 1.5
+      minimum_launch_speed_mps: 2.5
+      nominal_progress_m: 5.181543506650211
+      nominal_lateral_error_m: 1.086818849472297
+      nominal_peak_speed_mps: 3.4817282683424757
+      nominal_minimum_torso_height_m: 0.6016711885980958
+      nominal_minimum_upright: 0.8582166598488056
+      heldout_ball_x_offset_range_m: [-0.008, 0.020]
+      heldout_ball_y_offset_range_m: [-0.012, 0.012]
+      heldout_trials: 100
+      heldout_successes: 100
+      training_manifest_sha256: 8c40e2bb86c00dbbd733b41d933a955f408ff3c3bad6ce61fdc6a8d52c054c51
+      heldout_manifest_sha256: 64dfeedc9fbc8e31b491305493894f26f46ee12d589e84f8400543e1388bf34e
+      server_status: contact_observed
+      server_run: server-clear-s20261059-v1
+      server_cycles: 1200
+      server_decision_samples: 13
+      server_contact_events: 1
+      server_ordered_log_set_sha256: 31425062b99a3711a393286d47bc455d300d7b23aaab9f279f4897caf2560c7b
+  - name: right_pass_3p5m_experimental_v1
+    mode: pass
+    target_distance_m: 3.5
+    target_distance_tolerance_m: 1.00
+    target_angle_deg: 0.0
+    target_angle_tolerance_deg: 15.0
+    requested_speed_mps: 2.20
+    requested_speed_tolerance_mps: 0.35
+    ball_local_x_m: 0.31
+    ball_local_y_m: -0.04
+    ball_x_tolerance_m: 0.15
+    ball_y_tolerance_m: 0.15
+    kp: 150.0
+    kd: 1.0
+    base_pose: neutral
+    kicking_foot: right
+    key_times_s: [0.0, 0.18, 0.34, 0.54, 0.76, 1.20]
+    parameters:
+      - -0.08410323447625498
+      - -0.021811002164689904
+      - 0.3498902409244769
+      - 0.4428462538429489
+      - 0.10083392451200629
+      - -0.6402743915756124
+      - 0.2580889399020736
+      - -0.2638257260987846
+      - 0.036502657321147484
+      - -0.11159670360396745
+      - 0.2367357226849713
+      - -0.278101716344015
+      - 0.16494286465333582
+      - 0.036035461421890444
+    evidence:
+      simulator: exact_mujoco_rcssservermj_assets
+      nominal_progress_m: 3.5517633934026462
+      nominal_lateral_error_m: 0.02566001760262913
+      nominal_arrival_speed_error_mps: 0.12332005045234018
+      nominal_minimum_torso_height_m: 0.6097721690461767
+      nominal_minimum_upright: 0.9932264461935759
+      heldout_status: not_run
+      server_status: not_run
+      training_manifest_sha256: bc91b2fd16d9c99d19e53517381a18a24d68965c50b35332195feb76ac6102b3
+  - name: right_pass_5m_experimental_v1
+    mode: pass
+    target_distance_m: 5.0
+    target_distance_tolerance_m: 1.00
+    target_angle_deg: 0.0
+    target_angle_tolerance_deg: 15.0
+    requested_speed_mps: 3.00
+    requested_speed_tolerance_mps: 0.35
+    ball_local_x_m: 0.31
+    ball_local_y_m: -0.04
+    ball_x_tolerance_m: 0.15
+    ball_y_tolerance_m: 0.15
+    kp: 150.0
+    kd: 1.0
+    base_pose: neutral
+    kicking_foot: right
+    key_times_s: [0.0, 0.18, 0.34, 0.54, 0.76, 1.20]
+    parameters:
+      - 0.015691192537934398
+      - 0.03630610836727967
+      - 0.23530446841805178
+      - 0.3927212737966278
+      - -0.4407029272644398
+      - -0.6250476576026497
+      - 0.11328020659779162
+      - -0.4155086226689468
+      - -0.20642849397885618
+      - -0.08489980401674418
+      - 0.0438223986220482
+      - -0.03203267710769589
+      - -0.03687013491558312
+      - -0.31544885481399254
+    evidence:
+      simulator: exact_mujoco_rcssservermj_assets
+      nominal_progress_m: 4.970255398362303
+      nominal_lateral_error_m: 0.0420384513799531
+      nominal_arrival_speed_error_mps: 0.2672508381872887
+      nominal_minimum_torso_height_m: 0.6163349053378362
+      nominal_minimum_upright: 0.995002409974648
+      heldout_status: not_run
+      server_status: not_run
+      training_manifest_sha256: 3ccee26b2e00510d4f06e433f2cc7a64742ebdc78de0c976ade5b176d1fb758a

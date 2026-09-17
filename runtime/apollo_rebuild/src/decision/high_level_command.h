@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -23,15 +24,42 @@ struct WalkCommand {
     bool target_absolute{true};
     std::optional<double> orientation_deg;
     bool orientation_absolute{true};
+    /// Scales the stable walk orientation controller.  The default preserves
+    /// the command contract; precision setup code may raise it without
+    /// changing translational speed.
+    double orientation_gain{1.0};
     std::optional<int> role_id;
 };
 
 /// Requests execution of the learned get-up policy.
 struct GetUpCommand {};
+
+enum class KickMode : std::uint8_t {
+    ForwardContact,
+    DribbleTouch,
+    TargetedPass,
+    Shot,
+    Clear,
+};
+
+/// Bounded ball-action request consumed by the optional kick execution stack.
+struct KickCommand {
+    std::optional<std::array<double, 2>> target_point_m;
+    double requested_ball_speed_mps{0.0};
+    std::optional<int> receiver_player_number;
+    std::uint32_t action_id{0U};
+    KickMode mode{KickMode::ForwardContact};
+    bool allow_forward_contact_fallback{false};
+};
 /// Requests the neutral standing keyframe.
 struct NeutralCommand {};
 
 /// Command variants emitted by the decision layer and consumed by motion control.
-using HighLevelCommand = std::variant<BeamCommand, WalkCommand, GetUpCommand, NeutralCommand>;
+using HighLevelCommand = std::variant<
+    BeamCommand,
+    WalkCommand,
+    GetUpCommand,
+    KickCommand,
+    NeutralCommand>;
 
 }  // namespace decision

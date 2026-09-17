@@ -58,7 +58,56 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
             config.enable_goalkeeper_intercept = true;
         } else if (arg == "--disable-goalkeeper-intercept") {
             config.enable_goalkeeper_intercept = false;
+        } else if (arg == "--enable-parameterized-kick") {
+            config.enable_parameterized_kick = true;
+        } else if (arg == "--disable-parameterized-kick") {
+            config.enable_parameterized_kick = false;
+        } else if (arg == "--enable-fast-walk") {
+            config.enable_fast_walk = true;
+        } else if (arg == "--disable-fast-walk") {
+            config.enable_fast_walk = false;
+        } else if (arg == "--fast-walk-model") {
+            config.fast_walk_model = require_value("--fast-walk-model");
+        } else if (arg == "--enable-rapid-turn") {
+            config.enable_rapid_turn = true;
+        } else if (arg == "--disable-rapid-turn") {
+            config.enable_rapid_turn = false;
+        } else if (arg == "--rapid-turn-model") {
+            config.rapid_turn_model = require_value("--rapid-turn-model");
+        } else if (arg == "--enable-learned-kick") {
+            config.enable_learned_kick = true;
+        } else if (arg == "--disable-learned-kick") {
+            config.enable_learned_kick = false;
+        } else if (arg == "--shadow-learned-kick") {
+            config.shadow_learned_kick = true;
+        } else if (arg == "--disable-learned-kick-shadow") {
+            config.shadow_learned_kick = false;
+        } else if (arg == "--learned-kick-model") {
+            config.learned_kick_model = require_value("--learned-kick-model");
         }
+    }
+
+    if (config.enable_fast_walk && config.fast_walk_model.empty()) {
+        throw std::invalid_argument(
+            "--enable-fast-walk requires --fast-walk-model");
+    }
+    if (config.enable_rapid_turn && config.rapid_turn_model.empty()) {
+        throw std::invalid_argument(
+            "--enable-rapid-turn requires --rapid-turn-model");
+    }
+    if (config.enable_learned_kick && config.shadow_learned_kick) {
+        throw std::invalid_argument(
+            "learned kick active and shadow modes are mutually exclusive");
+    }
+    if ((config.enable_learned_kick || config.shadow_learned_kick) &&
+        !config.enable_parameterized_kick) {
+        throw std::invalid_argument(
+            "learned kick modes require --enable-parameterized-kick");
+    }
+    if ((config.enable_learned_kick || config.shadow_learned_kick) &&
+        config.learned_kick_model.empty()) {
+        throw std::invalid_argument(
+            "learned kick modes require --learned-kick-model");
     }
 
     return config;

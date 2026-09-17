@@ -136,8 +136,24 @@ Run a browser-rendered 7v7 against the frozen pristine Apollo checkout with:
 scripts/run_web_match_apollo_rebuild_vs_base.sh 120000
 ```
 
-The match uses the default-on dynamic-pass selector. Set
-`APOLLO_REBUILD_ENABLE_DYNAMIC_PASS=0` to run the clean A/B baseline.
+The developed-team launcher currently enables the complete candidate action
+stack: dynamic pass, goalkeeper walk intercept, parameterized kick, the learned
+2 m kick transition, FastWalkV2, and RapidTurnV1 (including the exact mirrored
+right turn). The three ONNX files are selected from `/home/win98/rl_runs` and
+checked against locked SHA-256 values before any agent starts. These are
+integrated candidates, not a claim that every one improves match results. Set
+the corresponding environment variable to `0`/`off` to run an ablation:
+
+```bash
+APOLLO_REBUILD_ENABLE_DYNAMIC_PASS=0 \
+APOLLO_REBUILD_ENABLE_GOALKEEPER_INTERCEPT=0 \
+APOLLO_ENABLE_PARAMETERIZED_KICK=0 \
+APOLLO_LEARNED_KICK_MODE=off \
+APOLLO_ENABLE_FAST_WALK=0 \
+APOLLO_ENABLE_RAPID_TURN=0 \
+scripts/run_web_match_apollo_rebuild_vs_base.sh 120000
+```
+
 The headless `scripts/run_apollo_rebuild_match.sh` fixture also supports
 `REBUILD_SIDE=right`; its optional `MATCH_NEAR_BALL_*` coordinates are always
 server-global, while the script mirrors which team and supporting players it
@@ -166,6 +182,24 @@ places around the scene.
 | `--dynamic-pass-force-rollout <id>` | — | — | Experiment only: execute one known prototype after the normal release geometry and two-frame confirmation |
 | `--enable-goalkeeper-intercept` | — | enabled | Track reachable incoming goal-line crossings with the existing Walk |
 | `--disable-goalkeeper-intercept` | — | — | Restore the upstream fixed-centre goalkeeper hold |
+| `--enable-parameterized-kick` | — | disabled | Enable bounded dribble/pass/shot/clear profiles and their safe fallback chain |
+| `--disable-parameterized-kick` | — | — | Disable all parameterized kick executors |
+| `--enable-learned-kick` | — | disabled | Actively execute the learned fixed-2 m transition where its contract matches |
+| `--shadow-learned-kick` | — | disabled | Run the learned transition without taking motor ownership |
+| `--learned-kick-model <path>` | — | — | ONNX model required by active or shadow learned-kick mode |
+| `--enable-fast-walk` | — | disabled | Enable the guarded FastWalkV2 forward specialist |
+| `--fast-walk-model <path>` | — | — | Phase-v2 ONNX required when FastWalkV2 is enabled |
+| `--enable-rapid-turn` | — | disabled | Enable guarded left turn and exact mirrored right turn |
+| `--rapid-turn-model <path>` | — | — | Run-policy ONNX required when RapidTurnV1 is enabled |
+
+Raw single-agent invocations leave model-backed candidates disabled because
+their model paths are installation-specific. The developed-team launcher above
+supplies the verified paths and enables them by default. Large-angle open-play
+navigation first emits a pure-yaw command so RapidTurn can satisfy its
+near-zero-translation entry contract; near-ball precision and restarts remain
+on the stable Walk. FastWalk is restricted by posture, gyro, command direction,
+ball distance and recovery cooldown gates. A bounded 3.5 s near-contact ball
+track prevents a one-frame visual loss from cancelling a contact action.
 
 The dynamic-pass selector is enabled by default and applies only to the active
 player during `PlayOn`; all other commands and roles retain the baseline path.
@@ -277,6 +311,8 @@ server ──► world ──► decision ──► behavior ──► motor act
 - `assets/networks/getup/policy.onnx` — learned get-up policy.
 - `assets/networks/dynamic_pass/selector.onnx` — frozen narrow-pass selector,
   loaded by default unless `--disable-dynamic-pass` is supplied.
+- `assets/keyframes/procedural_kick.yaml` — full-body procedural kick fallback.
+- `assets/keyframes/kick_residual_table.yaml` — bounded residual kick bank.
 - `assets/keyframes/neutral.yaml` — neutral-pose keyframe.
 
 All runtime assets are included in deployment archives produced by `pack.sh`.

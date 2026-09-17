@@ -27,6 +27,11 @@ struct APState {
     bool dribble_ready{false};
     bool set_play_released{false};
     double previous_ball_distance{0.0};
+    double kick_release_candidate_since_s{-1.0};
+    double kick_active_until_s{-1.0};
+    double kick_cooldown_until_s{-1.0};
+    std::uint32_t next_kick_action_id{1U};
+    std::optional<KickCommand> active_kick_command;
 };
 
 /// Short-lived goalkeeper intent retained across noisy ball-velocity frames.

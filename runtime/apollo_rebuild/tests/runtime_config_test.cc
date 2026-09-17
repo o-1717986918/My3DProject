@@ -36,5 +36,19 @@ int main() {
     assert(!parse({"ApolloCodeBase", "--enable-goalkeeper-intercept",
                    "--disable-goalkeeper-intercept"})
                 .enable_goalkeeper_intercept);
+    const auto motion = parse({
+        "ApolloCodeBase",
+        "--enable-parameterized-kick",
+        "--enable-fast-walk", "--fast-walk-model", "fast.onnx",
+        "--enable-rapid-turn", "--rapid-turn-model", "turn.onnx",
+        "--enable-learned-kick", "--learned-kick-model", "kick.onnx",
+    });
+    assert(motion.enable_parameterized_kick);
+    assert(motion.enable_fast_walk);
+    assert(motion.fast_walk_model == "fast.onnx");
+    assert(motion.enable_rapid_turn);
+    assert(motion.rapid_turn_model == "turn.onnx");
+    assert(motion.enable_learned_kick);
+    assert(motion.learned_kick_model == "kick.onnx");
     return 0;
 }

@@ -101,8 +101,12 @@ add_library(behavior_core
     src/behavior/dynamic_pass_runner.cc
     src/behavior/getup_runner.cc
     src/behavior/keyframe_runner.cc
+    src/behavior/kick_execution_profile.cc
+    src/behavior/kick_residual_runner.cc
+    src/behavior/learned_kick_runner.cc
     src/behavior/motion_manager.cc
     src/behavior/onnx_session.cc
+    src/behavior/procedural_kick_runner.cc
     src/behavior/walk_runner.cc
 )
 
@@ -225,6 +229,12 @@ if(BUILD_TESTING)
     target_link_libraries(goal_kick_behavior_test PRIVATE decision_core)
     add_test(NAME goal_kick_behavior_test COMMAND goal_kick_behavior_test)
 
+    add_executable(discrete_ball_action_test
+        tests/discrete_ball_action_test.cc
+    )
+    target_link_libraries(discrete_ball_action_test PRIVATE decision_core)
+    add_test(NAME discrete_ball_action_test COMMAND discrete_ball_action_test)
+
     add_executable(dynamic_pass_runner_test
         tests/dynamic_pass_runner_test.cc
     )
@@ -237,5 +247,49 @@ if(BUILD_TESTING)
     )
     target_include_directories(runtime_config_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME runtime_config_test COMMAND runtime_config_test)
+
+    add_executable(run_policy_reflection_test
+        tests/run_policy_reflection_test.cc
+    )
+    target_link_libraries(run_policy_reflection_test PRIVATE world_core)
+    target_include_directories(run_policy_reflection_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME run_policy_reflection_test COMMAND run_policy_reflection_test)
+
+    add_executable(kick_execution_profile_test
+        tests/kick_execution_profile_test.cc
+        src/behavior/kick_execution_profile.cc
+    )
+    target_link_libraries(kick_execution_profile_test PRIVATE world_core)
+    target_include_directories(kick_execution_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME kick_execution_profile_test COMMAND kick_execution_profile_test)
+
+    add_executable(kick_residual_runner_test
+        tests/kick_residual_runner_test.cc
+        src/behavior/kick_residual_runner.cc
+    )
+    target_link_libraries(
+        kick_residual_runner_test
+        PRIVATE world_core "${APOLLO_YAML_CPP_LINK}"
+    )
+    target_include_directories(kick_residual_runner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME kick_residual_runner_test COMMAND kick_residual_runner_test)
+
+    add_executable(procedural_kick_runner_test
+        tests/procedural_kick_runner_test.cc
+        src/behavior/procedural_kick_runner.cc
+    )
+    target_link_libraries(
+        procedural_kick_runner_test
+        PRIVATE world_core "${APOLLO_YAML_CPP_LINK}"
+    )
+    target_include_directories(procedural_kick_runner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME procedural_kick_runner_test COMMAND procedural_kick_runner_test)
+
+    add_executable(learned_kick_runner_test
+        tests/learned_kick_runner_test.cc
+    )
+    target_link_libraries(learned_kick_runner_test PRIVATE behavior_core)
+    target_include_directories(learned_kick_runner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME learned_kick_runner_test COMMAND learned_kick_runner_test)
 
 endif()

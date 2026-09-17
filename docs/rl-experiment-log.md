@@ -2008,3 +2008,31 @@ export, fixed-shot evaluator and stable Warp execution path. The next action
 candidate must introduce an explicit body-block or dive motion prior and train
 its transition/recovery, rather than extending the same lateral-Walk residual
 run.
+
+## Rebuild candidate action-stack integration smoke — 2026-09-17
+
+Per product direction, every candidate with a complete runtime contract was
+migrated into `runtime/apollo_rebuild` and enabled by default in the developed
+team launcher: the fixed-2 m learned transition, bounded parameterized kick
+profiles, FastWalkV2, and RapidTurnV1 with exact right-side reflection. Dynamic
+pass and the walk-reachable goalkeeper intercept remain enabled. The launcher
+locks all three external ONNX files by SHA-256; the raw binary keeps model-backed
+features opt-in because a standalone installation cannot assume local training
+paths.
+
+Two integration defects were removed before the live run. ONNX loading now
+accepts only a dynamic leading batch dimension while keeping feature dimensions
+strict. Far navigation with at least 50 degrees of heading error now emits a
+pure-yaw command first, making the RapidTurn translation gate reachable. A
+bounded near-contact track retains the last real ball point for 3.5 seconds
+through foot-level visual occlusion and resets on play-mode changes.
+
+The rebuilt runtime passed 9/9 C++ tests. In the first natural 7v7 smoke against
+frozen Apollo, the first ~145 seconds produced 10 FastWalkV2, 5 left RapidTurn,
+7 mirrored-right RapidTurn, 6 parameterized-kick, 6 dynamic-pass sampled states,
+and one authorized forward-fallback sample, with no client or model error. It
+also produced three GetUp samples. This result proves loading, reachability,
+direction reflection and runtime coexistence only; it does not overturn the
+earlier negative performance comparisons for FastWalk/RapidTurn or establish a
+match-strength gain. Logs are under
+`/home/win98/rl_runs/live/rebuild-all-capabilities-v3`.
