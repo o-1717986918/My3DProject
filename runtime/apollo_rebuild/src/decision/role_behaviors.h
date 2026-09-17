@@ -91,6 +91,12 @@ private:
 /// Clears persistent state owned by all role behavior instances.
 void reset_role_behavior_state();
 
+/// Enables optional candidate behavior that must stay dormant in the stable
+/// rebuild unless its corresponding motion stack is explicitly selected.
+void configure_candidate_action_features(
+    bool enable_discrete_ball_action,
+    bool enable_turn_first);
+
 int current_role_from_blackboard(const Blackboard& blackboard);
 
 /// Selects the behavior matching the current role, if one is available.

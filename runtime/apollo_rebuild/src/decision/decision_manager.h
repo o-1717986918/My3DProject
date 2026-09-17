@@ -14,7 +14,10 @@ namespace decision {
 /// Owns persistent decision state and evaluates one command per world snapshot.
 class DecisionManager {
 public:
-    explicit DecisionManager(bool enable_goalkeeper_intercept = false);
+    explicit DecisionManager(
+        bool enable_goalkeeper_intercept = false,
+        bool enable_discrete_ball_action = false,
+        bool enable_turn_first = false);
 
     HighLevelCommand decide(const world::WorldSnapshot& snapshot);
     const Blackboard& blackboard() const;

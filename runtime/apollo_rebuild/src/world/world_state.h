@@ -18,7 +18,11 @@ namespace world {
 /// Fuses raw perception and team communication into a canonical world snapshot.
 class WorldState {
 public:
-    WorldState(std::string team_name, int player_number, int max_players_per_team);
+    WorldState(
+        std::string team_name,
+        int player_number,
+        int max_players_per_team,
+        bool enable_near_contact_ball_track = false);
 
     /// Applies one perception frame and refreshes all derived estimates.
     void update_from_perception(
@@ -36,6 +40,7 @@ private:
     Vec3 last_known_ball_position_m_{0.0, 0.0, 0.0};
     double last_known_ball_time_{-1.0};
     double near_contact_ball_track_until_s_{-1.0};
+    bool enable_near_contact_ball_track_{false};
     BallKalman ball_kalman_;
 
     // Per-opponent motion-gate + smoothing state (indexed by player_number - 1).

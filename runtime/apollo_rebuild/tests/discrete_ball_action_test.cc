@@ -7,6 +7,8 @@
 #include <variant>
 
 int main() {
+    decision::configure_candidate_action_features(true, true);
+
     world::WorldSnapshot snapshot;
     snapshot.player_number = 7;
     snapshot.play_mode = world::PlayMode::PlayOn;

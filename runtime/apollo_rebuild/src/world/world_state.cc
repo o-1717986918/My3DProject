@@ -97,7 +97,12 @@ Vec3 set_play_ball_anchor(PlayMode mode) {
 
 }  // namespace
 
-WorldState::WorldState(std::string team_name, int player_number, int max_players_per_team) {
+WorldState::WorldState(
+    std::string team_name,
+    int player_number,
+    int max_players_per_team,
+    bool enable_near_contact_ball_track)
+    : enable_near_contact_ball_track_(enable_near_contact_ball_track) {
     snapshot_.team_name = std::move(team_name);
     snapshot_.player_number = player_number;
     snapshot_.teammates.resize(static_cast<std::size_t>(max_players_per_team));
@@ -282,7 +287,8 @@ void WorldState::update_from_perception(
             const double self_to_ball =
                 math::norm3(math::vec3_sub(proposed_ball, self.position_m));
             near_contact_ball_track_until_s_ =
-                self_to_ball <= kNearContactBallTrackActivationDistanceM
+                enable_near_contact_ball_track_ &&
+                    self_to_ball <= kNearContactBallTrackActivationDistanceM
                     ? frame.server_time + kNearContactBallTrackLifetimeS
                     : -1.0;
             ball_kalman_.update(proposed_ball, self_to_ball, frame.server_time);
@@ -646,7 +652,8 @@ void WorldState::refresh_ball_position_metadata() {
         snapshot_.ball.position_age_s = std::numeric_limits<double>::infinity();
     }
     snapshot_.ball.near_contact_track =
-        !snapshot_.ball.visible && last_known_ball_time_ > 0.0 &&
+        enable_near_contact_ball_track_ && !snapshot_.ball.visible &&
+        last_known_ball_time_ > 0.0 &&
         snapshot_.server_time <= near_contact_ball_track_until_s_;
     snapshot_.ball.position_valid = snapshot_.ball.visible ||
         snapshot_.ball.position_age_s <= kMaximumUsableBallAgeS ||

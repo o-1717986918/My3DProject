@@ -54,6 +54,9 @@ constexpr double kGkInterceptReleaseMarginS = 0.25;
 constexpr double kGkInterceptMaxBallAgeS = 0.25;
 constexpr double kGkInterceptFrameMarginM = 0.25;
 
+bool g_enable_discrete_ball_action = false;
+bool g_enable_turn_first = false;
+
 bool is_our_set_play(const world::WorldSnapshot& snapshot) {
     return snapshot.play_mode_group == world::PlayModeGroup::OurKick;
 }
@@ -165,7 +168,8 @@ WalkCommand make_walk_command_avoiding(
     // still clamps |vy| in every mode, so strafing stays within its safe cap.
     const bool strafe = suppress_heading_slowdown ||
                         (orient_to_ball && dist <= kStrafeMaxDistM);
-    if (!strafe && heading_error_abs_deg >= kTurnFirstHeadingDeg) {
+    if (g_enable_turn_first && !strafe &&
+        heading_error_abs_deg >= kTurnFirstHeadingDeg) {
         // A large combined translation+yaw request traps the stable actor in
         // slow lateral motion and prevents the dedicated rapid-turn policy from
         // satisfying its near-zero-translation entry contract.  Turn in place
@@ -418,9 +422,11 @@ HighLevelCommand make_ap_push_ball_to_goal(APDecisionContext& context) {
     const double absolute_direction_deg = math::norm2(goal_direction) > 1e-6
         ? math::vector_angle_deg(goal_direction)
         : 0.0;
-    if (const auto action = maybe_make_discrete_ball_action(
-            context, absolute_direction_deg)) {
-        return *action;
+    if (g_enable_discrete_ball_action) {
+        if (const auto action = maybe_make_discrete_ball_action(
+                context, absolute_direction_deg)) {
+            return *action;
+        }
     }
     return make_dribble_command(context, absolute_direction_deg);
 }
@@ -703,6 +709,14 @@ std::optional<HighLevelCommand> select_role_behavior(
 void reset_role_behavior_state() {
     ap_behavior_instance().reset_state();
     gk_behavior_instance().reset_state();
+}
+
+void configure_candidate_action_features(
+    bool enable_discrete_ball_action,
+    bool enable_turn_first) {
+    g_enable_discrete_ball_action = enable_discrete_ball_action;
+    g_enable_turn_first = enable_turn_first;
+    reset_role_behavior_state();
 }
 
 }  // namespace decision

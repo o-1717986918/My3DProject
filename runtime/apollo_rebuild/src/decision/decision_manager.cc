@@ -3,10 +3,18 @@
 
 #include "src/decision/decision_manager.h"
 
+#include "src/decision/role_behaviors.h"
+
 namespace decision {
 
-DecisionManager::DecisionManager(bool enable_goalkeeper_intercept)
-    : behavior_tree_(enable_goalkeeper_intercept) {}
+DecisionManager::DecisionManager(
+    bool enable_goalkeeper_intercept,
+    bool enable_discrete_ball_action,
+    bool enable_turn_first)
+    : behavior_tree_(enable_goalkeeper_intercept) {
+    configure_candidate_action_features(
+        enable_discrete_ball_action, enable_turn_first);
+}
 
 HighLevelCommand DecisionManager::decide(const world::WorldSnapshot& snapshot) {
     return behavior_tree_.evaluate(snapshot, blackboard_, role_manager_);
