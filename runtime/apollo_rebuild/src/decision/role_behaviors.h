@@ -8,6 +8,7 @@
 #include "src/decision/role_manager.h"
 #include "src/world/world_snapshot.h"
 
+#include <array>
 #include <optional>
 
 namespace decision {
@@ -22,6 +23,15 @@ public:
         const Blackboard& blackboard) const = 0;
 };
 
+/// A short position history for claiming a ball whose velocity estimate is
+/// unavailable. Each process owns its own history; no global team latch.
+struct LooseBallTrack {
+    std::array<double, 2> anchor_m{0.0, 0.0};
+    double stable_since_s{-1.0};
+    double last_observed_s{-1.0};
+    double claim_until_s{-1.0};
+};
+
 /// Persistent attacker state carried between decision cycles.
 struct APState {
     bool dribble_ready{false};
@@ -32,6 +42,7 @@ struct APState {
     double kick_cooldown_until_s{-1.0};
     std::uint32_t next_kick_action_id{1U};
     std::optional<KickCommand> active_kick_command;
+    LooseBallTrack goalkeeper_claim_track;
 };
 
 /// Short-lived goalkeeper intent retained across noisy ball-velocity frames.
@@ -39,6 +50,7 @@ struct GKState {
     bool intercept_active{false};
     double intercept_target_y_m{0.0};
     double intercept_until_s{-1.0};
+    LooseBallTrack loose_ball_track;
 };
 
 /// Generates the active-player command and set-play handoff state.
@@ -95,7 +107,8 @@ void reset_role_behavior_state();
 /// rebuild unless its corresponding motion stack is explicitly selected.
 void configure_candidate_action_features(
     bool enable_discrete_ball_action,
-    bool enable_turn_first);
+    bool enable_turn_first,
+    bool enable_goalkeeper_claim = false);
 
 int current_role_from_blackboard(const Blackboard& blackboard);
 

@@ -53,12 +53,94 @@ constexpr double kGkInterceptMaxTimeS = 3.0;
 constexpr double kGkInterceptReleaseMarginS = 0.25;
 constexpr double kGkInterceptMaxBallAgeS = 0.25;
 constexpr double kGkInterceptFrameMarginM = 0.25;
+constexpr double kGkAnticipationMaxBallAgeS = 0.50;
+constexpr double kGkAnticipationMaxOpponentAgeS = 0.75;
+constexpr double kGkAnticipationMaxOpponentBallDistanceM = 2.0;
+constexpr double kGkAnticipationStartBallXM = -5.0;
+constexpr double kGkAnticipationMaxOffsetM = 1.4;
+constexpr double kGkClaimMaxBallSpeedMps = 0.25;
+constexpr double kGkClaimOpponentClearanceM = 2.5;
+constexpr double kGkClaimStableDwellS = 0.30;
+constexpr double kGkClaimStableRadiusM = 0.12;
+constexpr double kGkClaimFollowThroughS = 2.0;
 
 bool g_enable_discrete_ball_action = false;
 bool g_enable_turn_first = false;
+bool g_enable_goalkeeper_claim = false;
 
 bool is_our_set_play(const world::WorldSnapshot& snapshot) {
     return snapshot.play_mode_group == world::PlayModeGroup::OurKick;
+}
+
+bool goalkeeper_can_claim_loose_ball(
+    const world::WorldSnapshot& snapshot, LooseBallTrack& track,
+    bool allow_contact_occlusion) {
+    const std::array<double, 2> ball{
+        snapshot.ball.position_m[0], snapshot.ball.position_m[1]};
+    const double goal_x = -field_geometry::kActualHalfLengthM;
+    const bool finishing_claim = track.claim_until_s >= snapshot.server_time;
+    const std::array<double, 2> self{
+        snapshot.self.position_m[0], snapshot.self.position_m[1]};
+    const bool near_contact_occlusion = allow_contact_occlusion &&
+        finishing_claim && math::planar_dist(self, ball) <= 0.80;
+    const double max_ball_age_s = near_contact_occlusion
+        ? 1.0 : kGkAnticipationMaxBallAgeS;
+    const double max_claim_x = goal_x + field_geometry::kGoalieAreaDepthM +
+        (finishing_claim ? 0.30 : -0.30);
+    if (snapshot.play_mode != world::PlayMode::PlayOn ||
+        !snapshot.ball.position_valid ||
+        snapshot.ball.position_age_s > max_ball_age_s ||
+        (snapshot.ball.velocity_valid &&
+         snapshot.ball.velocity_mps[0] < -0.05) ||
+        (!finishing_claim && !field_geometry::is_in_our_goalie_area(ball)) ||
+        ball[0] < goal_x + 0.5 ||
+        ball[0] > max_claim_x ||
+        std::abs(ball[1]) >
+            field_geometry::kGoalieAreaWidthM * 0.5 - 0.3) {
+        track = {};
+        return false;
+    }
+    const auto opponent_is_close = [&](const world::PlayerObservation& opponent) {
+        return !opponent.fallen && opponent.last_seen_time >= 0.0 &&
+            snapshot.server_time - opponent.last_seen_time <=
+                kGkAnticipationMaxOpponentAgeS &&
+            math::planar_dist(
+                {opponent.position_m[0], opponent.position_m[1]}, ball) <
+                kGkClaimOpponentClearanceM;
+    };
+    if (std::any_of(
+            snapshot.opponents.begin(), snapshot.opponents.end(),
+            opponent_is_close) ||
+        std::any_of(
+            snapshot.shared_opponents.begin(), snapshot.shared_opponents.end(),
+            opponent_is_close)) {
+        track = {};
+        return false;
+    }
+
+    // Team-shared ball positions are often fresh even though their velocity
+    // field is invalid. Observe a small stationary region for 0.3 s before
+    // leaving the line in that case; never interpret one unknown-speed frame
+    // as a stopped ball. Once committed, finish the approach as the ball
+    // starts moving away, unless the scene ceases to be safe.
+    if (track.last_observed_s < 0.0 ||
+        snapshot.server_time < track.last_observed_s ||
+        snapshot.server_time - track.last_observed_s > 0.30 ||
+        math::planar_dist(ball, track.anchor_m) > kGkClaimStableRadiusM) {
+        track.anchor_m = ball;
+        track.stable_since_s = snapshot.server_time;
+    }
+    track.last_observed_s = snapshot.server_time;
+    const bool slow_ball = snapshot.ball.velocity_valid
+        ? math::norm2({snapshot.ball.velocity_mps[0],
+                       snapshot.ball.velocity_mps[1]}) <=
+              kGkClaimMaxBallSpeedMps
+        : snapshot.server_time - track.stable_since_s >=
+              kGkClaimStableDwellS;
+    if (slow_ball) {
+        track.claim_until_s = snapshot.server_time + kGkClaimFollowThroughS;
+    }
+    return track.claim_until_s >= snapshot.server_time;
 }
 
 std::array<double, 2> role_position_from_blackboard(const Blackboard& blackboard) {
@@ -436,11 +518,32 @@ bool is_gk_our_goal_kick(const GKDecisionContext& context) {
 }
 
 WalkCommand make_gk_walk_to_ball(GKDecisionContext& context) {
-    // The original direct approach clears the restart faster than the staged
-    // align-behind-and-push candidate in repeated server scenarios.
+    // A goal kick is a direct, legal approach to the ball. Generic A* can
+    // route backwards at our goal line because of its boundary penalty.
     return make_walk_command_avoiding(
-        context.ball, context.snapshot, std::nullopt, true, true,
-        RoleManager::ROLE_GK);
+        context.ball, context.snapshot, std::nullopt, false, false,
+        RoleManager::ROLE_GK, false, false);
+}
+
+WalkCommand make_gk_claim_loose_ball(GKDecisionContext& context) {
+    // The generic A* boundary penalty can choose a backwards waypoint when
+    // the keeper starts near its goal line. The claim gate has already ruled
+    // out close opponents, so use a direct, deliberately slow approach here.
+    // This is ordinary Walk contact, not a claimed long-clearance model.
+    const bool near_ball = context.ball_distance <= 0.70;
+    const std::array<double, 2> target{
+        context.ball[0] + (near_ball ? 1.7 : 0.15), context.ball[1]};
+    WalkCommand command = make_walk_command_avoiding(
+        target, context.snapshot, std::nullopt, false, false,
+        RoleManager::ROLE_GK, false, false);
+    if (!command.target_absolute) {
+        const double speed = math::norm2(command.target_2d_m);
+        if (speed > 0.50) {
+            command.target_2d_m = math::vec2_scale(
+                command.target_2d_m, 0.50 / speed);
+        }
+    }
+    return command;
 }
 
 HighLevelCommand make_gk_hold_position(GKDecisionContext& /*context*/) {
@@ -459,6 +562,74 @@ HighLevelCommand make_gk_hold_position(GKDecisionContext& /*context*/) {
     return command;
 }
 
+HighLevelCommand make_gk_anticipatory_position(GKDecisionContext& context) {
+    const auto& snapshot = context.snapshot;
+    if (snapshot.play_mode != world::PlayMode::PlayOn ||
+        !snapshot.ball.position_valid ||
+        snapshot.ball.position_age_s > kGkAnticipationMaxBallAgeS ||
+        context.ball[0] > kGkAnticipationStartBallXM) {
+        return make_gk_hold_position(context);
+    }
+
+    // Position before a shot. An opponent behind the ball is a useful but
+    // uncertain shooting-direction cue: only use a fresh, close player whose
+    // player->ball ray actually intersects the goal mouth. The nearest such
+    // player can make contact first; a distant aligned player must not win.
+    const double goal_x = -field_geometry::kActualHalfLengthM;
+    double nearest_shooter_distance =
+        std::numeric_limits<double>::infinity();
+    std::optional<double> shot_line_y;
+    const auto consider = [&](const world::PlayerObservation& opponent) {
+        if (opponent.fallen || opponent.last_seen_time < 0.0 ||
+            snapshot.server_time - opponent.last_seen_time >
+                kGkAnticipationMaxOpponentAgeS ||
+            opponent.position_m[0] <= context.ball[0] + 0.10) {
+            return;
+        }
+        const std::array<double, 2> position{
+            opponent.position_m[0], opponent.position_m[1]};
+        const double distance = math::planar_dist(position, context.ball);
+        if (distance > kGkAnticipationMaxOpponentBallDistanceM ||
+            distance >= nearest_shooter_distance) {
+            return;
+        }
+        const double dx = context.ball[0] - position[0];
+        const double dy = context.ball[1] - position[1];
+        const double crossing_y =
+            context.ball[1] + (goal_x - context.ball[0]) * dy / dx;
+        if (!std::isfinite(crossing_y) ||
+            std::abs(crossing_y) > field_geometry::kGoalHalfWidthM) {
+            return;
+        }
+        nearest_shooter_distance = distance;
+        shot_line_y = crossing_y;
+    };
+    for (const auto& opponent : snapshot.opponents) consider(opponent);
+    for (const auto& opponent : snapshot.shared_opponents) consider(opponent);
+
+    // Without a credible shooter line, shade toward the ball while staying
+    // inside the goal mouth. This starts before the ball reaches the goalie
+    // area and remains conservative when the ball is still far upfield.
+    const double proximity = std::clamp(
+        (kGkAnticipationStartBallXM - context.ball[0]) / 5.0,
+        0.0, 1.0);
+    const double target_y = std::clamp(
+        shot_line_y.value_or(context.ball[1] * proximity),
+        -kGkAnticipationMaxOffsetM,
+        kGkAnticipationMaxOffsetM);
+    const std::array<double, 2> target{
+        goal_x + field_geometry::kGkHoldDepthM, target_y};
+    return make_walk_command_avoiding(
+        target, snapshot, std::nullopt, true, true,
+        RoleManager::ROLE_GK, true, false);
+}
+
+void clear_gk_intercept(GKState& state) {
+    state.intercept_active = false;
+    state.intercept_target_y_m = 0.0;
+    state.intercept_until_s = -1.0;
+}
+
 bool update_gk_intercept(GKDecisionContext& context, bool enabled) {
     const auto& snapshot = context.snapshot;
     const double hold_x =
@@ -468,7 +639,7 @@ bool update_gk_intercept(GKDecisionContext& context, bool enabled) {
         snapshot.self.position_m[2] < world::kFallenHeightThresholdM ||
         !snapshot.ball.position_valid ||
         snapshot.ball.position_age_s > kGkInterceptMaxBallAgeS) {
-        context.state = {};
+        clear_gk_intercept(context.state);
         return false;
     }
 
@@ -491,14 +662,14 @@ bool update_gk_intercept(GKDecisionContext& context, bool enabled) {
                     crossing_time_s + kGkInterceptReleaseMarginS;
             }
         } else if (vx >= kGkInterceptMinIncomingSpeedMps) {
-            context.state = {};
+            clear_gk_intercept(context.state);
         }
     }
 
     if (!context.state.intercept_active ||
         snapshot.server_time > context.state.intercept_until_s ||
         context.ball[0] < hold_x - 0.5) {
-        context.state = {};
+        clear_gk_intercept(context.state);
         return false;
     }
     return true;
@@ -591,6 +762,21 @@ HighLevelCommand APBehavior::make_command(
             true, true, RoleManager::ROLE_AP);
     }
 
+    if (g_enable_goalkeeper_claim && goalkeeper_can_claim_loose_ball(
+            snapshot, state_.goalkeeper_claim_track, false)) {
+        // Give the keeper an uncontested lane inside its own small area;
+        // remain just outside it to collect the clearance.
+        const std::array<double, 2> receive{
+            -field_geometry::kActualHalfLengthM +
+                field_geometry::kGoalieAreaDepthM + 0.8,
+            std::clamp(context.ball[1],
+                       -field_geometry::kGoalieAreaWidthM * 0.5 + 0.5,
+                       field_geometry::kGoalieAreaWidthM * 0.5 - 0.5)};
+        return make_walk_command_avoiding(
+            receive, snapshot, std::nullopt, true, true,
+            RoleManager::ROLE_AP);
+    }
+
     const double previous_ball_distance = state_.previous_ball_distance;
     const auto result = ap_tree->tick(context);
     state_.previous_ball_distance = context.ball_distance;
@@ -672,7 +858,13 @@ HighLevelCommand GKBehavior::make_command(
     if (update_gk_intercept(context, enable_intercept)) {
         return make_gk_intercept_command(context);
     }
-    return make_gk_hold_position(context);
+    if (enable_intercept && goalkeeper_can_claim_loose_ball(
+            snapshot, state_.loose_ball_track, true)) {
+        return make_gk_claim_loose_ball(context);
+    }
+    return enable_intercept
+        ? make_gk_anticipatory_position(context)
+        : make_gk_hold_position(context);
 }
 
 std::optional<HighLevelCommand> select_role_behavior(
@@ -713,9 +905,11 @@ void reset_role_behavior_state() {
 
 void configure_candidate_action_features(
     bool enable_discrete_ball_action,
-    bool enable_turn_first) {
+    bool enable_turn_first,
+    bool enable_goalkeeper_claim) {
     g_enable_discrete_ball_action = enable_discrete_ball_action;
     g_enable_turn_first = enable_turn_first;
+    g_enable_goalkeeper_claim = enable_goalkeeper_claim;
     reset_role_behavior_state();
 }
 

@@ -13,7 +13,8 @@ DecisionManager::DecisionManager(
     bool enable_turn_first)
     : behavior_tree_(enable_goalkeeper_intercept) {
     configure_candidate_action_features(
-        enable_discrete_ball_action, enable_turn_first);
+        enable_discrete_ball_action, enable_turn_first,
+        enable_goalkeeper_intercept);
 }
 
 HighLevelCommand DecisionManager::decide(const world::WorldSnapshot& snapshot) {

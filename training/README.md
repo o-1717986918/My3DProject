@@ -3,6 +3,9 @@
 This directory contains reproducible training inputs and deployment contracts.
 Generated runs belong under `/home/win98/rl_runs` and are not committed.
 
+Current priority and the goalkeeper/visual-training boundary are recorded in
+[`../docs/goalkeeper-motion-training-2026-09-20.md`](../docs/goalkeeper-motion-training-2026-09-20.md).
+
 The preserved first task is `kick_policy_v1`: a 50 Hz direction-only residual
 joint-position contract for Booster T1. Active R1 development uses
 `kick_policy_v2`, which adds requested range, launch speed, arrival speed and

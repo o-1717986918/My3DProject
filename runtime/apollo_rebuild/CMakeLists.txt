@@ -292,4 +292,15 @@ if(BUILD_TESTING)
     target_include_directories(learned_kick_runner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME learned_kick_runner_test COMMAND learned_kick_runner_test)
 
+    # The test sources use assert(); Release must not compile their checks out.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        foreach(test_target IN ITEMS
+            goal_kick_behavior_test discrete_ball_action_test
+            dynamic_pass_runner_test runtime_config_test
+            run_policy_reflection_test kick_execution_profile_test
+            kick_residual_runner_test procedural_kick_runner_test
+            learned_kick_runner_test)
+            target_compile_options(${test_target} PRIVATE -UNDEBUG)
+        endforeach()
+    endif()
 endif()
