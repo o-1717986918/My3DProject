@@ -60,3 +60,65 @@
 5. **三层验证。** MJX/Warp 训练曲线与可视化回放 → 独立精确 CPU 初态/物理评价 → RCSS 自然比赛 A/B。记录成功动作的使用率和比赛收益，不以单场比分或任意高准确率阈值替代因果比较。
 
 当前阶段交付的是**可复现的真实指令分布回放、直接服务器关节遥测、单步物理校准、已有 ONNX 的实测入口复测和可视化、教师小搜索的负结果**；还没有新训练出的神经动作模型，也没有修改默认比赛动作。下一次训练先补独立入口和高质量触球序列；没有多样的成功衔接标签时，不继续做弱监督的长 PPO。
+
+## 快走真实入口配对诊断（2026-09-21）
+
+新增 `training/tools/evaluate_onnx_run.py --server-corpus`：从上述 schema-2
+遥测中抽取直立、正在 Walk、身体平面速度至少 0.2 m/s 且前一帧连续的真实入口；
+同一球员同一场每 2 秒最多取一帧，并保留近球和远球的分组。初态用已经做过
+单步校准的映射器投到精确 CPU T1；Apollo Walk 反算上一动作，FastWalkV2 按
+实际运行时从零上一动作、零步态相位接管。保持原观测球位，再做移走球与步态相位
+消融。报告包含逐入口存活、速度、偏航、横漂、球—机器人接触及来源行号；这是
+**单机器人接管诊断，不是 RCSS 比赛成绩**。
+
+从五场归档抽取 40 个起点（近球 7、远球 33，最后一场 7 个），同一批起点各
+模拟 3 秒。原版 Apollo 用其运行时前向命令 `1.0 m/s`，FastWalkV2 用其运行时
+固定前向命令 `1.5 m/s`；指令不同，因此速度只能解释为**两个部署路径的输出**，
+不是同命令模型优劣。原版 40/40 直立、前速中位 0.868 m/s、绝对横漂中位
+0.076 m；`fast_walk_transition_recovery` 37/40 直立、前速中位 1.366 m/s、
+绝对横漂中位 0.416 m、偏航跟踪 RMSE 中位 0.195 rad/s（原版 0.071）。
+两次跌倒来自近球受控场景，一次来自远球入口；移走球后仍有两次跌倒，说明
+接管后的持续步态/横向偏差本身就有缺口，另一次可能与球接触有关。把初始步态相位
+改为 0.25/0.5/0.75 的假设性消融分别为 39/40、38/40、38/40 直立，横漂
+中位仍为 0.392/0.369/0.462 m；不能仅调整相位常数挂载。
+
+**跌倒不是一票否决。** 以跌倒时立即停止计算、不给快走补偿起身后的任何位移，
+快走在 36/40 个配对起点的 3 秒前向位移仍更大，均值 3.576 m 对原版
+2.515 m；三次跌倒起点则是明显的局部损失。下一轮优化的是“前进/到球收益减去
+横漂、失衡与起身损失”，而不是把跌倒率压到零作为唯一目标。本诊断的旧静态
+`candidate_gate`/十命令 `soccer_command_gate` 对实测入口不适用，报告置为 `null`；
+仍保留逐入口原始数据供比较。
+
+最终配对报告为 `/home/win98/rl_runs/training-transition/server-run-{apollo,fastwalk}-final-40x3-s20260921.json`；
+球和步态相位消融位于同目录的 `server-run-*-40x3-s20260921.json`。
+例如复测当前候选：
+
+```bash
+PYTHONPATH=training /home/win98/miniconda3/envs/my3d-rl/bin/python \
+  training/tools/evaluate_onnx_run.py \
+  --server-corpus /home/win98/rl_runs/training-transition/server-telemetry-v2-five-matches-s20260920/server-motion-telemetry.npz \
+  --episodes 40 --duration-s 3 --warmup-s 0.4 --seed 20260921 \
+  --vx 1.5 --model /home/win98/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/policy.onnx \
+  --contract training/contracts/run_policy_v2.yaml \
+  --output /home/win98/rl_runs/training-transition/<new-report>.json
+```
+
+这 40 条虽按时间稀疏，仍来自仅五场、且多条来自同一球员；近球初态全是受控场景，
+仅七条属于最后一场留出。单机器人精确 CPU 缺少对手和队友碰撞，球位是服务器估计；
+不能把 37/40 当真实比赛跌倒率，更不能据此自动启用 FastWalk。下一轮以现有
+checkpoint 为初始化，不重头训练：先加入**真实 Walk 姿态和球位的 reset/replay**，
+课程混合纯前进、接球前刹停、球旁绕行与恢复，优化前速同时约束横漂、偏航和倒地
+总耗时；同一批入口先跑本工具配对，随后跑原有十命令面与真实 7v7。只保留确实
+改善净到位/控球收益的候选。这个选择也与 [ICRA 2026 T1 striker 官方训练结构](https://github.com/Daffan/humanoid-soccer)
+中的追球步态 → 定向踢 → 感知学生分阶段路线一致；训练数据与物理仍使用本项目
+RCSS T1，不复制其 Isaac Gym 权重。
+
+同日两场 25 秒 wall-time 的真实 7v7 开/关快走烟测均保持 14/14 客户端、
+周期状态中均无 GetUp。开启版仅记录 29 个 FastWalkV2 状态样本（总 2,535），
+而两场实际模拟进度不同；它证明接口可运行，却不足以比较球队净收益。
+日志分别位于 `/home/win98/rl_runs/training-transition/rebuild-fastwalk-ab-{off,on}-s20260921`。
+`scripts/run_apollo_rebuild_match.sh` 新增仅本次运行生效的
+`APOLLO_REBUILD_ENABLE_FAST_WALK=1` 与可选 `APOLLO_REBUILD_FAST_WALK_MODEL`；
+不改变重建版默认设置。
+下一轮真实比赛需延长或设计更多确会进入高速前向职责的场景，再看到球、球权和
+恢复成本，不能用这两场无跌倒或比分作晋级依据。

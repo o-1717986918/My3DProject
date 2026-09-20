@@ -218,7 +218,18 @@ PYTHONPATH=training XLA_PYTHON_CLIENT_PREALLOCATE=false \
 ```
 
 Do not select a football locomotion policy from one straight-line evaluation.
-Export a candidate and run the fixed eight-command CPU suite:
+For a transition diagnostic on actual RCSS-observed Walk poses, the same CPU
+evaluator also accepts `--server-corpus <schema-2-telemetry.npz>` with
+`--episodes`, `--duration-s`, and `--warmup-s`. It records the sampled source
+rows and paired per-entry outcomes; use identical seeds/episode counts for
+Apollo Walk and FastWalk comparisons. `--server-ball-absent` and
+`--server-initial-gait-phase` are ablations, not runtime settings. The server
+positions/velocities are projected estimates in a single-T1 scene; neither
+this result nor the static command suite alone qualifies a model for a 7v7
+release. The 2026-09-21 comparison is in
+`docs/player-motion-training-2026-09-20.md`.
+
+Export a candidate and run the fixed ten-command CPU suite:
 
 ```bash
 PYTHONPATH=training python training/tools/evaluate_run_command_suite.py \
@@ -227,10 +238,11 @@ PYTHONPATH=training python training/tools/evaluate_run_command_suite.py \
   --output-dir /home/win98/rl_runs/run-soccer-omni-s20260951-v1/cpu-suite
 ```
 
-The suite covers stand, precision/fast forward, reverse, left/right strafe and
-left/right turn. It reports the worst upright completion, planar velocity RMSE
-and yaw-rate RMSE; every command must pass before the candidate can replace
-the retained runtime model.
+The suite covers stand, precision/fast forward, reverse, left/right strafe,
+left/right turn, and left/right forward curves. It reports completion, planar
+velocity error and yaw error by command. A narrow expert is judged on its
+declared use, but regressions elsewhere still matter when considering a
+unified-policy replacement.
 
 Static nominal-pose resets do not test a specialist entering from a live Walk
 phase.  Collect frozen Apollo states once, verify that reconstructed states can

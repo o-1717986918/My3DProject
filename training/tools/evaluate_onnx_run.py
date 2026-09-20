@@ -19,9 +19,12 @@ from my3d_rl.policy_symmetry import (
     mirror_run_observation,
     training_mirror_map,
 )
-from my3d_rl.rcss_scene import build_single_t1_soccer_model
+from my3d_rl.rcss_scene import RcssKickScene, build_single_t1_soccer_model
 from my3d_rl.reference_dynamics import circular_interpolate
 from my3d_rl.run_env import NOMINAL_TRAINING_POSE, TRAIN_TO_SERVER_SIGN
+from my3d_rl.server_motion_state import (
+    infer_previous_walk_action, project_server_motion_state,
+)
 from my3d_rl.t1_control import APOLLO_DEFAULT_POSE, apollo_joint_gains
 
 
@@ -101,6 +104,69 @@ def _box_geometric_contact(
     return bool(lowest_z <= pitch_height + tolerance)
 
 
+def select_server_handoff_rows(
+    arrays: dict[str, np.ndarray], *, episodes: int, seed: int,
+    min_speed_m_s: float,
+) -> np.ndarray:
+    """Draw separated dynamic Walk states, balancing near/far ball entries."""
+    if episodes < 1 or min_speed_m_s < 0.0:
+        raise ValueError("invalid server handoff selection")
+    required = {
+        "match_id", "player_number", "time_s", "motion", "self_xyz",
+        "self_velocity_body", "target_mask", "ball_valid", "ball_xyz",
+        "ball_position_age_s", "split",
+    }
+    if required - arrays.keys():
+        raise ValueError(f"server corpus missing fields: {sorted(required - arrays.keys())}")
+    speed = np.linalg.norm(arrays["self_velocity_body"][:, :2], axis=1)
+    eligible = (
+        (arrays["motion"] == "Walk")
+        & (arrays["self_xyz"][:, 2] >= 0.55)
+        & (speed >= min_speed_m_s)
+        & np.all(arrays["target_mask"] == 1, axis=1)
+    )
+    eligible[0] = False
+    eligible[1:] &= (
+        (arrays["match_id"][1:] == arrays["match_id"][:-1])
+        & (arrays["player_number"][1:] == arrays["player_number"][:-1])
+        & (np.abs(np.diff(arrays["time_s"]) - 0.02) <= 0.001)
+    )
+    near = (
+        (arrays["ball_valid"] == 1)
+        & (arrays["ball_position_age_s"] <= 0.1)
+        & (np.linalg.norm(
+            arrays["ball_xyz"][:, :2] - arrays["self_xyz"][:, :2], axis=1
+        ) <= 1.1)
+    )
+    rng = np.random.default_rng(seed)
+    # At most one start per match/player/two-second window, including across
+    # near/far buckets. Adjacent 50 Hz frames are not independent episodes.
+    buckets: dict[tuple[int, int, int], list[int]] = {}
+    for row in np.flatnonzero(eligible):
+        key = (
+            int(arrays["match_id"][row]),
+            int(arrays["player_number"][row]),
+            int(arrays["time_s"][row] // 2.0),
+        )
+        buckets.setdefault(key, []).append(int(row))
+    rows = np.asarray(
+        [int(rng.choice(bucket)) for bucket in buckets.values()], dtype=np.int32
+    )
+    if not len(rows):
+        raise ValueError("no eligible dynamic Walk handoff states")
+    near_rows = rng.permutation(rows[near[rows]])
+    far_rows = rng.permutation(rows[~near[rows]])
+    selected = list(near_rows[: min(len(near_rows), episodes // 2)])
+    selected.extend(far_rows[: min(len(far_rows), episodes - len(selected))])
+    remaining = episodes - len(selected)
+    if remaining:
+        pool = np.setdiff1d(rows, np.asarray(selected, dtype=np.int32))
+        selected.extend(rng.permutation(pool)[:remaining])
+    if len(selected) < episodes:
+        raise ValueError("not enough separated server handoff states")
+    return np.asarray(selected, dtype=np.int32)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
@@ -111,6 +177,15 @@ def main() -> None:
         help="required by motion-reference residual contracts",
     )
     parser.add_argument("--episodes", type=int, default=64)
+    parser.add_argument("--duration-s", type=float, default=10.0)
+    parser.add_argument("--warmup-s", type=float, default=2.0)
+    parser.add_argument("--server-corpus", type=Path)
+    parser.add_argument("--min-initial-speed", type=float, default=0.2)
+    parser.add_argument("--server-initial-gait-phase", type=float, default=0.0)
+    parser.add_argument(
+        "--server-ball-absent", action="store_true",
+        help="paired server-state diagnostic with the estimated ball moved away",
+    )
     parser.add_argument("--seed", type=int, default=4501)
     parser.add_argument("--vx", type=float, default=1.5)
     parser.add_argument("--vy", type=float, default=0.0)
@@ -137,13 +212,39 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
-    if args.episodes < 1:
+    if args.episodes < 1 or args.duration_s <= 0.0 or not 0.0 <= args.warmup_s < args.duration_s:
         raise ValueError("episodes must be positive")
+    if args.server_corpus is not None and (
+        not args.server_corpus.is_file() or args.min_initial_speed < 0.0
+        or args.motion_reference is not None
+    ):
+        raise ValueError("server handoff requires a corpus, nonnegative speed and no motion reference")
+    if args.server_ball_absent and args.server_corpus is None:
+        raise ValueError("server-ball-absent requires a server corpus")
+    if not 0.0 <= args.server_initial_gait_phase < 1.0 or (
+        args.server_initial_gait_phase != 0.0 and args.server_corpus is None
+    ):
+        raise ValueError("initial gait phase requires server corpus and [0, 1)")
     if args.action_scale is not None and not 0.0 < args.action_scale <= 1.0:
         raise ValueError("action-scale must be in (0, 1]")
     if args.contact_proxy_tolerance < 0.0:
         raise ValueError("contact-proxy-tolerance must be non-negative")
 
+    server_arrays = None
+    server_rows = None
+    if args.server_corpus is not None:
+        manifest = json.loads(
+            (args.server_corpus.parent / "manifest.json").read_text(encoding="utf-8")
+        )
+        if (manifest.get("schema_version") != 2
+            or manifest.get("archive_sha256") != _sha256(args.server_corpus)):
+            raise ValueError("server handoff requires verified schema-2 telemetry")
+        with np.load(args.server_corpus, allow_pickle=False) as archive:
+            server_arrays = {key: np.asarray(archive[key]) for key in archive.files}
+        server_rows = select_server_handoff_rows(
+            server_arrays, episodes=args.episodes, seed=args.seed,
+            min_speed_m_s=args.min_initial_speed,
+        )
     model = build_single_t1_soccer_model(prefix="accept_", robot_x=-10.0)
     model.opt.timestep = 0.005
     data = mujoco.MjData(model)
@@ -161,6 +262,10 @@ def main() -> None:
         PHASE_CONTRACT if actor_size == 80 else DEFAULT_CONTRACT
     )
     contract = load_policy_contract(contract_path)
+    server_scene = None
+    if server_arrays is not None:
+        server_scene = RcssKickScene(contract, prefix="accept_")
+        model, data = server_scene.model, server_scene.data
     apollo_runtime = contract.gain_profile == "apollo_runtime_per_joint"
     if apollo_runtime and (args.symmetry_ensemble or args.mirror_policy):
         raise ValueError(
@@ -266,6 +371,11 @@ def main() -> None:
     right_foot_geom = model.geom(prefix + "right_foot").id
     pitch_height = float(model.geom_pos[pitch_geom, 2])
     ball_joint = model.joint("ball-root")
+    ball_geom = model.geom("ball").id
+    robot_geoms = np.asarray([
+        str(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, index)).startswith(prefix)
+        for index in range(model.ngeom)
+    ], dtype=bool)
 
     lowers = np.array(
         [model.joint(prefix + name).range[0] for name in contract.joint_order]
@@ -290,6 +400,16 @@ def main() -> None:
         model.actuator_biasprm[pos_actuator, 1] = -contract.kp
         model.actuator_gainprm[vel_actuator, 0] = contract.kd
         model.actuator_biasprm[vel_actuator, 2] = -contract.kd
+        if server_rows is not None:
+            # The live FastWalk branch retains Apollo's separately tracked
+            # head targets and their original gains.
+            head_gains = np.asarray([
+                apollo_joint_gains(name) for name in contract.joint_order[:2]
+            ])
+            model.actuator_gainprm[pos_actuator[:2], 0] = head_gains[:, 0]
+            model.actuator_biasprm[pos_actuator[:2], 1] = -head_gains[:, 0]
+            model.actuator_gainprm[vel_actuator[:2], 0] = head_gains[:, 1]
+            model.actuator_biasprm[vel_actuator[:2], 2] = -head_gains[:, 1]
 
     rng = np.random.default_rng(args.seed)
     command = np.array([args.vx, args.vy, args.yaw_rate], dtype=np.float32)
@@ -302,6 +422,7 @@ def main() -> None:
     yaw_rate_rmses: list[float] = []
     planar_velocity_rmses: list[float] = []
     lateral_drifts: list[float] = []
+    forward_progresses: list[float] = []
     flight_phase: list[bool] = []
     flight_phase_anytime: list[bool] = []
     max_flight_steps: list[int] = []
@@ -313,10 +434,13 @@ def main() -> None:
     proxy_false_negative = 0
     proxy_flight_frames = 0
     actual_flight_frames = 0
-    episode_steps = round(10.0 / 0.02)
-    warmup_steps = round(2.0 / 0.02)
+    episode_steps = round(args.duration_s / 0.02)
+    warmup_steps = round(args.warmup_s / 0.02)
 
-    for _ in range(args.episodes):
+    initial_speeds: list[float] = []
+    initial_near_ball: list[bool] = []
+    episode_records: list[dict[str, object]] = []
+    for episode in range(args.episodes):
         mujoco.mj_resetData(model, data)
         gait_phase = float(rng.uniform())
         joint_noise_limit = 0.005 if reference_centered else 0.02
@@ -372,25 +496,60 @@ def main() -> None:
                 np.sin(0.5 * yaw),
             ]
             initial_physical = nominal_physical
-        data.qpos[joint_qpos] = np.clip(initial_physical + joint_noise, lowers, uppers)
-        data.qvel[root_dof : root_dof + 6] += rng.uniform(
-            -root_velocity_noise_limit, root_velocity_noise_limit, 6
-        )
-        data.qpos[ball_joint.qposadr[0] : ball_joint.qposadr[0] + 3] = [
-            10.0,
-            8.0,
-            0.11,
-        ]
-        data.ctrl[pos_actuator] = initial_physical
-        mujoco.mj_forward(model, data)
+        previous_action = np.zeros(contract.action_size, dtype=np.float32)
+        if server_rows is None:
+            data.qpos[joint_qpos] = np.clip(initial_physical + joint_noise, lowers, uppers)
+            data.qvel[root_dof : root_dof + 6] += rng.uniform(
+                -root_velocity_noise_limit, root_velocity_noise_limit, 6
+            )
+            data.qpos[ball_joint.qposadr[0] : ball_joint.qposadr[0] + 3] = [
+                10.0, 8.0, 0.11,
+            ]
+            data.ctrl[pos_actuator] = initial_physical
+            mujoco.mj_forward(model, data)
+        else:
+            assert server_scene is not None and server_arrays is not None
+            row = int(server_rows[episode])
+            project_server_motion_state(server_scene, server_arrays, row)
+            if args.server_ball_absent:
+                start_xyz = np.asarray(server_arrays["self_xyz"][row])
+                data.qpos[ball_joint.qposadr[0] : ball_joint.qposadr[0] + 3] = [
+                    float(start_xyz[0] + 10.0),
+                    float(start_xyz[1] + 10.0),
+                    0.11,
+                ]
+                data.qvel[ball_joint.dofadr[0] : ball_joint.dofadr[0] + 6] = 0.0
+                mujoco.mj_forward(model, data)
+            q = data.qpos[root_qpos + 3 : root_qpos + 7]
+            yaw = float(np.arctan2(
+                2.0 * (q[0] * q[3] + q[1] * q[2]),
+                1.0 - 2.0 * (q[2] ** 2 + q[3] ** 2),
+            ))
+            gait_phase = args.server_initial_gait_phase
+            if apollo_runtime:
+                previous_action, _ = infer_previous_walk_action(server_arrays, row)
+                previous_action = previous_action.astype(np.float32)
+            initial_speeds.append(float(np.linalg.norm(
+                server_arrays["self_velocity_body"][row, :2]
+            )))
+            initial_near_ball.append(bool(
+                server_arrays["ball_valid"][row] == 1
+                and server_arrays["ball_position_age_s"][row] <= 0.1
+                and np.linalg.norm(
+                    server_arrays["ball_xyz"][row, :2]
+                    - server_arrays["self_xyz"][row, :2]
+                ) <= 1.1
+            ))
 
         initial_xy = data.qpos[root_qpos : root_qpos + 2].copy()
-        previous_action = np.zeros(contract.action_size, dtype=np.float32)
+        initial_ball_xy = data.qpos[ball_joint.qposadr[0] : ball_joint.qposadr[0] + 2].copy()
         local_velocity_samples: list[np.ndarray] = []
         yaw_rate_samples: list[float] = []
         airborne_substeps: list[bool] = []
         fell = False
         invalid = False
+        ball_robot_contact_substeps = 0
+        first_ball_robot_contact_s = None
 
         for step in range(episode_steps):
             joint_position_training = data.qpos[joint_qpos] * sign
@@ -490,12 +649,24 @@ def main() -> None:
                 lowers,
                 uppers,
             )
+            if server_rows is not None:
+                # Runtime FastWalk preserves the stable actor's head tracker.
+                targets[:2] = data.qpos[joint_qpos[:2]]
             data.ctrl[pos_actuator] = targets
             previous_action = action.astype(np.float32)
             gait_phase = (gait_phase + 0.02 * gait_frequency) % 1.0
 
             for _ in range(4):
                 mujoco.mj_step(model, data)
+                pairs = data.contact.geom[:data.ncon]
+                ball_robot_contact = bool(np.any(
+                    ((pairs[:, 0] == ball_geom) & robot_geoms[pairs[:, 1]])
+                    | ((pairs[:, 1] == ball_geom) & robot_geoms[pairs[:, 0]])
+                ))
+                if ball_robot_contact:
+                    ball_robot_contact_substeps += 1
+                    if first_ball_robot_contact_s is None:
+                        first_ball_robot_contact_s = (step + 1) * 0.02
                 left_contact = _has_contact(data, pitch_geom, left_foot_geom)
                 right_contact = _has_contact(data, pitch_geom, right_foot_geom)
                 airborne_substeps.append(not left_contact and not right_contact)
@@ -558,7 +729,15 @@ def main() -> None:
         yaw_error = yaw_after_warmup - command[2]
         delta_world = data.qpos[root_qpos : root_qpos + 2] - initial_xy
         c0, s0 = np.cos(yaw), np.sin(yaw)
+        forward_progress = c0 * delta_world[0] + s0 * delta_world[1]
         lateral = -s0 * delta_world[0] + c0 * delta_world[1]
+        ball_delta_world = (
+            data.qpos[ball_joint.qposadr[0] : ball_joint.qposadr[0] + 2]
+            - initial_ball_xy
+        )
+        ball_forward_progress = (
+            c0 * ball_delta_world[0] + s0 * ball_delta_world[1]
+        )
         airborne_array = np.asarray(airborne_substeps[warmup_steps * 4 :], dtype=bool)
         longest_flight = _max_consecutive(airborne_array)
         longest_flight_anytime = _max_consecutive(np.asarray(airborne_substeps))
@@ -580,12 +759,36 @@ def main() -> None:
             float(np.sqrt(np.mean(np.sum(np.square(velocity_error), axis=1))))
         )
         lateral_drifts.append(abs(float(lateral)))
+        forward_progresses.append(float(forward_progress))
         # Two consecutive 5 ms physics frames reject one-frame contact noise.
         flight_phase.append(longest_flight >= 2)
         flight_phase_anytime.append(longest_flight_anytime >= 2)
         max_flight_steps.append(longest_flight)
         survived_control_steps.append(len(local_velocity_samples))
         invalid_episodes += int(invalid)
+        if server_rows is not None:
+            episode_records.append({
+                "row": int(server_rows[episode]),
+                "match_id": int(server_arrays["match_id"][server_rows[episode]]),
+                "player_number": int(server_arrays["player_number"][server_rows[episode]]),
+                "time_s": float(server_arrays["time_s"][server_rows[episode]]),
+                "split": int(server_arrays["split"][server_rows[episode]]),
+                "initial_speed_m_s": initial_speeds[-1],
+                "initial_near_ball": initial_near_ball[-1],
+                "completed": bool(completed[-1]),
+                "fell": bool(fell),
+                "invalid": bool(invalid),
+                "survived_seconds": len(local_velocity_samples) * 0.02,
+                "mean_forward_speed_m_s": mean_forward_speeds[-1],
+                "mean_lateral_speed_m_s": mean_lateral_speeds[-1],
+                "mean_yaw_rate_rad_s": mean_yaw_rates[-1],
+                "lateral_drift_m": lateral_drifts[-1],
+                "forward_progress_m": float(forward_progress),
+                "ball_forward_progress_m": float(ball_forward_progress),
+                "planar_velocity_rmse_m_s": planar_velocity_rmses[-1],
+                "ball_robot_contact_substeps": ball_robot_contact_substeps,
+                "first_ball_robot_contact_s": first_ball_robot_contact_s,
+            })
 
     speeds = np.asarray(mean_forward_speeds)
     lateral_speeds = np.asarray(mean_lateral_speeds)
@@ -630,8 +833,21 @@ def main() -> None:
         ),
         "symmetry_ensemble": args.symmetry_ensemble,
         "mirror_policy": args.mirror_policy,
-        "duration_seconds": 10.0,
-        "warmup_seconds": 2.0,
+        "duration_seconds": args.duration_s,
+        "warmup_seconds": args.warmup_s,
+        "server_corpus": (
+            str(args.server_corpus.resolve()) if args.server_corpus else None
+        ),
+        "server_corpus_sha256": (
+            _sha256(args.server_corpus) if args.server_corpus else None
+        ),
+        "server_ball_absent": args.server_ball_absent,
+        "server_initial_gait_phase": args.server_initial_gait_phase,
+        "server_handoff_diagnostic_only": server_rows is not None,
+        "server_state_rows": server_rows.tolist() if server_rows is not None else None,
+        "server_state_initial_speed_m_s": initial_speeds if server_rows is not None else None,
+        "server_state_near_ball": initial_near_ball if server_rows is not None else None,
+        "server_state_episodes": episode_records if server_rows is not None else None,
         "upright_completion_rate": completion_rate,
         "invalid_episode_count": invalid_episodes,
         "forward_speed": {
@@ -669,6 +885,10 @@ def main() -> None:
             "median_m": _percentile(drifts, 50),
             "p90_m": _percentile(drifts, 90),
         },
+        "forward_progress": {
+            "mean_m": float(np.mean(forward_progresses)),
+            "median_m": _percentile(np.asarray(forward_progresses), 50),
+        },
         "flight_phase_episode_rate": flight_rate,
         "flight_phase_anytime_episode_rate": float(np.mean(flight_phase_anytime)),
         "survival": {
@@ -704,8 +924,10 @@ def main() -> None:
         "flight_phase_episode_rate_gte_0_80": flight_rate >= 0.80,
         "all_values_finite": invalid_episodes == 0,
     }
-    payload["gates"] = gates
-    payload["candidate_gate_passed"] = all(gates.values())
+    payload["gates"] = gates if server_rows is None else None
+    payload["candidate_gate_passed"] = (
+        all(gates.values()) if server_rows is None else None
+    )
     soccer_command_gates = {
         "upright_completion_rate_gte_0_95": completion_rate >= 0.95,
         "median_planar_velocity_rmse_lte_0_45": payload[
@@ -716,8 +938,12 @@ def main() -> None:
         ] <= 0.35,
         "all_values_finite": invalid_episodes == 0,
     }
-    payload["soccer_command_gates"] = soccer_command_gates
-    payload["soccer_command_gate_passed"] = all(soccer_command_gates.values())
+    payload["soccer_command_gates"] = (
+        soccer_command_gates if server_rows is None else None
+    )
+    payload["soccer_command_gate_passed"] = (
+        all(soccer_command_gates.values()) if server_rows is None else None
+    )
 
     rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     if args.output:

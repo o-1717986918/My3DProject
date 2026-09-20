@@ -96,6 +96,18 @@ case "${APOLLO_REBUILD_ENABLE_GOALKEEPER_INTERCEPT:-1}" in
     1) rebuild_args+=(--enable-goalkeeper-intercept) ;;
     *) echo "APOLLO_REBUILD_ENABLE_GOALKEEPER_INTERCEPT must be 0 or 1" >&2; exit 2 ;;
 esac
+case "${APOLLO_REBUILD_ENABLE_FAST_WALK:-0}" in
+    0) ;;
+    1)
+        fast_walk_model=${APOLLO_REBUILD_FAST_WALK_MODEL:-/home/win98/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/policy.onnx}
+        if [[ ! -f "$fast_walk_model" ]]; then
+            echo "FastWalkV2 model is missing: $fast_walk_model" >&2
+            exit 2
+        fi
+        rebuild_args+=(--enable-fast-walk --fast-walk-model "$fast_walk_model")
+        ;;
+    *) echo "APOLLO_REBUILD_ENABLE_FAST_WALK must be 0 or 1" >&2; exit 2 ;;
+esac
 if [[ ! -x "$server_python" || ! -x "$server_binary" ]]; then
     echo "RCSSServerMJ environment is missing" >&2
     exit 2
