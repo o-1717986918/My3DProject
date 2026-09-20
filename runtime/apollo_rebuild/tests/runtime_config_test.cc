@@ -28,6 +28,9 @@ int main() {
                   "--enable-dynamic-pass"})
                .enable_dynamic_pass);
     assert(parse({"ApolloCodeBase"}).dynamic_pass_forced_rollout_id == -1);
+    assert(parse({"ApolloCodeBase"}).training_telemetry_interval == 0);
+    assert(parse({"ApolloCodeBase", "--training-telemetry-interval", "1"})
+               .training_telemetry_interval == 1);
     assert(parse({"ApolloCodeBase", "--dynamic-pass-force-rollout", "65"})
                .dynamic_pass_forced_rollout_id == 65);
     assert(parse({"ApolloCodeBase"}).enable_goalkeeper_intercept);

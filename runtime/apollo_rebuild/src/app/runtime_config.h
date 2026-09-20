@@ -19,6 +19,8 @@ struct RuntimeConfig {
     std::string config_root{"config"};
     std::string log_level{"info"};
     std::size_t status_interval{0};
+    // Opt-in, per-agent server-observed motion frames for offline training.
+    std::size_t training_telemetry_interval{0};
     bool enable_dynamic_pass{true};
     int dynamic_pass_forced_rollout_id{-1};
     bool enable_goalkeeper_intercept{true};

@@ -10,6 +10,7 @@
 #include "src/world/frame_normalizer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
@@ -45,6 +46,76 @@ void normalize_frame_for_team(server::PerceptionFrame& frame, bool is_left_team)
     if (frame.orientation.has_value()) {
         frame.orientation->wxyz = world::FrameNormalizer::normalize_quaternion_wxyz(frame.orientation->wxyz, false);
     }
+}
+
+// Raw server observations, not reconstructed MuJoCo qpos/qvel. Keep the joint
+// order explicit and emit one complete line so parallel agent logs can be
+// parsed without coupling training data capture to the decision path.
+void emit_training_telemetry(
+    const world::WorldSnapshot& snapshot,
+    const robot::T1RobotModel& robot_model,
+    const robot::JointTargets& targets,
+    const std::string& motion) {
+    const auto& names = robot_model.readable_joint_names();
+    for (const auto& name : names) {
+        const auto position = snapshot.self.joint_positions_deg.find(name);
+        const auto velocity = snapshot.self.joint_velocities_deg_s.find(name);
+        if (position == snapshot.self.joint_positions_deg.end() ||
+            velocity == snapshot.self.joint_velocities_deg_s.end() ||
+            !std::isfinite(position->second) ||
+            !std::isfinite(velocity->second)) {
+            return;  // Never turn an incomplete sensor packet into a label.
+        }
+    }
+    std::ostringstream line;
+    line << std::setprecision(9)
+         << "APOLLO_REBUILD_MOTION_TELEMETRY"
+         << " t=" << snapshot.server_time
+         << " player=" << snapshot.player_number
+         << " side=" << (snapshot.is_left_team.value_or(true) ? "left" : "right")
+         << " motion=" << motion
+         << " ball_valid=" << (snapshot.ball.position_valid ? 1 : 0)
+         << " ball_age=" << snapshot.ball.position_age_s
+         << " ball_velocity_valid=" << (snapshot.ball.velocity_valid ? 1 : 0);
+    const auto append = [&line](const char* key, const auto& values) {
+        line << ' ' << key << '=';
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            if (index > 0U) line << ',';
+            line << values[index];
+        }
+    };
+    append("self_xyz", snapshot.self.position_m);
+    append("self_quat_wxyz", snapshot.self.orientation_wxyz);
+    append("self_velocity_body", snapshot.self.lin_vel_b);
+    append("gyro_deg_s", snapshot.self.gyro_deg_s);
+    append("ball_xyz", snapshot.ball.position_m);
+    append("ball_velocity", snapshot.ball.velocity_mps);
+    line << " joint_position_deg=";
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        if (index > 0U) line << ',';
+        line << snapshot.self.joint_positions_deg.at(names[index]);
+    }
+    line << " joint_velocity_deg_s=";
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        if (index > 0U) line << ',';
+        line << snapshot.self.joint_velocities_deg_s.at(names[index]);
+    }
+    line << " target_position_deg=";
+    std::string target_mask;
+    target_mask.reserve(names.size());
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        if (index > 0U) line << ',';
+        const auto target = std::find_if(
+            targets.begin(), targets.end(),
+            [&name = names[index]](const robot::JointTarget& item) {
+                return item.joint_name == name;
+            });
+        const bool found = target != targets.end() && std::isfinite(target->q_deg);
+        line << (found ? target->q_deg : 0.0);
+        target_mask.push_back(found ? '1' : '0');
+    }
+    line << " target_mask=" << target_mask;
+    std::cerr << line.str() << '\n';
 }
 
 }  // namespace
@@ -217,6 +288,7 @@ std::string AgentApp::process_perception_message(const std::string& message) {
     const std::string previous_active_motion = last_active_motion_;
 
     std::vector<std::string> nodes;
+    robot::JointTargets telemetry_targets;
     if (const auto* beam = std::get_if<decision::BeamCommand>(&command)) {
         // Beam is the only absolute-coordinate output. The agent works in a
         // canonical frame (own goal at -x) obtained by a 180-degree rotation of
@@ -234,6 +306,9 @@ std::string AgentApp::process_perception_message(const std::string& message) {
         if (motion_result.handled) {
             const auto motor_nodes = server::ActionEncoder::encode_motor_actions(motion_result.joint_targets, robot_model_);
             nodes.insert(nodes.end(), motor_nodes.begin(), motor_nodes.end());
+            if (config_.training_telemetry_interval > 0) {
+                telemetry_targets = motion_result.joint_targets;
+            }
         }
     }
 
@@ -276,6 +351,12 @@ std::string AgentApp::process_perception_message(const std::string& message) {
         snapshot, dynamic_pass_active, dynamic_pass_started);
 
     ++processed_frames_;
+    if (config_.training_telemetry_interval > 0 &&
+        processed_frames_ % config_.training_telemetry_interval == 0 &&
+        snapshot.play_mode == world::PlayMode::PlayOn) {
+        emit_training_telemetry(
+            snapshot, robot_model_, telemetry_targets, last_active_motion_);
+    }
     if (config_.status_interval > 0 &&
         processed_frames_ % config_.status_interval == 0) {
         const std::array<double, 2> self{

@@ -42,6 +42,24 @@ Nearby frames are not independent trials. The evaluator selects one state per
 replay, and neither these exact-CPU probes nor the diagnostic geometry flag
 authorize a competition kick or demonstrate held-out match success.
 
+For actual RCSS-observed joint trajectories rather than reconstructed replay
+states, run a rebuild match with opt-in telemetry (default is off):
+
+```bash
+MATCH_RUN_DIR=/home/win98/rl_runs/training-transition/MATCH_RUN \
+APOLLO_REBUILD_TRAINING_TELEMETRY_INTERVAL=1 \
+scripts/run_apollo_rebuild_match.sh 30
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/collect_server_motion_telemetry.py \
+  --match-dir /home/win98/rl_runs/training-transition/MATCH_RUN \
+  --run-dir /home/win98/rl_runs/training-transition/TELEMETRY_RUN
+```
+
+Pass `--match-dir` repeatedly to collect independent matches; the last match
+is held out as validation. One match has no validation split. The raw
+server-observed torso and joint arrays are not simulator qpos/qvel and must
+not be injected into MuJoCo without a calibrated state adapter.
+
 The preserved first task is `kick_policy_v1`: a 50 Hz direction-only residual
 joint-position contract for Booster T1. Active R1 development uses
 `kick_policy_v2`, which adds requested range, launch speed, arrival speed and
