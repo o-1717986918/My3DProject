@@ -3,8 +3,44 @@
 This directory contains reproducible training inputs and deployment contracts.
 Generated runs belong under `/home/win98/rl_runs` and are not committed.
 
-Current priority and the goalkeeper/visual-training boundary are recorded in
+The current player-action training priority, match-replay entry data, and
+skill-transition sequence are recorded in
+[`../docs/player-motion-training-2026-09-20.md`](../docs/player-motion-training-2026-09-20.md).
+The goalkeeper/visual-training boundary is recorded separately in
 [`../docs/goalkeeper-motion-training-2026-09-20.md`](../docs/goalkeeper-motion-training-2026-09-20.md).
+
+## Match-command kick handoff data
+
+Use a high-frequency `APOLLO_REBUILD_STATUS_INTERVAL=5` rebuild match log and
+the existing frozen Apollo handoff state corpus. The collector runs the
+logged Walk command sequence in exact CPU MuJoCo, starting each replay with
+the logged *local* ball position. It does not claim to recover the server's
+unlogged joint trajectory. Keep both datasets and outputs below
+`/home/win98/rl_runs`:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/collect_match_kick_handoff.py \
+  --match-dir /home/win98/rl_runs/MATCH_DIR \
+  --entry-corpus /home/win98/rl_runs/apollo-handoff/CORPUS_RUN/apollo-handoff-states.npz \
+  --run-dir /home/win98/rl_runs/training-transition/NEW_RUN
+```
+
+The corpus contains provenance hashes, full CPU state, gait/support features,
+grouped splits, and a diagnostic count of release-like geometry. Probe one
+frozen teacher action per independent replay before investing in BC or RL:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/evaluate_match_kick_handoff.py \
+  /home/win98/rl_runs/kick-teacher/TEACHER.json \
+  /home/win98/rl_runs/training-transition/NEW_RUN/match-kick-handoff.npz \
+  --output /home/win98/rl_runs/training-transition/NEW_RUN/teacher-probe.json
+```
+
+Nearby frames are not independent trials. The evaluator selects one state per
+replay, and neither these exact-CPU probes nor the diagnostic geometry flag
+authorize a competition kick or demonstrate held-out match success.
 
 The preserved first task is `kick_policy_v1`: a 50 Hz direction-only residual
 joint-position contract for Booster T1. Active R1 development uses

@@ -146,11 +146,20 @@ def _frame_from_status(values: dict[str, str]) -> TraceFrame:
     )
     ball_distance = float(values.get("ball_dist", np.linalg.norm(world_ball)))
     time_value = values["t"] if "t" in values else values["server_time"]
+    ball_age = float(values.get("ball_position_age", "0"))
+    ball_valid = values.get("ball_position_valid", "1") == "1"
     return TraceFrame(
         time_s=float(time_value),
         command=velocity_command_from_status(values),
         ball_local_xy=ball_local,
-        near_ball=math.isfinite(ball_distance) and ball_distance <= 1.10,
+        near_ball=(
+            ball_valid
+            and math.isfinite(ball_age)
+            and ball_age <= 0.10
+            and math.isfinite(ball_distance)
+            and ball_distance <= 1.10
+            and bool(np.isfinite(ball_local).all())
+        ),
     )
 
 
@@ -177,7 +186,9 @@ def load_match_traces(
             eligible = values.get("mode") == "4" and values.get("motion") == "Walk"
             if eligible:
                 frame = _frame_from_status(values)
-                if active and frame.time_s - active[-1].time_s > maximum_gap_s:
+                # Decimal status timestamps such as 573.35 -> 573.55 can be
+                # represented a little above 0.20 in binary floating point.
+                if active and frame.time_s - active[-1].time_s > maximum_gap_s + 1e-6:
                     if len(active) >= 2:
                         traces.append((path.name, active))
                     active = []

@@ -67,3 +67,48 @@ def test_load_match_traces_splits_non_walk_states(tmp_path: Path) -> None:
 
     assert len(traces) == 2
     assert [len(frames) for _, frames in traces] == [2, 2]
+
+
+def test_stale_or_invalid_ball_cannot_seed_near_ball_replay(tmp_path: Path) -> None:
+    log = tmp_path / "Apollo-Rebuild-3.log"
+    base = (
+        "player=3 mode=4 motion=Walk ball_dist=0.5 ball_x=0.5 ball_y=0 "
+        "x=0 y=0 yaw_deg=0 walk_target_x=1 walk_target_y=0 "
+        "walk_target_absolute=0 walk_orientation_present=0"
+    )
+    log.write_text(
+        "\n".join(
+            [
+                f"APOLLO_REBUILD_STATUS t=1.0 {base} ball_position_valid=0",
+                f"APOLLO_REBUILD_STATUS t=1.1 {base} ball_position_valid=1 ball_position_age=0.5",
+                f"APOLLO_REBUILD_STATUS t=1.2 {base} ball_position_valid=1 ball_position_age=0",
+            ]
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    traces = load_match_traces(tmp_path, "Apollo-Rebuild")
+
+    assert len(traces) == 1
+    assert [frame.near_ball for frame in traces[0][1]] == [False, False, True]
+
+
+def test_decimal_status_interval_does_not_fragment_trace(tmp_path: Path) -> None:
+    log = tmp_path / "Apollo-Rebuild-4.log"
+    base = (
+        "player=4 mode=4 motion=Walk ball_dist=0.5 ball_x=0.5 ball_y=0 "
+        "x=0 y=0 yaw_deg=0 walk_target_x=1 walk_target_y=0 "
+        "walk_target_absolute=0 walk_orientation_present=0"
+    )
+    log.write_text(
+        "\n".join(
+            f"APOLLO_REBUILD_STATUS t={time_s:.2f} {base}"
+            for time_s in (573.35, 573.55, 573.75, 573.95)
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    traces = load_match_traces(tmp_path, "Apollo-Rebuild")
+
+    assert len(traces) == 1
+    assert len(traces[0][1]) == 4
