@@ -3,6 +3,7 @@
 #include "src/app/runtime_config.h"
 
 #include <cassert>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -49,6 +50,16 @@ int main() {
     assert(motion.enable_parameterized_kick);
     assert(motion.enable_fast_walk);
     assert(motion.fast_walk_model == "fast.onnx");
+    assert(parse({"ApolloCodeBase"}).fast_walk_yaw_bias_rad_s == 0.0);
+    assert(parse({"ApolloCodeBase", "--fast-walk-yaw-bias", "-0.05"})
+               .fast_walk_yaw_bias_rad_s == -0.05);
+    bool rejected_excessive_bias = false;
+    try {
+        (void)parse({"ApolloCodeBase", "--fast-walk-yaw-bias", "0.3"});
+    } catch (const std::invalid_argument&) {
+        rejected_excessive_bias = true;
+    }
+    assert(rejected_excessive_bias);
     assert(motion.enable_rapid_turn);
     assert(motion.rapid_turn_model == "turn.onnx");
     assert(motion.enable_learned_kick);

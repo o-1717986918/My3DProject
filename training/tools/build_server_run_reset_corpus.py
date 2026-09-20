@@ -65,6 +65,24 @@ def select_reset_rows(
     return np.asarray(sorted(selected.values()), dtype=np.int32)
 
 
+def forward_entry_proxy(
+    arrays: dict[str, np.ndarray], rows: np.ndarray
+) -> np.ndarray:
+    """Approximate forward handoff from observed motion, not WalkCommand."""
+    body_velocity = arrays["self_velocity_body"][rows]
+    quaternion = arrays["self_quat_wxyz"][rows]
+    tilt_deg = np.rad2deg(np.arccos(np.clip(
+        1.0 - 2.0 * (quaternion[:, 1] ** 2 + quaternion[:, 2] ** 2),
+        -1.0, 1.0,
+    )))
+    return (
+        (body_velocity[:, 0] >= 0.5)
+        & (np.abs(body_velocity[:, 1]) <= 0.25)
+        & (np.max(np.abs(arrays["gyro_deg_s"][rows]), axis=1) <= 55.0)
+        & (tilt_deg <= 6.0)
+    )
+
+
 def build_reset_arrays(
     arrays: dict[str, np.ndarray], rows: np.ndarray
 ) -> dict[str, np.ndarray]:
@@ -84,11 +102,15 @@ def build_reset_arrays(
             axis=1,
         ) <= 1.1)
     )
+    # Observed kinematics are only a proxy for runtime eligibility: the
+    # actual WalkCommand is not present in this telemetry schema.
+    forward_entry = forward_entry_proxy(arrays, rows)
     return {
         "qpos": np.asarray(qpos, dtype=np.float32),
         "qvel": np.asarray(qvel, dtype=np.float32),
         "split": arrays["split"][rows].astype(np.uint8),
         "near_ball": near.astype(np.uint8),
+        "forward_entry_proxy": forward_entry.astype(np.uint8),
         "source_row": rows,
         "source_match_id": arrays["match_id"][rows].astype(np.int32),
         "source_player_number": arrays["player_number"][rows].astype(np.int32),
@@ -131,7 +153,7 @@ def main() -> None:
     corpus_path = output_dir / "server-run-resets.npz"
     np.savez_compressed(corpus_path, **resets)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "purpose": "server_projected_phase_v2_fast_walk_reset_states",
         "promotable": False,
         "source_state": "quantized_server_observation_projected_into_single_T1_scene",
@@ -151,6 +173,21 @@ def main() -> None:
         "validation_near_ball_entries": int(np.sum(
             (resets["split"] == 1) & (resets["near_ball"] == 1)
         )),
+        "train_forward_entry_proxy_entries": int(np.sum(
+            (resets["split"] == 0)
+            & (resets["forward_entry_proxy"] == 1)
+        )),
+        "validation_forward_entry_proxy_entries": int(np.sum(
+            (resets["split"] == 1)
+            & (resets["forward_entry_proxy"] == 1)
+        )),
+        "forward_entry_proxy_rule": {
+            "measured_body_vx_min_m_s": 0.5,
+            "measured_body_vy_abs_max_m_s": 0.25,
+            "gyro_abs_max_deg_s": 55.0,
+            "torso_tilt_max_deg": 6.0,
+            "runtime_walk_command_observed": False,
+        },
         "warning": "not full RCSS state: contacts, other players and some ball velocity are unobserved",
     }
     (output_dir / "manifest.json").write_text(
@@ -159,6 +196,8 @@ def main() -> None:
     print(json.dumps({key: manifest[key] for key in (
         "entries", "train_entries", "validation_entries",
         "train_near_ball_entries", "validation_near_ball_entries",
+        "train_forward_entry_proxy_entries",
+        "validation_forward_entry_proxy_entries",
     )}, indent=2))
 
 

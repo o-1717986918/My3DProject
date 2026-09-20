@@ -38,7 +38,8 @@ public:
     explicit WalkRunner(
         const std::filesystem::path& model_path,
         std::optional<std::filesystem::path> fast_walk_model_path = std::nullopt,
-        std::optional<std::filesystem::path> rapid_turn_model_path = std::nullopt);
+        std::optional<std::filesystem::path> rapid_turn_model_path = std::nullopt,
+        double fast_walk_yaw_bias_rad_s = 0.0);
 
     /// Evaluates one policy step; `reset` reinitializes temporal observations.
     WalkStepResult step(
@@ -68,6 +69,7 @@ private:
     std::vector<float> fast_previous_action_;
     double fast_gait_phase_{0.0};
     bool fast_walk_disabled_{false};
+    double fast_walk_yaw_bias_rad_s_{0.0};
     bool fast_walk_active_{false};
     double fast_walk_cooldown_until_s_{0.0};
     mutable int last_fast_walk_gate_{-1};

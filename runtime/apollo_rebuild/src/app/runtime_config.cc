@@ -3,6 +3,7 @@
 
 #include "src/app/runtime_config.h"
 
+#include <cmath>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -71,6 +72,9 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
             config.enable_fast_walk = false;
         } else if (arg == "--fast-walk-model") {
             config.fast_walk_model = require_value("--fast-walk-model");
+        } else if (arg == "--fast-walk-yaw-bias") {
+            config.fast_walk_yaw_bias_rad_s = std::stod(
+                require_value("--fast-walk-yaw-bias"));
         } else if (arg == "--enable-rapid-turn") {
             config.enable_rapid_turn = true;
         } else if (arg == "--disable-rapid-turn") {
@@ -93,6 +97,11 @@ RuntimeConfig RuntimeConfig::from_args(int argc, char* argv[]) {
     if (config.enable_fast_walk && config.fast_walk_model.empty()) {
         throw std::invalid_argument(
             "--enable-fast-walk requires --fast-walk-model");
+    }
+    if (!std::isfinite(config.fast_walk_yaw_bias_rad_s) ||
+        std::abs(config.fast_walk_yaw_bias_rad_s) > 0.2) {
+        throw std::invalid_argument(
+            "--fast-walk-yaw-bias must be finite and within [-0.2, 0.2]");
     }
     if (config.enable_rapid_turn && config.rapid_turn_model.empty()) {
         throw std::invalid_argument(

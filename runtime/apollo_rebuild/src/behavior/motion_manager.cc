@@ -21,7 +21,8 @@ MotionManager::MotionManager(const app::RuntimeConfig& config)
               : std::nullopt,
           config.enable_rapid_turn
               ? std::optional<std::filesystem::path>{config.rapid_turn_model}
-              : std::nullopt),
+              : std::nullopt,
+          config.fast_walk_yaw_bias_rad_s),
       neutral_runner_(config.resolve_asset_path("keyframes/neutral.yaml")),
       getup_runner_(config.resolve_asset_path("networks/getup/policy.onnx")),
       parameterized_kick_enabled_(config.enable_parameterized_kick),

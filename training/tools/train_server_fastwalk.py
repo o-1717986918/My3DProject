@@ -50,7 +50,9 @@ def json_value(value: Any) -> Any:
 
 
 def fastwalk_overrides(
-    *, impl: str, graph_mode: str, num_envs: int
+    *, impl: str, graph_mode: str, num_envs: int,
+    path_lateral_penalty: float = 12.0,
+    heading_drift_penalty: float = 8.0,
 ) -> dict[str, object]:
     """Match the deployed forward command without making falling taboo."""
     return {
@@ -78,8 +80,8 @@ def fastwalk_overrides(
         "reward.alive": 0.75,
         "reward.lateral_tracking": -10.0,
         "reward.yaw_rate_error": -8.0,
-        "reward.path_lateral": -12.0,
-        "reward.heading_drift": -8.0,
+        "reward.path_lateral": -path_lateral_penalty,
+        "reward.heading_drift": -heading_drift_penalty,
         "reward.vertical_velocity": -0.50,
         "reward.angular_xy": -0.45,
         "reward.action_rate": -0.05,
@@ -106,6 +108,9 @@ def main() -> None:
     parser.add_argument("--num-eval-envs", type=int, default=8)
     parser.add_argument("--num-evals", type=int, default=2)
     parser.add_argument("--near-ball-probability", type=float, default=0.20)
+    parser.add_argument("--forward-entry-probability", type=float, default=0.0)
+    parser.add_argument("--path-lateral-penalty", type=float, default=12.0)
+    parser.add_argument("--heading-drift-penalty", type=float, default=8.0)
     parser.add_argument("--seed", type=int, default=20260921)
     args = parser.parse_args()
     run_dir = args.run_dir.resolve()
@@ -117,6 +122,9 @@ def main() -> None:
         or run_dir.exists()
         or args.num_envs < 1 or args.num_eval_envs < 1
         or not 0.0 <= args.near_ball_probability <= 1.0
+        or not 0.0 <= args.forward_entry_probability <= 1.0
+        or args.path_lateral_penalty < 0.0
+        or args.heading_drift_penalty < 0.0
         or (args.impl != "warp" and args.warp_graph_mode != "auto")
     ):
         raise ValueError("invalid source/checkpoint/run directory or training options")
@@ -130,6 +138,11 @@ def main() -> None:
         or corpus_manifest.get("contract_sha256") != sha256(CONTRACT)
     ):
         raise ValueError("reset corpus manifest/hash/contract mismatch")
+    if (
+        args.forward_entry_probability > 0.0
+        and corpus_manifest.get("schema_version", 0) < 2
+    ):
+        raise ValueError("forward-entry sampling requires a schema-2 corpus")
     profile = get_ppo_profile(PROFILE_NAME)
     contract = load_policy_contract(CONTRACT)
     if profile.policy_contract != contract.policy_name:
@@ -142,16 +155,22 @@ def main() -> None:
     steps = effective_timesteps(args.num_timesteps, epoch_size)
     evals = compatible_num_evals(steps, epoch_size, args.num_evals)
     overrides = fastwalk_overrides(
-        impl=args.impl, graph_mode=args.warp_graph_mode, num_envs=args.num_envs
+        impl=args.impl,
+        graph_mode=args.warp_graph_mode,
+        num_envs=args.num_envs,
+        path_lateral_penalty=args.path_lateral_penalty,
+        heading_drift_penalty=args.heading_drift_penalty,
     )
     train_env = ServerFastWalkRun(
         args.reset_corpus, split=0,
         near_ball_probability=args.near_ball_probability,
+        forward_entry_probability=args.forward_entry_probability,
         config_overrides=overrides, contract=contract,
     )
     eval_env = ServerFastWalkRun(
         args.reset_corpus, split=1,
         near_ball_probability=None,
+        forward_entry_probability=None,
         config_overrides=overrides, contract=contract,
     )
     run_dir.mkdir(parents=True)
@@ -177,6 +196,12 @@ def main() -> None:
         "validation_entries": corpus_manifest["validation_entries"],
         "near_ball_probability_train": args.near_ball_probability,
         "near_ball_probability_validation": eval_env._near_probability,
+        "forward_entry_probability_non_near_train": (
+            train_env._forward_probability
+        ),
+        "forward_entry_probability_non_near_validation": (
+            eval_env._forward_probability
+        ),
         "implementation": args.impl,
         "backend": jax.default_backend(),
         "devices": [str(device) for device in jax.devices()],

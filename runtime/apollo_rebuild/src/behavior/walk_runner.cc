@@ -105,8 +105,10 @@ std::optional<robot::T1RobotModel::HeadTargets> update_head_tracker(
 WalkRunner::WalkRunner(
     const std::filesystem::path& model_path,
     std::optional<std::filesystem::path> fast_walk_model_path,
-    std::optional<std::filesystem::path> rapid_turn_model_path)
-    : session_(model_path, OnnxModelContract{{1, 78}, {1, 23}}) {
+    std::optional<std::filesystem::path> rapid_turn_model_path,
+    double fast_walk_yaw_bias_rad_s)
+    : session_(model_path, OnnxModelContract{{1, 78}, {1, 23}}),
+      fast_walk_yaw_bias_rad_s_(fast_walk_yaw_bias_rad_s) {
     if (fast_walk_model_path.has_value()) {
         fast_walk_session_.emplace(
             *fast_walk_model_path,
@@ -297,7 +299,10 @@ std::optional<robot::JointTargets> WalkRunner::step_fast_walk(
         snapshot,
         {1.5F,
          std::clamp(stable_velocity_command[1], -0.1F, 0.1F),
-         std::clamp(stable_velocity_command[2], -0.2F, 0.2F)},
+         std::clamp(
+             static_cast<float>(stable_velocity_command[2] +
+                                fast_walk_yaw_bias_rad_s_),
+             -0.2F, 0.2F)},
         fast_previous_action_,
         fast_gait_phase_);
 

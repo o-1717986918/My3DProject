@@ -105,6 +105,11 @@ case "${APOLLO_REBUILD_ENABLE_FAST_WALK:-0}" in
             exit 2
         fi
         rebuild_args+=(--enable-fast-walk --fast-walk-model "$fast_walk_model")
+        if [[ -n "${APOLLO_REBUILD_FAST_WALK_YAW_BIAS:-}" ]]; then
+            rebuild_args+=(
+                --fast-walk-yaw-bias "$APOLLO_REBUILD_FAST_WALK_YAW_BIAS"
+            )
+        fi
         ;;
     *) echo "APOLLO_REBUILD_ENABLE_FAST_WALK must be 0 or 1" >&2; exit 2 ;;
 esac

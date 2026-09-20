@@ -9,7 +9,10 @@ import pytest
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.rcss_scene import RcssKickScene
 from my3d_rl.server_run_env import ServerFastWalkRun
-from tools.build_server_run_reset_corpus import select_reset_rows
+from tools.build_server_run_reset_corpus import (
+    forward_entry_proxy,
+    select_reset_rows,
+)
 from tools.train_server_fastwalk import fastwalk_overrides
 
 
@@ -44,6 +47,29 @@ def test_reset_row_selection_thins_dynamic_walk_per_player_time_bucket():
         select_reset_rows(arrays, stride_s=0.2, min_speed_m_s=0.2)
 
 
+def test_forward_entry_proxy_separates_lateral_and_turning_recovery_states():
+    velocity = np.array([
+        [0.7, 0.1, 0.0],
+        [0.7, 0.4, 0.0],
+        [-0.5, 0.0, 0.0],
+        [0.7, 0.1, 0.0],
+        [0.7, 0.1, 0.0],
+    ], dtype=np.float32)
+    gyro = np.zeros((5, 3), dtype=np.float32)
+    gyro[3, 2] = 70.0
+    quaternion = np.tile([1.0, 0.0, 0.0, 0.0], (5, 1))
+    quaternion[4, :2] = [np.cos(np.deg2rad(3.5)), np.sin(np.deg2rad(3.5))]
+    arrays = {
+        "self_velocity_body": velocity,
+        "gyro_deg_s": gyro,
+        "self_quat_wxyz": quaternion,
+    }
+    np.testing.assert_array_equal(
+        forward_entry_proxy(arrays, np.arange(5)),
+        [True, False, False, False, False],
+    )
+
+
 def test_server_fastwalk_reset_preserves_projected_pose_and_runtime_handoff(tmp_path):
     contract = load_policy_contract(CONTRACT)
     scene = RcssKickScene(contract, prefix="train_")
@@ -71,3 +97,29 @@ def test_server_fastwalk_reset_preserves_projected_pose_and_runtime_handoff(tmp_
     np.testing.assert_allclose(np.asarray(state.info["command"]), [1.5, 0.0, 0.0])
     np.testing.assert_allclose(np.asarray(state.info["last_action"]), 0.0)
     assert float(state.info["gait_phase"]) == 0.0
+
+
+def test_server_fastwalk_reset_can_prioritize_forward_handoffs(tmp_path):
+    contract = load_policy_contract(CONTRACT)
+    scene = RcssKickScene(contract, prefix="train_")
+    qpos = np.tile(scene.data.qpos, (3, 1)).astype(np.float32)
+    qvel = np.zeros((3, scene.model.nv), dtype=np.float32)
+    corpus = tmp_path / "server-run-resets.npz"
+    np.savez_compressed(
+        corpus, qpos=qpos, qvel=qvel,
+        split=np.zeros(3, dtype=np.uint8),
+        near_ball=np.zeros(3, dtype=np.uint8),
+        forward_entry_proxy=np.array([0, 1, 0], dtype=np.uint8),
+        source_row=np.array([11, 22, 33], dtype=np.int32),
+    )
+    env = ServerFastWalkRun(
+        corpus, split=0, contract=contract,
+        near_ball_probability=0.0,
+        forward_entry_probability=1.0,
+        config_overrides=fastwalk_overrides(
+            impl="jax", graph_mode="auto", num_envs=1
+        ),
+    )
+    for seed in range(3):
+        state = env.reset(jax.random.PRNGKey(seed))
+        assert int(state.info["entry_source_row"]) == 22

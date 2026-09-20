@@ -27,6 +27,9 @@ struct RuntimeConfig {
     bool enable_parameterized_kick{false};
     bool enable_fast_walk{false};
     std::string fast_walk_model;
+    // Experimental phase-v2 straight-line yaw compensation; zero preserves
+    // the frozen runtime behavior until a real-match comparison is complete.
+    double fast_walk_yaw_bias_rad_s{0.0};
     bool enable_rapid_turn{false};
     std::string rapid_turn_model;
     bool enable_learned_kick{false};

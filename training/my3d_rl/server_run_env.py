@@ -29,6 +29,7 @@ class ServerFastWalkRun(DirectionalRun):
         *,
         split: int,
         near_ball_probability: float | None = None,
+        forward_entry_probability: float | None = None,
         config_overrides: dict[str, Any] | None = None,
         contract: PolicyContract,
     ) -> None:
@@ -38,6 +39,8 @@ class ServerFastWalkRun(DirectionalRun):
             raise ValueError("split must be train=0 or validation=1")
         if near_ball_probability is not None and not 0.0 <= near_ball_probability <= 1.0:
             raise ValueError("near-ball probability must be in [0, 1]")
+        if forward_entry_probability is not None and not 0.0 <= forward_entry_probability <= 1.0:
+            raise ValueError("forward-entry probability must be in [0, 1]")
         super().__init__(config_overrides=config_overrides, contract=contract)
         if (
             not self._config.use_fixed_command
@@ -50,24 +53,39 @@ class ServerFastWalkRun(DirectionalRun):
             required = {"qpos", "qvel", "split", "near_ball", "source_row"}
             if required - set(archive.files):
                 raise ValueError("server reset corpus is missing required arrays")
+            if forward_entry_probability and "forward_entry_proxy" not in archive.files:
+                raise ValueError("forward-entry sampling needs a labeled corpus")
             all_split = np.asarray(archive["split"], dtype=np.uint8)
             selected = all_split == split
             qpos = np.asarray(archive["qpos"][selected], dtype=np.float32)
             qvel = np.asarray(archive["qvel"][selected], dtype=np.float32)
             near_ball = np.asarray(archive["near_ball"][selected], dtype=np.uint8)
+            forward_entry = (
+                np.asarray(archive["forward_entry_proxy"][selected], dtype=np.uint8)
+                if "forward_entry_proxy" in archive.files
+                else np.zeros(len(qpos), dtype=np.uint8)
+            )
             source_row = np.asarray(archive["source_row"][selected], dtype=np.int32)
         if (
             qpos.ndim != 2 or len(qpos) == 0
             or qpos.shape[1] != self._mj_model.nq
             or qvel.shape != (len(qpos), self._mj_model.nv)
             or near_ball.shape != (len(qpos),)
+            or forward_entry.shape != (len(qpos),)
             or source_row.shape != (len(qpos),)
             or not np.isfinite(qpos).all() or not np.isfinite(qvel).all()
             or set(np.unique(near_ball)) - {0, 1}
+            or set(np.unique(forward_entry)) - {0, 1}
         ):
             raise ValueError("server reset corpus has incompatible state arrays")
         near_indices = np.flatnonzero(near_ball == 1)
         far_indices = np.flatnonzero(near_ball == 0)
+        forward_indices = np.flatnonzero(
+            (near_ball == 0) & (forward_entry == 1)
+        )
+        other_indices = np.flatnonzero(
+            (near_ball == 0) & (forward_entry == 0)
+        )
         if len(far_indices) == 0:
             raise ValueError("server reset corpus needs non-near-ball states")
         self._entry_qpos = jp.asarray(qpos)
@@ -75,20 +93,48 @@ class ServerFastWalkRun(DirectionalRun):
         self._entry_source_row = jp.asarray(source_row)
         self._near_indices = jp.asarray(near_indices, dtype=jp.int32)
         self._far_indices = jp.asarray(far_indices, dtype=jp.int32)
+        self._forward_indices = jp.asarray(forward_indices, dtype=jp.int32)
+        self._other_indices = jp.asarray(other_indices, dtype=jp.int32)
         self._near_count = len(near_indices)
         self._far_count = len(far_indices)
+        self._forward_count = len(forward_indices)
+        self._other_count = len(other_indices)
         self._near_probability = (
             float(np.mean(near_ball))
             if near_ball_probability is None else near_ball_probability
         )
         if self._near_count == 0:
             self._near_probability = 0.0
+        self._forward_probability = (
+            float(len(forward_indices) / len(far_indices))
+            if forward_entry_probability is None
+            else forward_entry_probability
+        )
+        if self._forward_count == 0:
+            self._forward_probability = 0.0
+        if self._other_count == 0:
+            self._forward_probability = 1.0
 
     def reset(self, rng: jax.Array) -> mjx_env.State:
-        rng, near_rng, far_rng, bucket_rng = jax.random.split(rng, 4)
+        rng, near_rng, far_rng, bucket_rng, forward_rng, other_rng, forward_bucket_rng = (
+            jax.random.split(rng, 7)
+        )
         far_index = self._far_indices[
             jax.random.randint(far_rng, (), 0, self._far_count)
         ]
+        if self._forward_count and self._other_count:
+            forward_index = self._forward_indices[
+                jax.random.randint(forward_rng, (), 0, self._forward_count)
+            ]
+            other_index = self._other_indices[
+                jax.random.randint(other_rng, (), 0, self._other_count)
+            ]
+            far_index = jp.where(
+                jax.random.bernoulli(
+                    forward_bucket_rng, self._forward_probability
+                ),
+                forward_index, other_index,
+            )
         if self._near_count:
             near_index = self._near_indices[
                 jax.random.randint(near_rng, (), 0, self._near_count)

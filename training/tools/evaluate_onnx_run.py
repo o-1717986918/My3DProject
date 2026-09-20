@@ -26,6 +26,7 @@ from my3d_rl.server_motion_state import (
     infer_previous_walk_action, project_server_motion_state,
 )
 from my3d_rl.t1_control import APOLLO_DEFAULT_POSE, apollo_joint_gains
+from tools.build_server_run_reset_corpus import forward_entry_proxy
 
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
@@ -107,6 +108,8 @@ def _box_geometric_contact(
 def select_server_handoff_rows(
     arrays: dict[str, np.ndarray], *, episodes: int, seed: int,
     min_speed_m_s: float,
+    validation_only: bool = False,
+    forward_entry_only: bool = False,
 ) -> np.ndarray:
     """Draw separated dynamic Walk states, balancing near/far ball entries."""
     if episodes < 1 or min_speed_m_s < 0.0:
@@ -125,6 +128,15 @@ def select_server_handoff_rows(
         & (speed >= min_speed_m_s)
         & np.all(arrays["target_mask"] == 1, axis=1)
     )
+    if validation_only:
+        eligible &= arrays["split"] == 1
+    if forward_entry_only:
+        required_proxy = {"self_quat_wxyz", "gyro_deg_s"}
+        if required_proxy - arrays.keys():
+            raise ValueError("forward-entry probe needs orientation and gyro telemetry")
+        eligible &= forward_entry_proxy(
+            arrays, np.arange(len(eligible), dtype=np.int32)
+        )
     eligible[0] = False
     eligible[1:] &= (
         (arrays["match_id"][1:] == arrays["match_id"][:-1])
@@ -181,6 +193,14 @@ def main() -> None:
     parser.add_argument("--warmup-s", type=float, default=2.0)
     parser.add_argument("--server-corpus", type=Path)
     parser.add_argument("--min-initial-speed", type=float, default=0.2)
+    parser.add_argument(
+        "--server-validation-only", action="store_true",
+        help="draw handoffs only from held-out matches",
+    )
+    parser.add_argument(
+        "--server-forward-entry-only", action="store_true",
+        help="draw observed forward-motion proxies, not actual WalkCommand gates",
+    )
     parser.add_argument("--server-initial-gait-phase", type=float, default=0.0)
     parser.add_argument(
         "--server-ball-absent", action="store_true",
@@ -219,8 +239,11 @@ def main() -> None:
         or args.motion_reference is not None
     ):
         raise ValueError("server handoff requires a corpus, nonnegative speed and no motion reference")
-    if args.server_ball_absent and args.server_corpus is None:
-        raise ValueError("server-ball-absent requires a server corpus")
+    if (
+        args.server_ball_absent or args.server_validation_only
+        or args.server_forward_entry_only
+    ) and args.server_corpus is None:
+        raise ValueError("server-state options require a server corpus")
     if not 0.0 <= args.server_initial_gait_phase < 1.0 or (
         args.server_initial_gait_phase != 0.0 and args.server_corpus is None
     ):
@@ -244,6 +267,8 @@ def main() -> None:
         server_rows = select_server_handoff_rows(
             server_arrays, episodes=args.episodes, seed=args.seed,
             min_speed_m_s=args.min_initial_speed,
+            validation_only=args.server_validation_only,
+            forward_entry_only=args.server_forward_entry_only,
         )
     model = build_single_t1_soccer_model(prefix="accept_", robot_x=-10.0)
     model.opt.timestep = 0.005
@@ -845,6 +870,8 @@ def main() -> None:
         "server_initial_gait_phase": args.server_initial_gait_phase,
         "server_handoff_diagnostic_only": server_rows is not None,
         "server_state_rows": server_rows.tolist() if server_rows is not None else None,
+        "server_validation_only": args.server_validation_only,
+        "server_forward_entry_only": args.server_forward_entry_only,
         "server_state_initial_speed_m_s": initial_speeds if server_rows is not None else None,
         "server_state_near_ball": initial_near_ball if server_rows is not None else None,
         "server_state_episodes": episode_records if server_rows is not None else None,

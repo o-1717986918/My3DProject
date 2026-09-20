@@ -171,3 +171,61 @@ RCSS T1，不复制其 Isaac Gym 权重。
 跌倒率改善或比赛胜率改善。完整日志保存在候选目录的
 `live-rebuild-vs-base-50s/` 和 `live-parent-vs-base-50s/`；下一轮需要同侧别、
 多场景配对及到球/出球净收益分析。
+
+## 快走入口分布与航向偏置消融（2026-09-21）
+
+上一轮 2,514 个真实 Walk 重置状态中，只有 1,312 个满足**观测运动学近似**：
+前向速度至少 0.5 m/s、侧速绝对值不超过 0.25 m/s、陀螺仪不超过 55°/s、
+躯干倾斜不超过 6°。遥测没有高层 WalkCommand，此标签**不是**真正运行时
+FastWalk 门控。`build_server_run_reset_corpus.py` 现在保留此标签，语料 schema 2
+位于 `/home/win98/rl_runs/training-transition/server-run-reset-corpus-forward-proxy-s20260921-v2/`；
+按整场划分仍为训练 2,213、验证 301，其中近似正向分别 1,140 和 172。
+训练环境可将正向近似作为主要初态，仍抽取其他侧移/转向状态用于恢复。
+
+从原 FastWalk checkpoint **独立**续训的 v2 使用非近球样本中 80% 正向近似、
+10% 近球样本，路径横漂与朝向惩罚分别从 12/8 调到 24/12，完成 196,608 步。
+ONNX 导出校验通过，最大误差 `8.58e-6`；产物及配置清单在
+`/home/win98/rl_runs/training-transition/server-fastwalk-continuation-s20260921-v2-forwardmix/`。
+续训命令的关键参数如下；输出目录必须是新的 WSL 路径：
+
+```bash
+PYTHONPATH=training XLA_PYTHON_CLIENT_PREALLOCATE=false \
+  /home/win98/miniconda3/envs/my3d-rl/bin/python training/tools/train_server_fastwalk.py \
+  --reset-corpus /home/win98/rl_runs/training-transition/server-run-reset-corpus-forward-proxy-s20260921-v2/server-run-resets.npz \
+  --restore-checkpoint /home/win98/rl_runs/stable-motion/fast-walk-transition-recovery-s20261160-v1/checkpoints/000001179648 \
+  --run-dir /home/win98/rl_runs/training-transition/server-fastwalk-continuation-s20260921-v2-forwardmix \
+  --num-envs 64 --num-timesteps 196608 --num-evals 2 --num-eval-envs 16 \
+  --near-ball-probability 0.10 --forward-entry-probability 0.80 \
+  --path-lateral-penalty 24 --heading-drift-penalty 12 --seed 20260922
+```
+
+`evaluate_onnx_run.py` 新增只抽**留出比赛**与正向近似的选项，32 个按球员/时间
+稀疏的相同初态各跑 3 秒：
+
+| 模型 | 直立结束 | 平均前向位移 | 绝对横漂中位 / P90 |
+| --- | ---: | ---: | ---: |
+| 原 FastWalk | 32/32 | 3.873 m | 0.302 / 0.712 m |
+| v1 实测入口续训 | 32/32 | 3.875 m | 0.315 / 0.653 m |
+| v2 正向混合续训 | 32/32 | 3.871 m | 0.346 / 0.647 m |
+
+v2 未改善留出集前进或典型横漂，不能晋级。这里模型偏转呈正向偏置：原模型
+偏航速率中位 `+0.097 rad/s`，横漂也同向。对原模型做**推理时**镜像双路平均，
+留出正向入口横漂中位降至 0.230 m，却多 1 次倒地，宽域 40 入口则从
+37/40 降到 35/40 直立、十命令套件从 8/10 降到 6/10；不采用为通用方案。
+
+更轻的 `−0.05 rad/s` FastWalk 策略输入补偿，在相同的留出正向入口得到
+32/32 直立、平均前进 3.888 m、横漂中位/P90 为 0.256/0.578 m；宽域
+40 入口为 38/40 直立、平均前进 3.622 m、横漂中位 0.290 m，但横漂
+P90 从 0.970 升到 1.007 m。`−0.10` 和 `−0.15` 在部分入口退步，故只保留
+小幅值作为**试验选项**。`scripts/run_apollo_rebuild_match.sh` 可用
+`APOLLO_REBUILD_ENABLE_FAST_WALK=1 APOLLO_REBUILD_FAST_WALK_YAW_BIAS=-0.05`
+单次启用；二进制默认偏置仍为零、FastWalk 仍默认关闭。此补偿属于部署控制
+消融，不是新训练出更强全向模型，也不能替代真实转身和横向移动训练。
+
+同侧 50 秒墙钟的真实 7v7 有/无补偿试跑均为 14/14 客户端存活，但 FastWalk
+状态采样分别只有 36 与 90、GetUp 状态采样分别为 31 与 30；轨迹分叉明显，
+不能从这些数字归因比赛收益或跌倒率。CPU 同初态结果足以支持保留试验入口，
+不足以默认启用。下一步要么在可重复的定点跑向球场景中增加有效快走暴露，
+要么用服务器状态重新训练能直接接管转向、刹停的策略，而非继续调整静态惩罚。
+现有定点球场景也试跑了各 20 秒：7 号队员有/无补偿分别仅 16/15 个
+FastWalk 采样帧，不能用于净到位比较；需要重新设计更长的可重复前向职责。
