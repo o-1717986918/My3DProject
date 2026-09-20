@@ -111,6 +111,8 @@ class RcssKickScene:
         *,
         kp: float | np.ndarray,
         kd: float | np.ndarray,
+        target_velocity_rad_s: np.ndarray | None = None,
+        feedforward_tau: np.ndarray | None = None,
     ) -> JointState:
         targets = np.asarray(targets_rad, dtype=np.float64)
         gains_p = np.broadcast_to(np.asarray(kp, dtype=np.float64), targets.shape)
@@ -124,9 +126,27 @@ class RcssKickScene:
         if np.any(gains_p < 0.0) or np.any(gains_d < 0.0):
             raise ValueError("PD gains must be non-negative")
 
-        self.data.ctrl[self._tau_actuator] = 0.0
+        velocities = (
+            np.zeros_like(targets)
+            if target_velocity_rad_s is None
+            else np.asarray(target_velocity_rad_s, dtype=np.float64)
+        )
+        torques = (
+            np.zeros_like(targets)
+            if feedforward_tau is None
+            else np.asarray(feedforward_tau, dtype=np.float64)
+        )
+        if (
+            velocities.shape != targets.shape
+            or torques.shape != targets.shape
+            or not np.isfinite(velocities).all()
+            or not np.isfinite(torques).all()
+        ):
+            raise ValueError("motor velocity/torque controls must be finite joint vectors")
+
+        self.data.ctrl[self._tau_actuator] = torques
         self.data.ctrl[self._pos_actuator] = targets
-        self.data.ctrl[self._vel_actuator] = 0.0
+        self.data.ctrl[self._vel_actuator] = velocities
         self.model.actuator_gainprm[self._pos_actuator, 0] = gains_p
         self.model.actuator_biasprm[self._pos_actuator, 1] = -gains_p
         self.model.actuator_gainprm[self._vel_actuator, 0] = gains_d

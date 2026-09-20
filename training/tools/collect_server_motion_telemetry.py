@@ -40,6 +40,10 @@ VECTOR_SHAPES = {
     "joint_position_deg": JOINT_COUNT,
     "joint_velocity_deg_s": JOINT_COUNT,
     "target_position_deg": JOINT_COUNT,
+    "target_velocity_deg_s": JOINT_COUNT,
+    "target_kp": JOINT_COUNT,
+    "target_kd": JOINT_COUNT,
+    "target_tau": JOINT_COUNT,
 }
 
 
@@ -56,6 +60,8 @@ def parse_telemetry_line(line: str) -> dict[str, object] | None:
     if not line.startswith(PREFIX):
         return None
     fields = dict(token.split("=", 1) for token in line.split()[1:])
+    if fields.get("schema") != "2":
+        raise ValueError("motion telemetry requires complete schema 2 motor controls")
     frame: dict[str, object] = {
         "time_s": float(fields["t"]),
         "player_number": int(fields["player"]),
@@ -160,7 +166,7 @@ def main() -> None:
     archive = run_dir / "server-motion-telemetry.npz"
     np.savez_compressed(archive, **arrays)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "purpose": "server_observed_motion_and_sent_targets",
         "promotable": False,
         "units": "server canonical team frame; joint positions/targets degrees; joint velocities degrees/s",

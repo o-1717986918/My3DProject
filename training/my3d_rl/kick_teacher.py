@@ -422,6 +422,7 @@ class KickTeacherEvaluator:
             if self._walk_session.get_outputs()[0].shape != [1, 23]:
                 raise ValueError("Apollo walk teacher must have a [1, 23] output")
         self._captured_targets = np.empty((0, self.contract.action_size))
+        self._captured_qpos = np.empty((0, self.model.nq))
         self._captured_observations = np.empty((0, self.contract.observation_size))
         self._captured_actions = np.empty((0, self.contract.action_size))
         self._captured_transition_entry: KickTransitionEntry | None = None
@@ -450,6 +451,11 @@ class KickTeacherEvaluator:
     def captured_targets(self) -> np.ndarray:
         """Return a defensive copy of targets from the last captured rollout."""
         return self._captured_targets.copy()
+
+    @property
+    def captured_qpos(self) -> np.ndarray:
+        """Return 50 Hz physical states from the last visualized rollout."""
+        return self._captured_qpos.copy()
 
     @property
     def captured_transition_sequence(
@@ -632,6 +638,7 @@ class KickTeacherEvaluator:
         parameters: np.ndarray | None,
         *,
         capture_targets: bool = False,
+        capture_states: bool = False,
         ball_x_offset_m: float = 0.0,
         ball_y_offset_m: float = 0.0,
         phase_reference_ball_x_offset_m: float | None = None,
@@ -797,6 +804,7 @@ class KickTeacherEvaluator:
             )
         data.ctrl[self._pos_actuator] = self._default_pose
         mujoco.mj_forward(self.model, data)
+        captured_qpos: list[np.ndarray] = [data.qpos.copy()] if capture_states else []
         self._captured_transition_entry = None
         self._captured_transition_sequence = ()
         transition_sequence: list[tuple[int, float, KickTransitionEntry]] = []
@@ -1072,6 +1080,8 @@ class KickTeacherEvaluator:
                 torso_upright = float(data.xmat[self._torso_body].reshape(3, 3)[2, 2])
                 minimum_torso_height = min(minimum_torso_height, torso_height)
                 minimum_upright = min(minimum_upright, torso_upright)
+            if capture_states:
+                captured_qpos.append(data.qpos.copy())
             if (
                 kick_policy_session is not None or kick_correction_session is not None
             ) and (minimum_torso_height < 0.35 or minimum_upright < 0.0):
@@ -1081,6 +1091,10 @@ class KickTeacherEvaluator:
             self._captured_targets = np.asarray(captured_targets)
             self._captured_observations = np.asarray(captured_observations)
             self._captured_actions = np.asarray(captured_actions)
+        self._captured_qpos = (
+            np.asarray(captured_qpos) if capture_states
+            else np.empty((0, self.model.nq))
+        )
         self._captured_transition_sequence = tuple(transition_sequence)
 
         displacement = data.xpos[self._ball_body, :2] - initial_ball

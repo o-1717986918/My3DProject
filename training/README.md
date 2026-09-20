@@ -60,6 +60,39 @@ is held out as validation. One match has no validation split. The raw
 server-observed torso and joint arrays are not simulator qpos/qvel and must
 not be injected into MuJoCo without a calibrated state adapter.
 
+Schema-2 telemetry includes all six motor-control fields. Use the exact CPU
+one-step probe before deriving training initial states:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/evaluate_server_motion_parity.py \
+  /home/win98/rl_runs/training-transition/TELEMETRY_RUN/server-motion-telemetry.npz \
+  --output /home/win98/rl_runs/training-transition/TELEMETRY_RUN/parity.json
+```
+
+Compare the frozen teacher with already trained v3 ONNX actors on one state
+per observed near-ball approach; the optional replay saves a 50 Hz physical
+trajectory for visual inspection:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/evaluate_server_kick_handoff.py \
+  /home/win98/rl_runs/kick-teacher/kick-v2-residual-ultradense-position-grid-v2.json \
+  /home/win98/rl_runs/training-transition/TELEMETRY_RUN/server-motion-telemetry.npz \
+  --model /home/win98/rl_runs/kick-transition-dagger-r3-bc-s10201/policy.onnx \
+  --replay-model /home/win98/rl_runs/kick-transition-dagger-r3-bc-s10201/policy.onnx \
+  --output /home/win98/rl_runs/training-transition/TELEMETRY_RUN/kick-probe.json \
+  --replay-output /home/win98/rl_runs/training-transition/TELEMETRY_RUN/kick-replay.npz
+MUJOCO_GL=egl PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/render_soccer_motion_replay.py \
+  /home/win98/rl_runs/training-transition/TELEMETRY_RUN/kick-replay.npz \
+  --output /home/win98/rl_runs/training-transition/TELEMETRY_RUN/kick-contact-sheet.png
+```
+
+The contact sheet is an exact-CPU visualization of a **projected** server
+entry, not a video of an RCSS match. A frozen teacher/ONNX success in this
+probe does not automatically change the competition runtime.
+
 The preserved first task is `kick_policy_v1`: a 50 Hz direction-only residual
 joint-position contract for Booster T1. Active R1 development uses
 `kick_policy_v2`, which adds requested range, launch speed, arrival speed and

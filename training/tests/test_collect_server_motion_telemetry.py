@@ -12,14 +12,16 @@ def sample_line(*, time_s: float = 1.0, valid: int = 1) -> str:
     joints = ",".join("0" for _ in range(23))
     return (
         "APOLLO_REBUILD_MOTION_TELEMETRY "
-        f"t={time_s} player=7 side=left motion=Walk "
+        f"schema=2 t={time_s} player=7 side=left motion=Walk "
         f"ball_valid={valid} ball_age={'0.02' if valid else 'inf'} "
         "ball_velocity_valid=0 "
         "self_xyz=0,0,0.8 self_quat_wxyz=1,0,0,0 "
         "self_velocity_body=0.4,0,0 gyro_deg_s=0,0,0 "
         "ball_xyz=0.5,0,0.11 ball_velocity=0,0,0 "
         f"joint_position_deg={joints} joint_velocity_deg_s={joints} "
-        f"target_position_deg={joints} target_mask={'1' * 23}"
+        f"target_position_deg={joints} target_velocity_deg_s={joints} "
+        f"target_kp={joints} target_kd={joints} target_tau={joints} "
+        f"target_mask={'1' * 23}"
     )
 
 
@@ -30,6 +32,7 @@ def test_parse_complete_server_frame_and_reject_partial_joint_state() -> None:
     assert frame["motion"] == "Walk"
     assert frame["joint_position_deg"].shape == (23,)
     assert np.all(frame["target_mask"] == 1)
+    assert frame["target_kp"].shape == (23,)
     invalid_ball = parse_telemetry_line(sample_line(valid=0))
     assert invalid_ball is not None
     assert np.isinf(invalid_ball["ball_position_age_s"])
@@ -38,6 +41,8 @@ def test_parse_complete_server_frame_and_reject_partial_joint_state() -> None:
             f"joint_position_deg={','.join('0' for _ in range(23))}",
             "joint_position_deg=0,0",
         ))
+    with pytest.raises(ValueError, match="schema 2"):
+        parse_telemetry_line(sample_line().replace("schema=2 ", ""))
 
 
 def test_collect_holds_out_whole_matches_not_correlated_players(tmp_path: Path) -> None:

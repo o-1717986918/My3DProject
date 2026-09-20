@@ -70,6 +70,7 @@ void emit_training_telemetry(
     std::ostringstream line;
     line << std::setprecision(9)
          << "APOLLO_REBUILD_MOTION_TELEMETRY"
+         << " schema=2"
          << " t=" << snapshot.server_time
          << " player=" << snapshot.player_number
          << " side=" << (snapshot.is_left_team.value_or(true) ? "left" : "right")
@@ -100,20 +101,34 @@ void emit_training_telemetry(
         if (index > 0U) line << ',';
         line << snapshot.self.joint_velocities_deg_s.at(names[index]);
     }
-    line << " target_position_deg=";
+    std::vector<const robot::JointTarget*> ordered_targets;
+    ordered_targets.reserve(names.size());
     std::string target_mask;
     target_mask.reserve(names.size());
     for (std::size_t index = 0; index < names.size(); ++index) {
-        if (index > 0U) line << ',';
         const auto target = std::find_if(
             targets.begin(), targets.end(),
             [&name = names[index]](const robot::JointTarget& item) {
                 return item.joint_name == name;
             });
         const bool found = target != targets.end() && std::isfinite(target->q_deg);
-        line << (found ? target->q_deg : 0.0);
+        ordered_targets.push_back(found ? &*target : nullptr);
         target_mask.push_back(found ? '1' : '0');
     }
+    const auto append_targets = [&line, &ordered_targets](
+                                    const char* key, auto member) {
+        line << ' ' << key << '=';
+        for (std::size_t index = 0; index < ordered_targets.size(); ++index) {
+            if (index > 0U) line << ',';
+            line << (ordered_targets[index]
+                ? ordered_targets[index]->*member : 0.0);
+        }
+    };
+    append_targets("target_position_deg", &robot::JointTarget::q_deg);
+    append_targets("target_velocity_deg_s", &robot::JointTarget::dq_deg);
+    append_targets("target_kp", &robot::JointTarget::kp);
+    append_targets("target_kd", &robot::JointTarget::kd);
+    append_targets("target_tau", &robot::JointTarget::tau);
     line << " target_mask=" << target_mask;
     std::cerr << line.str() << '\n';
 }
