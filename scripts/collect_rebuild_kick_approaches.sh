@@ -9,6 +9,7 @@ run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/training-transition/kick-approaches
 agent_port=${MATCH_AGENT_PORT:-$((38000 + $$ % 1000))}
 monitor_port=$((agent_port + 1))
 server_python=${RCSSSERVERMJ_PYTHON:-/home/win98/.local/pipx/venvs/rcsssmj/bin/python}
+approach_side=${KICK_APPROACH_SIDE:-left}
 match_pid=
 
 cleanup() {
@@ -34,18 +35,26 @@ case "${KICK_APPROACH_VARIANT:-train}" in
         exit 2
         ;;
 esac
+if [[ "$approach_side" != left && "$approach_side" != right ]]; then
+    echo "KICK_APPROACH_SIDE must be left or right" >&2
+    exit 2
+fi
 if [[ "${KICK_APPROACH_VARIANT:-train}" == random ]] &&
     [[ ! "${KICK_APPROACH_SEED:-20260921}" =~ ^[0-9]+$ ]]; then
     echo "KICK_APPROACH_SEED must be a nonnegative integer" >&2
     exit 2
 fi
 
+near_ball_robot_x=-0.8
+if [[ "$approach_side" == right ]]; then
+    near_ball_robot_x=0.8
+fi
 MATCH_RUN_DIR="$run_dir" \
 MATCH_AGENT_PORT="$agent_port" \
 MATCH_MONITOR_PORT="$monitor_port" \
-REBUILD_SIDE=left \
+REBUILD_SIDE="$approach_side" \
 MATCH_FORCE_NEAR_BALL=1 \
-MATCH_NEAR_BALL_ROBOT_X=-0.8 \
+MATCH_NEAR_BALL_ROBOT_X="$near_ball_robot_x" \
 APOLLO_REBUILD_ENABLE_DYNAMIC_PASS=0 \
 APOLLO_REBUILD_STATUS_INTERVAL=5 \
 APOLLO_REBUILD_TRAINING_TELEMETRY_INTERVAL=1 \
@@ -125,25 +134,54 @@ PY
         ;;
 esac
 
+if [[ "$approach_side" == left ]]; then
+    placement_commands=(
+        '(agent (unum 2) (team Apollo-Rebuild) (move3d -20 -9 0.8 1 0 0 0))'
+        '(agent (unum 3) (team Apollo-Rebuild) (move3d -20 9 0.8 1 0 0 0))'
+        '(agent (unum 4) (team Apollo-Rebuild) (move3d -19 -6 0.8 1 0 0 0))'
+        '(agent (unum 5) (team Apollo-Rebuild) (move3d -19 6 0.8 1 0 0 0))'
+        '(agent (unum 6) (team Apollo-Rebuild) (move3d -18 0 0.8 1 0 0 0))'
+        '(agent (unum 2) (team Apollo-Base) (move3d 20 -9 0.8 0 0 0 1))'
+        '(agent (unum 3) (team Apollo-Base) (move3d 20 9 0.8 0 0 0 1))'
+        '(agent (unum 4) (team Apollo-Base) (move3d 19 -6 0.8 0 0 0 1))'
+        '(agent (unum 5) (team Apollo-Base) (move3d 19 6 0.8 0 0 0 1))'
+        '(agent (unum 6) (team Apollo-Base) (move3d 18 0 0.8 0 0 0 1))'
+        '(agent (unum 7) (team Apollo-Base) (move3d 18 8 0.8 0 0 0 1))'
+    )
+else
+    # Raw server coordinates are a 180-degree rotation of the canonical
+    # right-team frame used by runtime telemetry.
+    placement_commands=(
+        '(agent (unum 2) (team Apollo-Rebuild) (move3d 20 9 0.8 0 0 0 1))'
+        '(agent (unum 3) (team Apollo-Rebuild) (move3d 20 -9 0.8 0 0 0 1))'
+        '(agent (unum 4) (team Apollo-Rebuild) (move3d 19 6 0.8 0 0 0 1))'
+        '(agent (unum 5) (team Apollo-Rebuild) (move3d 19 -6 0.8 0 0 0 1))'
+        '(agent (unum 6) (team Apollo-Rebuild) (move3d 18 0 0.8 0 0 0 1))'
+        '(agent (unum 2) (team Apollo-Base) (move3d -20 9 0.8 1 0 0 0))'
+        '(agent (unum 3) (team Apollo-Base) (move3d -20 -9 0.8 1 0 0 0))'
+        '(agent (unum 4) (team Apollo-Base) (move3d -19 6 0.8 1 0 0 0))'
+        '(agent (unum 5) (team Apollo-Base) (move3d -19 -6 0.8 1 0 0 0))'
+        '(agent (unum 6) (team Apollo-Base) (move3d -18 0 0.8 1 0 0 0))'
+        '(agent (unum 7) (team Apollo-Base) (move3d -18 -8 0.8 1 0 0 0))'
+    )
+fi
+
 for scenario in "${scenarios[@]}"; do
     read -r robot_x robot_y robot_qw robot_qz ball_vx ball_vy <<<"$scenario"
+    if [[ "$approach_side" == right ]]; then
+        read -r robot_x robot_y robot_qw robot_qz ball_vx ball_vy < <(
+            "$server_python" -c \
+                'import sys; x,y,qw,qz,vx,vy=map(float,sys.argv[1:]); print(-x,-y,-qz,qw,-vx,-vy)' \
+                "$robot_x" "$robot_y" "$robot_qw" "$robot_qz" "$ball_vx" "$ball_vy"
+        )
+    fi
     "$server_python" "$repo_dir/scripts/send_monitor_command.py" \
         --host 127.0.0.1 --port "$monitor_port" --delay 0.02 \
         "(agent (unum 7) (team Apollo-Rebuild) (move3d $robot_x $robot_y 0.8 $robot_qw 0 0 $robot_qz))" \
-        '(agent (unum 2) (team Apollo-Rebuild) (move3d -20 -9 0.8 1 0 0 0))' \
-        '(agent (unum 3) (team Apollo-Rebuild) (move3d -20 9 0.8 1 0 0 0))' \
-        '(agent (unum 4) (team Apollo-Rebuild) (move3d -19 -6 0.8 1 0 0 0))' \
-        '(agent (unum 5) (team Apollo-Rebuild) (move3d -19 6 0.8 1 0 0 0))' \
-        '(agent (unum 6) (team Apollo-Rebuild) (move3d -18 0 0.8 1 0 0 0))' \
-        '(agent (unum 2) (team Apollo-Base) (move3d 20 -9 0.8 0 0 0 1))' \
-        '(agent (unum 3) (team Apollo-Base) (move3d 20 9 0.8 0 0 0 1))' \
-        '(agent (unum 4) (team Apollo-Base) (move3d 19 -6 0.8 0 0 0 1))' \
-        '(agent (unum 5) (team Apollo-Base) (move3d 19 6 0.8 0 0 0 1))' \
-        '(agent (unum 6) (team Apollo-Base) (move3d 18 0 0.8 0 0 0 1))' \
-        '(agent (unum 7) (team Apollo-Base) (move3d 18 8 0.8 0 0 0 1))' \
+        "${placement_commands[@]}" \
         "(ball (pos 0 0 0.11) (vel $ball_vx $ball_vy 0))"
-    printf 'scenario x=%s y=%s ball_v=(%s,%s)\n' \
-        "$robot_x" "$robot_y" "$ball_vx" "$ball_vy"
+    printf 'scenario side=%s raw_x=%s raw_y=%s ball_v=(%s,%s)\n' \
+        "$approach_side" "$robot_x" "$robot_y" "$ball_vx" "$ball_vy"
     sleep 2.2
 done
 
