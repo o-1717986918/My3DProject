@@ -87,12 +87,38 @@ def representative_approaches(arrays: dict[str, np.ndarray]) -> tuple[np.ndarray
     return np.asarray(selected, dtype=np.int32), int(np.sum(release))
 
 
+def nearest_teacher_records(
+    records: list[dict[str, object]], ball_xy: np.ndarray, count: int
+) -> list[dict[str, object]]:
+    """Select a static-position bank by local ball geometry, without outcome peeking."""
+    if count < 1 or np.asarray(ball_xy).shape != (2,):
+        raise ValueError("positive bank size and one local ball position are required")
+    ranked = sorted(
+        records,
+        key=lambda item: (
+            float(np.linalg.norm(
+                np.asarray(ball_xy, dtype=np.float64)
+                - np.array([
+                    0.32 + float(item["ball_x_offset_m"]),
+                    float(item["ball_y_offset_m"]),
+                ])
+            )),
+            int(item["condition_index"]),
+        ),
+    )
+    return ranked[:count]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("teacher_manifest", type=Path)
     parser.add_argument("server_corpus", type=Path)
     parser.add_argument("--condition-index", type=int, default=60)
     parser.add_argument("--max-approaches", type=int, default=16)
+    parser.add_argument(
+        "--teacher-bank-neighbors", type=int, default=0,
+        help="also probe this many nearest static-position teachers per approach",
+    )
     parser.add_argument("--model", type=Path, action="append", default=[])
     parser.add_argument("--replay-model", type=Path)
     parser.add_argument("--replay-output", type=Path)
@@ -103,6 +129,7 @@ def main() -> None:
         not args.teacher_manifest.is_file() or not args.server_corpus.is_file()
         or not args.output.is_absolute() or output.is_relative_to(REPOSITORY_ROOT.resolve())
         or output.exists() or args.max_approaches < 1
+        or args.teacher_bank_neighbors < 0 or args.teacher_bank_neighbors > 16
         or not all(path.is_file() for path in args.model)
         or (args.replay_model is not None and (
             args.replay_output is None
@@ -132,6 +159,15 @@ def main() -> None:
     if len(records) != 1:
         raise ValueError("condition index must select one accepted teacher")
     record = records[0]
+    compatible_bank = [
+        item for item in teacher.get("records", [])
+        if bool(item.get("accepted"))
+        and all(item.get(key) == record.get(key) for key in (
+            "distance_m", "angle_deg", "requested_speed_mps",
+            "desired_arrival_speed_mps", "mode",
+        ))
+        and "ball_x_offset_m" in item and "ball_y_offset_m" in item
+    ]
     contract = load_policy_contract(CONTRACT)
     scene = RcssKickScene(contract)
     evaluator = KickTeacherEvaluator(
@@ -202,6 +238,38 @@ def main() -> None:
         "condition_index": args.condition_index,
         "trials": trials,
     }
+    if args.teacher_bank_neighbors:
+        bank_trials: list[dict[str, object]] = []
+        for row in selected[: args.max_approaches]:
+            project_server_motion_state(scene, arrays, int(row))
+            qpos, qvel = scene.data.qpos.copy(), scene.data.qvel.copy()
+            previous_action, _ = infer_previous_walk_action(arrays, int(row))
+            candidates: list[dict[str, object]] = []
+            for item in nearest_teacher_records(
+                compatible_bank, local[row], args.teacher_bank_neighbors
+            ):
+                outcome = evaluator.rollout(
+                    np.asarray(item["parameters"], dtype=np.float64),
+                    initial_qpos=qpos, initial_qvel=qvel,
+                    initial_walk_previous_action=previous_action,
+                )
+                candidates.append({
+                    "condition_index": int(item["condition_index"]),
+                    "contact": bool(outcome["contact"]),
+                    "fell": bool(outcome["fell"]),
+                    "success": bool(kick_trial_success(outcome)),
+                    "metrics": outcome,
+                })
+            bank_trials.append({
+                "row": int(row), "split": int(arrays["split"][row]),
+                "candidates": candidates,
+            })
+        report["teacher_bank"] = {
+            "selection": "nearest_local_ball_position_without_outcome_peeking",
+            "neighbors": args.teacher_bank_neighbors,
+            "outcome_oracle_is_deployment_policy": False,
+            "trials": bank_trials,
+        }
     models: list[dict[str, object]] = []
     for path, session in sessions:
         model_trials: list[dict[str, object]] = []

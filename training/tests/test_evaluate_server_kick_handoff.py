@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from tools.evaluate_server_kick_handoff import ball_local_xy, representative_approaches
+from tools.evaluate_server_kick_handoff import (
+    ball_local_xy, nearest_teacher_records, representative_approaches,
+)
 
 
 def test_representative_approaches_deduplicates_adjacent_frames() -> None:
@@ -42,3 +44,18 @@ def test_representative_approaches_rejects_turned_away() -> None:
 
     assert candidate_frames == 0
     assert rows.size == 0
+
+
+def test_nearest_teacher_bank_uses_geometry_not_outcome() -> None:
+    records = [
+        {"condition_index": 2, "ball_x_offset_m": -0.05, "ball_y_offset_m": 0.04,
+         "score": 100.0},
+        {"condition_index": 1, "ball_x_offset_m": 0.02, "ball_y_offset_m": 0.0,
+         "score": -100.0},
+        {"condition_index": 3, "ball_x_offset_m": 0.02, "ball_y_offset_m": 0.0,
+         "score": 100.0},
+    ]
+
+    chosen = nearest_teacher_records(records, np.array([0.34, 0.0]), 2)
+
+    assert [record["condition_index"] for record in chosen] == [1, 3]

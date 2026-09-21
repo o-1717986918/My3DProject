@@ -1191,6 +1191,7 @@ class KickTeacherEvaluator:
         ball_y_offset_m: float = 0.0,
         initial_qpos: np.ndarray | None = None,
         initial_qvel: np.ndarray | None = None,
+        initial_walk_previous_action: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, float | bool]]:
         """Execute the learner and label every visited state with the teacher."""
         metrics = self.rollout(
@@ -1200,6 +1201,7 @@ class KickTeacherEvaluator:
             ball_y_offset_m=ball_y_offset_m,
             initial_qpos=initial_qpos,
             initial_qvel=initial_qvel,
+            initial_walk_previous_action=initial_walk_previous_action,
             kick_policy_session=session,
         )
         sample_count = self._captured_observations.shape[0]
