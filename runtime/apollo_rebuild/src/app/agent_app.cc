@@ -55,6 +55,8 @@ void emit_training_telemetry(
     const world::WorldSnapshot& snapshot,
     const robot::T1RobotModel& robot_model,
     const robot::JointTargets& targets,
+    const robot::JointTargets& reference_targets,
+    double motion_elapsed_s,
     const std::string& motion) {
     const auto& names = robot_model.readable_joint_names();
     for (const auto& name : names) {
@@ -70,11 +72,12 @@ void emit_training_telemetry(
     std::ostringstream line;
     line << std::setprecision(9)
          << "APOLLO_REBUILD_MOTION_TELEMETRY"
-         << " schema=2"
+         << " schema=3"
          << " t=" << snapshot.server_time
          << " player=" << snapshot.player_number
          << " side=" << (snapshot.is_left_team.value_or(true) ? "left" : "right")
          << " motion=" << motion
+         << " motion_elapsed=" << motion_elapsed_s
          << " ball_valid=" << (snapshot.ball.position_valid ? 1 : 0)
          << " ball_age=" << snapshot.ball.position_age_s
          << " ball_velocity_valid=" << (snapshot.ball.velocity_valid ? 1 : 0);
@@ -130,6 +133,28 @@ void emit_training_telemetry(
     append_targets("target_kd", &robot::JointTarget::kd);
     append_targets("target_tau", &robot::JointTarget::tau);
     line << " target_mask=" << target_mask;
+    std::vector<const robot::JointTarget*> ordered_reference_targets;
+    ordered_reference_targets.reserve(names.size());
+    std::string reference_mask;
+    reference_mask.reserve(names.size());
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        const auto target = std::find_if(
+            reference_targets.begin(), reference_targets.end(),
+            [&name = names[index]](const robot::JointTarget& item) {
+                return item.joint_name == name;
+            });
+        const bool found = target != reference_targets.end() &&
+            std::isfinite(target->q_deg);
+        ordered_reference_targets.push_back(found ? &*target : nullptr);
+        reference_mask.push_back(found ? '1' : '0');
+    }
+    line << " reference_position_deg=";
+    for (std::size_t index = 0; index < ordered_reference_targets.size(); ++index) {
+        if (index > 0U) line << ',';
+        line << (ordered_reference_targets[index]
+            ? ordered_reference_targets[index]->q_deg : 0.0);
+    }
+    line << " reference_mask=" << reference_mask;
     std::cerr << line.str() << '\n';
 }
 
@@ -304,6 +329,8 @@ std::string AgentApp::process_perception_message(const std::string& message) {
 
     std::vector<std::string> nodes;
     robot::JointTargets telemetry_targets;
+    robot::JointTargets telemetry_reference_targets;
+    double telemetry_motion_elapsed_s = -1.0;
     if (const auto* beam = std::get_if<decision::BeamCommand>(&command)) {
         // Beam is the only absolute-coordinate output. The agent works in a
         // canonical frame (own goal at -x) obtained by a 180-degree rotation of
@@ -323,6 +350,9 @@ std::string AgentApp::process_perception_message(const std::string& message) {
             nodes.insert(nodes.end(), motor_nodes.begin(), motor_nodes.end());
             if (config_.training_telemetry_interval > 0) {
                 telemetry_targets = motion_result.joint_targets;
+                telemetry_reference_targets =
+                    motion_result.reference_joint_targets;
+                telemetry_motion_elapsed_s = motion_result.motion_elapsed_s;
             }
         }
     }
@@ -370,7 +400,12 @@ std::string AgentApp::process_perception_message(const std::string& message) {
         processed_frames_ % config_.training_telemetry_interval == 0 &&
         snapshot.play_mode == world::PlayMode::PlayOn) {
         emit_training_telemetry(
-            snapshot, robot_model_, telemetry_targets, last_active_motion_);
+            snapshot,
+            robot_model_,
+            telemetry_targets,
+            telemetry_reference_targets,
+            telemetry_motion_elapsed_s,
+            last_active_motion_);
     }
     if (config_.status_interval > 0 &&
         processed_frames_ % config_.status_interval == 0) {

@@ -96,6 +96,8 @@ MotionStepResult MotionManager::step(
                         true,
                         "DynamicPass-r" + std::to_string(pass.prototype_rollout_id),
                         pass.joint_targets,
+                        stable.joint_targets,
+                        elapsed,
                     };
                 }
                 walk_reset_pending_ = true;
@@ -139,6 +141,8 @@ MotionStepResult MotionManager::step(
                     "DynamicPass-r" +
                         std::to_string(pass.prototype_rollout_id),
                     pass.joint_targets,
+                    stable.joint_targets,
+                    elapsed,
                 };
             }
         }

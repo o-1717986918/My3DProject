@@ -10,6 +10,8 @@ from pathlib import Path
 
 import numpy as np
 
+from my3d_rl.rcss_replay import load_ball_trajectory
+
 
 START_PREFIX = "APOLLO_REBUILD_DYNAMIC_PASS_START "
 RESULT_PREFIX = "APOLLO_REBUILD_DYNAMIC_PASS_RESULT "
@@ -204,6 +206,75 @@ def summarize(outcomes: list[DynamicPassOutcome]) -> dict[str, object]:
     }
 
 
+def summarize_ground_truth(
+    outcomes: list[DynamicPassOutcome],
+    replay_times_s: np.ndarray,
+    replay_ball_position_m: np.ndarray,
+    *,
+    team_side: str,
+) -> dict[str, object]:
+    """Measure action windows against server truth, independent of vision age."""
+
+    times = np.asarray(replay_times_s, dtype=np.float64)
+    positions = np.asarray(replay_ball_position_m, dtype=np.float64)
+    if (
+        team_side not in {"left", "right"}
+        or times.ndim != 1
+        or positions.shape != (times.size, 3)
+        or times.size < 2
+        or not np.isfinite(times).all()
+        or not np.isfinite(positions).all()
+        or np.any(np.diff(times) <= 0.0)
+    ):
+        raise ValueError("invalid RCSS ground-truth trajectory")
+    canonical_sign = 1.0 if team_side == "left" else -1.0
+    rows: list[dict[str, float | int | bool]] = []
+    for outcome in outcomes:
+        start = int(np.argmin(np.abs(times - outcome.start_time_s)))
+        end = int(np.argmin(np.abs(times - outcome.end_time_s)))
+        if end <= start or abs(times[start] - outcome.start_time_s) > 0.05:
+            continue
+        segment = positions[start : end + 1]
+        delta = canonical_sign * (segment[:, :2] - segment[0, :2])
+        directional_speed = canonical_sign * np.diff(segment[:, 0]) / np.diff(
+            times[start : end + 1]
+        )
+        maximum_progress = float(np.max(delta[:, 0]))
+        final_dx = float(delta[-1, 0])
+        final_dy = float(delta[-1, 1])
+        peak_directional_speed = float(np.max(directional_speed))
+        success = bool(
+            outcome.completed
+            and maximum_progress >= 2.5
+            and abs(final_dy) <= 1.0
+            and peak_directional_speed >= 1.5
+        )
+        rows.append(
+            {
+                "player": outcome.player,
+                "rollout_id": outcome.rollout_id,
+                "start_time_s": outcome.start_time_s,
+                "end_time_s": outcome.end_time_s,
+                "maximum_progress_m": maximum_progress,
+                "final_ball_dx_m": final_dx,
+                "final_ball_dy_m": final_dy,
+                "peak_directional_speed_mps": peak_directional_speed,
+                "forward_drive_success": success,
+                "upright": outcome.upright,
+            }
+        )
+    return {
+        "source": "RCSSServerMJ RSMP replay scene graph",
+        "team_side": team_side,
+        "outcome_count": len(rows),
+        "forward_drive_success_count": sum(
+            bool(row["forward_drive_success"]) for row in rows
+        ),
+        "upright_count": sum(bool(row["upright"]) for row in rows),
+        "outcomes": rows,
+    }
+
+
 def save_npz(path: Path, outcomes: list[DynamicPassOutcome]) -> None:
     if not outcomes:
         raise ValueError("cannot save an empty outcome corpus")
@@ -282,6 +353,8 @@ def main() -> None:
     )
     parser.add_argument("--team-prefix", default="Apollo-Rebuild")
     parser.add_argument("--output-npz", type=Path)
+    parser.add_argument("--server-replay", type=Path)
+    parser.add_argument("--team-side", choices=("left", "right"), default="left")
     args = parser.parse_args()
 
     outcomes = [
@@ -291,7 +364,16 @@ def main() -> None:
     ]
     if args.output_npz is not None:
         save_npz(args.output_npz, outcomes)
-    print(json.dumps(summarize(outcomes), indent=2, sort_keys=True))
+    report = summarize(outcomes)
+    if args.server_replay is not None:
+        replay_times, replay_positions = load_ball_trajectory(args.server_replay)
+        report["server_ground_truth"] = summarize_ground_truth(
+            outcomes,
+            replay_times,
+            replay_positions,
+            team_side=args.team_side,
+        )
+    print(json.dumps(report, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

@@ -47,6 +47,7 @@ states, run a rebuild match with opt-in telemetry (default is off):
 
 ```bash
 MATCH_RUN_DIR=/home/win98/rl_runs/training-transition/MATCH_RUN \
+MATCH_SERVER_LOGFILE=/home/win98/rl_runs/training-transition/MATCH_RUN/server-replay \
 APOLLO_REBUILD_TRAINING_TELEMETRY_INTERVAL=1 \
 scripts/run_apollo_rebuild_match.sh 30
 PYTHONPATH=training conda run -n my3d-rl python \
@@ -62,8 +63,10 @@ One match has no validation split. The raw
 server-observed torso and joint arrays are not simulator qpos/qvel and must
 not be injected into MuJoCo without a calibrated state adapter.
 
-Schema-2 telemetry includes all six motor-control fields. Use the exact CPU
-one-step probe before deriving training initial states:
+Schema-2 telemetry includes all six motor-control fields. Schema 3 additionally
+records the live unmodified Walk reference targets and motion elapsed time, so
+the deployed residual composition can be reconstructed instead of guessed.
+Use the exact CPU one-step probe before deriving training initial states:
 
 ```bash
 PYTHONPATH=training conda run -n my3d-rl python \
@@ -94,6 +97,21 @@ MUJOCO_GL=egl PYTHONPATH=training conda run -n my3d-rl python \
 The contact sheet is an exact-CPU visualization of a **projected** server
 entry, not a video of an RCSS match. A frozen teacher/ONNX success in this
 probe does not automatically change the competition runtime.
+
+When `MATCH_SERVER_LOGFILE` is present, measure a completed DynamicPass against
+the RCSSServerMJ replay scene graph rather than the agent's possibly stale ball
+estimate:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/analyze_dynamic_pass_outcomes.py \
+  --match-dir /home/win98/rl_runs/training-transition/MATCH_RUN \
+  --server-replay /home/win98/rl_runs/training-transition/MATCH_RUN/server-replay \
+  --team-side left
+```
+
+The replay truth is the release gate for ball displacement and direction. Agent
+telemetry remains the source for body/joint state and sent control targets.
 
 The preserved first task is `kick_policy_v1`: a 50 Hz direction-only residual
 joint-position contract for Booster T1. Active R1 development uses

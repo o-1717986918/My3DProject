@@ -25,6 +25,15 @@ def sample_line(*, time_s: float = 1.0, valid: int = 1) -> str:
     )
 
 
+def sample_schema3_line(*, time_s: float = 1.0) -> str:
+    joints = ",".join("1" for _ in range(23))
+    return (
+        sample_line(time_s=time_s)
+        .replace("schema=2 ", "schema=3 motion_elapsed=0.24 ")
+        + f" reference_position_deg={joints} reference_mask={'1' * 23}"
+    )
+
+
 def test_parse_complete_server_frame_and_reject_partial_joint_state() -> None:
     assert parse_telemetry_line("other log line") is None
     frame = parse_telemetry_line(sample_line())
@@ -45,6 +54,16 @@ def test_parse_complete_server_frame_and_reject_partial_joint_state() -> None:
         parse_telemetry_line(sample_line().replace("schema=2 ", ""))
 
 
+def test_parse_schema3_preserves_live_reference_targets() -> None:
+    frame = parse_telemetry_line(sample_schema3_line())
+
+    assert frame is not None
+    assert frame["telemetry_schema"] == 3
+    assert frame["motion_elapsed_s"] == pytest.approx(0.24)
+    np.testing.assert_array_equal(frame["reference_position_deg"], np.ones(23))
+    assert np.all(frame["reference_mask"] == 1)
+
+
 def test_collect_holds_out_whole_matches_not_correlated_players(tmp_path: Path) -> None:
     match_dirs = [tmp_path / "first", tmp_path / "second"]
     for match_dir in match_dirs:
@@ -60,6 +79,7 @@ def test_collect_holds_out_whole_matches_not_correlated_players(tmp_path: Path) 
     assert summary["samples"] == 8
     assert summary["fresh_near_ball_samples"] == 8
     assert summary["complete_target_samples"] == 8
+    assert summary["complete_reference_samples"] == 0
     assert summary["train_samples"] == summary["validation_samples"] == 4
     assert np.all(arrays["split"][arrays["match_id"] == 0] == 0)
     assert np.all(arrays["split"][arrays["match_id"] == 1] == 1)

@@ -20,14 +20,32 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace behavior {
 
 /// Low-level targets selected for the current high-level command.
 struct MotionStepResult {
+    MotionStepResult() = default;
+    MotionStepResult(
+        bool handled_value,
+        std::string active_motion_value,
+        robot::JointTargets joint_targets_value,
+        robot::JointTargets reference_joint_targets_value = {},
+        double motion_elapsed_value = -1.0)
+        : handled(handled_value),
+          active_motion(std::move(active_motion_value)),
+          joint_targets(std::move(joint_targets_value)),
+          reference_joint_targets(std::move(reference_joint_targets_value)),
+          motion_elapsed_s(motion_elapsed_value) {}
+
     bool handled{false};
     std::string active_motion;
     robot::JointTargets joint_targets;
+    // Optional unmodified base targets used before a learned/procedural
+    // overlay. Training telemetry uses this to reproduce the live composition.
+    robot::JointTargets reference_joint_targets;
+    double motion_elapsed_s{-1.0};
 };
 
 /// Selects and coordinates walk, neutral, and get-up motion runners.

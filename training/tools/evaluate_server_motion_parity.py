@@ -184,8 +184,13 @@ def main() -> None:
     ):
         raise ValueError("corpus must exist; output must be new, absolute, and outside the repo")
     manifest = json.loads((args.corpus.parent / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != 2 or manifest.get("archive_sha256") != sha256(args.corpus):
-        raise ValueError("complete schema-2 telemetry and matching manifest are required")
+    if (
+        manifest.get("schema_version") not in {2, 3}
+        or manifest.get("archive_sha256") != sha256(args.corpus)
+    ):
+        raise ValueError(
+            "complete schema-2/3 telemetry and matching manifest are required"
+        )
     with np.load(args.corpus, allow_pickle=False) as archive:
         arrays = {name: np.asarray(archive[name]) for name in archive.files}
     report = evaluate(arrays, seed=args.seed, max_rows_per_bucket=args.max_rows_per_bucket)

@@ -3,8 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
-from tools.analyze_dynamic_pass_outcomes import load_outcomes, save_npz, summarize
+from tools.analyze_dynamic_pass_outcomes import (
+    load_outcomes,
+    save_npz,
+    summarize,
+    summarize_ground_truth,
+)
 
 
 def test_pairs_release_observation_with_measured_result(tmp_path: Path) -> None:
@@ -121,3 +127,36 @@ def test_unmatched_result_is_ignored(tmp_path: Path) -> None:
 
     assert load_outcomes(tmp_path, "Apollo-Rebuild") == []
     assert summarize([]) == {"outcome_count": 0}
+
+
+def test_ground_truth_uses_team_frame_and_does_not_require_upright(
+    tmp_path: Path,
+) -> None:
+    observation = ",".join(["0"] * 98)
+    (tmp_path / "Apollo-Rebuild-7.log").write_text(
+        "APOLLO_REBUILD_DYNAMIC_PASS_START "
+        "t=10 player=7 motion=DynamicPass-r60467 observation="
+        + observation
+        + "\nAPOLLO_REBUILD_DYNAMIC_PASS_RESULT "
+        "t=11 player=7 motion=DynamicPass-r60467 "
+        "termination=completed duration=1 selector_confidence=1 "
+        "start_ball_speed=-1 peak_ball_speed=-1 final_ball_speed=-1 "
+        "ball_dx=0 ball_dy=0 ball_displacement=0 peak_ball_height=0.11 "
+        "end_ball_valid=1 end_ball_age=1 upright=0\n",
+        encoding="utf-8",
+    )
+    outcome = load_outcomes(tmp_path, "Apollo-Rebuild")[0]
+    times = np.asarray([9.96, 10.0, 10.5, 11.0])
+    # A right-side team attacks toward global -x; canonical y is also flipped.
+    positions = np.asarray(
+        [[4.0, 1.0, 0.11], [4.0, 1.0, 0.11], [2.0, 0.8, 0.11], [1.2, 0.6, 0.11]]
+    )
+
+    report = summarize_ground_truth(
+        [outcome], times, positions, team_side="right"
+    )
+
+    assert report["forward_drive_success_count"] == 1
+    assert report["upright_count"] == 0
+    assert report["outcomes"][0]["maximum_progress_m"] == pytest.approx(2.8)
+    assert report["outcomes"][0]["final_ball_dy_m"] == pytest.approx(0.4)

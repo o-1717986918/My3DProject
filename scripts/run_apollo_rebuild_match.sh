@@ -38,6 +38,7 @@ goalkeeper_shot_x=${MATCH_GOALKEEPER_SHOT_X:-18}
 goalkeeper_shot_y=${MATCH_GOALKEEPER_SHOT_Y:-0.7}
 goalkeeper_shot_speed=${MATCH_GOALKEEPER_SHOT_SPEED:-5.0}
 run_dir=${MATCH_RUN_DIR:-/home/win98/rl_runs/apollo-rebuild-vs-base-$(date +%Y%m%d-%H%M%S)-$rebuild_side}
+server_replay_log=${MATCH_SERVER_LOGFILE:-}
 
 server_pid=
 player_pids=()
@@ -117,6 +118,10 @@ if [[ ! -x "$server_python" || ! -x "$server_binary" ]]; then
     echo "RCSSServerMJ environment is missing" >&2
     exit 2
 fi
+case "$server_replay_log" in
+    ""|/home/win98/rl_runs/*) ;;
+    *) echo "MATCH_SERVER_LOGFILE must be below /home/win98/rl_runs" >&2; exit 2 ;;
+esac
 if [[ ! -x "$rebuild_binary" ]]; then
     "$repo_dir/scripts/build_apollo_rebuild.sh" >/dev/null
 fi
@@ -136,13 +141,18 @@ if [[ ! -x "$base_binary" ]]; then
 fi
 
 mkdir -p "$run_dir"
-"$server_binary" \
+server_args=(
     --host 127.0.0.1 \
     --aport "$agent_port" \
     --mport "$monitor_port" \
     --sync --no-realtime --no-render \
-    --field fifa7vs7 --rules ssim26 \
-    >"$run_dir/server.log" 2>&1 &
+    --field fifa7vs7 --rules ssim26
+)
+if [[ -n "$server_replay_log" ]]; then
+    mkdir -p "$(dirname "$server_replay_log")"
+    server_args+=(--logfile "$server_replay_log")
+fi
+"$server_binary" "${server_args[@]}" >"$run_dir/server.log" 2>&1 &
 server_pid=$!
 sleep 2
 

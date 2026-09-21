@@ -45,6 +45,9 @@ VECTOR_SHAPES = {
     "target_kd": JOINT_COUNT,
     "target_tau": JOINT_COUNT,
 }
+REFERENCE_VECTOR_SHAPES = {
+    "reference_position_deg": JOINT_COUNT,
+}
 
 
 def sha256(path: Path) -> str:
@@ -60,13 +63,16 @@ def parse_telemetry_line(line: str) -> dict[str, object] | None:
     if not line.startswith(PREFIX):
         return None
     fields = dict(token.split("=", 1) for token in line.split()[1:])
-    if fields.get("schema") != "2":
-        raise ValueError("motion telemetry requires complete schema 2 motor controls")
+    schema = fields.get("schema")
+    if schema not in {"2", "3"}:
+        raise ValueError("motion telemetry requires complete schema 2 or 3 controls")
     frame: dict[str, object] = {
+        "telemetry_schema": int(schema),
         "time_s": float(fields["t"]),
         "player_number": int(fields["player"]),
         "side": fields["side"],
         "motion": fields["motion"],
+        "motion_elapsed_s": float(fields.get("motion_elapsed", -1.0)),
         "ball_valid": int(fields["ball_valid"]),
         "ball_position_age_s": float(fields["ball_age"]),
         "ball_velocity_valid": int(fields["ball_velocity_valid"]),
@@ -76,12 +82,26 @@ def parse_telemetry_line(line: str) -> dict[str, object] | None:
         if vector.shape != (size,) or not np.isfinite(vector).all():
             raise ValueError(f"invalid {name} in motion telemetry")
         frame[name] = vector
+    for name, size in REFERENCE_VECTOR_SHAPES.items():
+        vector = np.fromstring(
+            fields[name], sep=",", dtype=np.float64
+        ) if schema == "3" else np.zeros(size, dtype=np.float64)
+        if vector.shape != (size,) or not np.isfinite(vector).all():
+            raise ValueError(f"invalid {name} in motion telemetry")
+        frame[name] = vector
     mask = fields["target_mask"]
     if len(mask) != JOINT_COUNT or set(mask) - {"0", "1"}:
         raise ValueError("invalid target mask in motion telemetry")
     frame["target_mask"] = np.fromiter((char == "1" for char in mask), dtype=np.uint8)
+    reference_mask = fields.get("reference_mask", "0" * JOINT_COUNT)
+    if len(reference_mask) != JOINT_COUNT or set(reference_mask) - {"0", "1"}:
+        raise ValueError("invalid reference mask in motion telemetry")
+    frame["reference_mask"] = np.fromiter(
+        (char == "1" for char in reference_mask), dtype=np.uint8
+    )
     if (
         not np.isfinite(frame["time_s"])
+        or not np.isfinite(frame["motion_elapsed_s"])
         or frame["player_number"] not in range(1, 12)
         or frame["side"] not in {"left", "right"}
         or frame["ball_valid"] not in {0, 1}
@@ -122,13 +142,19 @@ def collect(
         raise ValueError("no motion telemetry in match logs; enable its interval")
     arrays = {
         name: np.stack([row[name] for row in rows]).astype(np.float32)
-        for name in VECTOR_SHAPES
+        for name in VECTOR_SHAPES | REFERENCE_VECTOR_SHAPES
     }
-    for name in ("time_s", "ball_position_age_s"):
+    for name in ("time_s", "ball_position_age_s", "motion_elapsed_s"):
         arrays[name] = np.asarray([row[name] for row in rows], dtype=np.float64)
-    for name in ("player_number", "ball_valid", "ball_velocity_valid", "match_id"):
+    for name in (
+        "telemetry_schema", "player_number", "ball_valid",
+        "ball_velocity_valid", "match_id",
+    ):
         arrays[name] = np.asarray([row[name] for row in rows], dtype=np.int32)
     arrays["target_mask"] = np.stack([row["target_mask"] for row in rows])
+    arrays["reference_mask"] = np.stack(
+        [row["reference_mask"] for row in rows]
+    )
     for name in ("side", "motion"):
         arrays[name] = np.asarray([row[name] for row in rows], dtype="U64")
     # Correlated players and time windows from one match stay on one side.
@@ -158,6 +184,9 @@ def collect(
         "validation_samples": int(np.sum(arrays["split"] == 1)),
         "fresh_near_ball_samples": int(np.sum(near_ball)),
         "complete_target_samples": int(np.sum(np.all(arrays["target_mask"] == 1, axis=1))),
+        "complete_reference_samples": int(
+            np.sum(np.all(arrays["reference_mask"] == 1, axis=1))
+        ),
         "sources": sources,
     }
     return arrays, summary
@@ -185,7 +214,7 @@ def main() -> None:
     archive = run_dir / "server-motion-telemetry.npz"
     np.savez_compressed(archive, **arrays)
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "purpose": "server_observed_motion_and_sent_targets",
         "promotable": False,
         "units": "server canonical team frame; joint positions/targets degrees; joint velocities degrees/s",
@@ -206,6 +235,7 @@ def main() -> None:
     print(json.dumps({key: manifest[key] for key in (
         "samples", "match_groups", "train_samples", "validation_samples",
         "fresh_near_ball_samples", "complete_target_samples",
+        "complete_reference_samples",
     )}, indent=2))
 
 
