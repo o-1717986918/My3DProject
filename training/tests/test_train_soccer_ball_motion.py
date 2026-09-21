@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tools.train_soccer_ball_motion import (
+    _effective_learning_rate,
     _load_bootstrap_gate,
     _load_parent_run_gate,
     _target_angle_range_degrees,
@@ -147,3 +148,12 @@ def test_k2_trainer_rejects_invalid_angle_curriculum(
 ):
     with pytest.raises(ValueError, match=message):
         _target_angle_range_degrees(0.0, minimum, maximum)
+
+
+def test_k2_trainer_uses_bounded_learning_rate_override():
+    assert _effective_learning_rate(1.0e-5, None) == 1.0e-5
+    assert _effective_learning_rate(1.0e-5, 1.0e-4) == 1.0e-4
+
+    for invalid in (0.0, 1.1e-3, float("nan")):
+        with pytest.raises(ValueError, match="learning rate"):
+            _effective_learning_rate(1.0e-5, invalid)

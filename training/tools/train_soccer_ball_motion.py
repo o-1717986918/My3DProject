@@ -51,6 +51,14 @@ def _target_angle_range_degrees(
     return float(minimum), float(maximum)
 
 
+def _effective_learning_rate(default: float, override: float | None) -> float:
+    """Resolve a bounded experiment rate without editing shared PPO profiles."""
+    value = default if override is None else override
+    if not math.isfinite(value) or not 1.0e-7 <= value <= 1.0e-3:
+        raise ValueError("learning rate must be finite and within [1e-7, 1e-3]")
+    return float(value)
+
+
 def _load_bootstrap_gate(
     report_path: Path, restore_checkpoint: Path
 ) -> dict[str, Any]:
@@ -153,6 +161,7 @@ def main() -> None:
     parser.add_argument("--target-angle-min-degrees", type=float)
     parser.add_argument("--target-angle-max-degrees", type=float)
     parser.add_argument("--requested-arrival-speed", type=float, default=0.8)
+    parser.add_argument("--learning-rate", type=float)
     args = parser.parse_args()
     if min(
         args.num_timesteps,
@@ -180,6 +189,9 @@ def main() -> None:
     )
     contract = load_policy_contract(args.contract)
     profile = get_ppo_profile(args.profile)
+    learning_rate = _effective_learning_rate(
+        profile.learning_rate, args.learning_rate
+    )
     if profile.policy_contract != contract.policy_name:
         raise ValueError("PPO profile and policy contract differ")
     if (profile.batch_size * profile.num_minibatches) % args.num_envs:
@@ -235,6 +247,7 @@ def main() -> None:
         "policy_contract_path": str(args.contract.resolve()),
         "policy_contract_sha256": _sha256(args.contract),
         "profile": profile.__dict__,
+        "effective_learning_rate": learning_rate,
         "backend": jax.default_backend(),
         "implementation": args.impl,
         "devices": [str(device) for device in jax.devices()],
@@ -305,7 +318,7 @@ def main() -> None:
             episode_length=train_env._config.episode_length,
             action_repeat=1,
             wrap_env_fn=wrapper.wrap_for_brax_training,
-            learning_rate=profile.learning_rate,
+            learning_rate=learning_rate,
             entropy_cost=profile.entropy_cost,
             discounting=profile.discounting,
             unroll_length=profile.unroll_length,

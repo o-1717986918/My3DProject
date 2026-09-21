@@ -2121,3 +2121,20 @@ The next run samples 15--22.5 degrees from the stable 22.5-degree checkpoint,
 retaining successful old targets in every batch while introducing the new
 direction. Only an overlapping range that preserves contact and nonzero target
 success will expand toward 7.5 and 0 degrees.
+
+The first overlapping 15--22.5-degree run did not solve conditioning. It kept
+64/64 contact/recovery and zero falls, but success moved from 4/64 initially to
+2/64 at both saved checkpoints. Direct checkpoint inspection explains why:
+the 16 appended actor-input rows have norm 0.01667 at the stable 22.5-degree
+parent versus 32.40125 for the 110 inherited rows, a ratio of `5.15e-4`; after
+overlapping training the ratio is `4.60e-4`. The target command remains nearly
+unused.
+
+Before implementing a separate network, one bounded scalar ablation remains.
+The K2 trainer now accepts a manifest-recorded learning-rate override while
+leaving the shared PPO profile unchanged. The next run repeats the same parent
+and overlapping range at `1e-4` instead of `1e-5`, with adaptive KL still
+enabled. It is accepted only if both command-row norm and held-out angle outcome
+improve. Otherwise scalar PPO tuning stops and the next implementation is a
+frozen inherited actor plus a target-conditioned adapter or supervised target
+row initialization.
