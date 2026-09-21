@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from tools.train_soccer_ball_motion import _load_bootstrap_gate
+from tools.train_soccer_ball_motion import (
+    _load_bootstrap_gate,
+    _load_parent_run_gate,
+)
 
 
 def _write_bootstrap_report(tmp_path: Path) -> tuple[Path, Path]:
@@ -71,3 +74,55 @@ def test_k2_trainer_rejects_another_checkpoint(tmp_path):
 
     with pytest.raises(ValueError, match="differs"):
         _load_bootstrap_gate(report, another)
+
+
+def _write_parent_run(tmp_path: Path) -> tuple[Path, Path]:
+    run_dir = tmp_path / "parent"
+    checkpoint = run_dir / "checkpoints" / "000000196608"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "params").write_bytes(b"continued-k2")
+    manifest = run_dir / "run-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "purpose": "k2_fixed_motion_ball_target_residual_training",
+                "policy_contract": "soccer_ball_motion_policy_v1",
+                "timestep_accounting_passed": True,
+                "observed_final_timesteps": 393216,
+                "git_revision": "a" * 40,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest, checkpoint
+
+
+def test_k2_trainer_accepts_checkpoint_from_completed_parent_run(tmp_path):
+    manifest, checkpoint = _write_parent_run(tmp_path)
+
+    result = _load_parent_run_gate(manifest, checkpoint)
+
+    assert result["type"] == "k2_parent_checkpoint"
+    assert result["checkpoint_step"] == 196608
+    assert result["checkpoint_tree_sha256"]
+
+
+def test_k2_trainer_rejects_checkpoint_outside_parent_run(tmp_path):
+    manifest, unused = _write_parent_run(tmp_path)
+    other = tmp_path / "other" / "000000196608"
+    other.mkdir(parents=True)
+    (other / "params").write_bytes(b"other")
+
+    with pytest.raises(ValueError, match="outside"):
+        _load_parent_run_gate(manifest, other)
+
+
+def test_k2_trainer_rejects_incomplete_parent_run(tmp_path):
+    manifest, checkpoint = _write_parent_run(tmp_path)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["status"] = "running"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="did not complete"):
+        _load_parent_run_gate(manifest, checkpoint)

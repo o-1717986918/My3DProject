@@ -58,6 +58,7 @@ def _load_bootstrap_gate(
     if report["parity"]["value_max_abs"] > report["parity"]["required_max_abs"]:
         raise ValueError("bootstrap critic parity exceeds its declared threshold")
     return {
+        "type": "k2_zero_row_bootstrap",
         "report": str(report_path.resolve()),
         "report_sha256": _sha256(report_path),
         "checkpoint_tree_sha256": observed_hash,
@@ -69,10 +70,49 @@ def _load_bootstrap_gate(
     }
 
 
+def _load_parent_run_gate(
+    manifest_path: Path, restore_checkpoint: Path
+) -> dict[str, Any]:
+    """Bind a curriculum continuation to a completed K2 parent run."""
+    if not manifest_path.is_file():
+        raise FileNotFoundError(manifest_path)
+    if not restore_checkpoint.is_dir():
+        raise FileNotFoundError(restore_checkpoint)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if (
+        manifest.get("status") != "complete"
+        or manifest.get("purpose")
+        != "k2_fixed_motion_ball_target_residual_training"
+        or manifest.get("policy_contract") != "soccer_ball_motion_policy_v1"
+        or not manifest.get("timestep_accounting_passed", False)
+    ):
+        raise ValueError("parent K2 run did not complete its declared contract")
+    checkpoint_root = (manifest_path.parent / "checkpoints").resolve()
+    resolved_checkpoint = restore_checkpoint.resolve()
+    if resolved_checkpoint.parent != checkpoint_root:
+        raise ValueError("restore checkpoint is outside the parent K2 run")
+    try:
+        checkpoint_step = int(resolved_checkpoint.name)
+    except ValueError as error:
+        raise ValueError("parent checkpoint name must be a numeric step") from error
+    if not 0 < checkpoint_step <= int(manifest["observed_final_timesteps"]):
+        raise ValueError("parent checkpoint step is outside the completed run")
+    return {
+        "type": "k2_parent_checkpoint",
+        "manifest": str(manifest_path.resolve()),
+        "manifest_sha256": _sha256(manifest_path),
+        "parent_git_revision": manifest.get("git_revision"),
+        "checkpoint_step": checkpoint_step,
+        "checkpoint_tree_sha256": _tree_sha256(restore_checkpoint),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("corpus_root", type=Path)
-    parser.add_argument("--bootstrap-report", type=Path, required=True)
+    initialization = parser.add_mutually_exclusive_group(required=True)
+    initialization.add_argument("--bootstrap-report", type=Path)
+    initialization.add_argument("--parent-run-manifest", type=Path)
     parser.add_argument("--restore-checkpoint", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
@@ -92,6 +132,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260990)
     parser.add_argument("--target-distance", type=float, default=2.0)
     parser.add_argument("--target-angle-degrees", type=float, default=0.0)
+    parser.add_argument("--requested-arrival-speed", type=float, default=0.8)
     args = parser.parse_args()
     if min(
         args.num_timesteps,
@@ -100,13 +141,17 @@ def main() -> None:
         args.num_eval_envs,
     ) < 1:
         raise ValueError("training counts must be positive")
-    if args.target_distance <= 0.0:
-        raise ValueError("target distance must be positive")
+    if min(args.target_distance, args.requested_arrival_speed) <= 0.0:
+        raise ValueError("target distance and arrival speed must be positive")
 
     run_dir = _external_new_directory(args.run_dir)
     revision = _git_revision()
-    bootstrap_gate = _load_bootstrap_gate(
-        args.bootstrap_report, args.restore_checkpoint
+    initialization_gate = (
+        _load_bootstrap_gate(args.bootstrap_report, args.restore_checkpoint)
+        if args.bootstrap_report is not None
+        else _load_parent_run_gate(
+            args.parent_run_manifest, args.restore_checkpoint
+        )
     )
     contract = load_policy_contract(args.contract)
     profile = get_ppo_profile(args.profile)
@@ -137,6 +182,7 @@ def main() -> None:
         "naconmax": max(2048, 8 * args.num_envs),
         "target_distance_range": [args.target_distance, args.target_distance],
         "target_angle_range": [angle_rad, angle_rad],
+        "requested_arrival_speed_m_s": args.requested_arrival_speed,
     }
     train_env = BallConditionedSoccerMotionTracking(
         corpus, config_overrides=overrides, contract=contract
@@ -179,13 +225,14 @@ def main() -> None:
         "corpus_root": str(args.corpus_root.resolve()),
         "corpus": _corpus_manifest(corpus),
         "restore_checkpoint": str(args.restore_checkpoint.resolve()),
-        "bootstrap_gate": bootstrap_gate,
+        "initialization_gate": initialization_gate,
         "curriculum": {
             "motion": int(train_env._config.fixed_motion_index),
             "start_frame_min": int(train_env._config.fixed_start_frame_min),
             "start_frame_max": int(train_env._config.fixed_start_frame_max),
             "target_distance_m": args.target_distance,
             "target_angle_degrees": args.target_angle_degrees,
+            "requested_arrival_speed_m_s": args.requested_arrival_speed,
             "post_contact_controller": "apollo_zero_command_walk",
             "post_contact_recovery_steps": int(
                 train_env._config.post_contact_recovery_steps

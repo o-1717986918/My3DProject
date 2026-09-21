@@ -2071,3 +2071,26 @@ post-contact fall costs 25 once and no longer terminates ball observation;
 pre-contact falls still terminate. This prices occasional recoverable falls as
 a finite match cost while preserving both physical target success and upright
 recovery as separate evidence.
+
+The first lateral-shaped run completed 1,966,080 steps from the unmodified
+zero-row bootstrap. Its midpoint improved the same-run final lateral outcome
+from 2.200 m to 2.011 m, but the final checkpoint regressed to 2.386 m and both
+remained at 0% target success. Exact CPU selection confirms a smaller real gain
+at the midpoint: across starts 113--118, median final lateral error improves
+from 4.795 m to 4.109 m and median minimum target distance from 1.547 m to
+1.478 m, with 6/6 contacts, zero falls and still 0/6 targets. The final
+checkpoint is worse and neither is deployable. Artifacts are under
+`/home/win98/rl_runs/paid-k2/k2b-fixed2m-lateral-shaped-s20260994-v1`; exact
+reports use the adjacent `exact-lateral-shaped-{mid,final}-s20260994-v1.json`
+names.
+
+This is evidence for curriculum distance, not for more blind optimizer steps.
+The bootstrap's exact trajectories already yield 1/6 physical targets at both
+35 and 45 degrees when the 2 m requested arrival speed is 2.0 m/s, versus 0/6
+at 0 degrees and 0.8 m/s. The trainer now exposes requested arrival speed and
+supports an auditable continuation gate from a completed K2 run. A continuation
+records the parent manifest hash, checkpoint step and checkpoint tree hash and
+rejects incomplete runs or checkpoints outside their declared parent. The next
+run starts at 45 degrees / 2.0 m/s, then rotates through 30, 15 and 0 degrees
+before lowering arrival speed; every stage is selected by exact CPU outcome,
+not by the last checkpoint convention.
