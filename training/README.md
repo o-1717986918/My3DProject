@@ -158,6 +158,12 @@ Before starting a long run, exercise at least one batched reset and step with
 `--impl warp`. A successful CUDA import alone is insufficient: the full test
 must pass graph capture, contact-sensor evaluation and reward computation.
 
+K2 reports `event/ball_target_success` independently from
+`event/target_success`. The first is the commanded ball outcome even if the
+robot later falls; the second additionally requires upright recovery. A
+post-contact fall is charged once as a finite match cost and does not stop ball
+rollout immediately. A pre-contact fall still terminates the attempt.
+
 GMR is also installed only in `my3d-motion`. Keep its checkout outside the
 repository at the source-lock commit; generated LAFAN derivatives remain
 local-only under the dataset licence.

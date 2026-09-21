@@ -61,6 +61,8 @@ def test_k2_environment_has_finite_126_and_134_boundaries():
     assert 113 <= int(state.info["reference_frame"]) <= 118
     assert state.obs["state"].shape == (126,)
     assert state.obs["privileged_state"].shape == (134,)
+    assert float(state.metrics["event/ball_target_success"]) == 0.0
+    assert not bool(state.info["post_contact_fell"])
     assert np.isfinite(np.asarray(state.obs["state"])).all()
     np.testing.assert_allclose(
         np.asarray(state.obs["state"][-2:]), [0.0, 1.0], atol=1.0e-7

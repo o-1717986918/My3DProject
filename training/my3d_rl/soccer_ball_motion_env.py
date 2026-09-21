@@ -74,7 +74,10 @@ def default_config() -> config_dict.ConfigDict:
     config.success_event_reward = 30.0
     config.miss_event_cost = 20.0
     config.wrong_foot_cost = 20.0
-    config.post_contact_fall_cost = 100.0
+    # One post-contact fall is a finite match cost. A useful high-impulse ball
+    # outcome may outweigh it, while repeated per-frame punishment must not
+    # make all aggressive actions irrational.
+    config.post_contact_fall_cost = 25.0
     return config
 
 
@@ -262,6 +265,8 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
                 "ball_observation_valid": jp.array(True),
                 "contacted": jp.array(False),
                 "wrong_foot_contacted": jp.array(False),
+                "ball_target_succeeded": jp.array(False),
+                "post_contact_fell": jp.array(False),
                 "post_contact_steps": jp.array(0, dtype=jp.int32),
                 "last_target_distance": target_distance,
                 "minimum_target_distance": target_distance,
@@ -272,6 +277,7 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
             {
                 "event/correct_foot_contact": jp.array(0.0),
                 "event/wrong_foot_contact": jp.array(0.0),
+                "event/ball_target_success": jp.array(0.0),
                 "event/recovery_complete": jp.array(0.0),
                 "event/target_success": jp.array(0.0),
                 "reward/ball_target_progress": jp.array(0.0),
@@ -288,6 +294,8 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
         was_contacted = state.info["contacted"]
         was_wrong_contacted = state.info["wrong_foot_contacted"]
+        was_ball_target_succeeded = state.info["ball_target_succeeded"]
+        was_post_contact_fell = state.info["post_contact_fell"]
         last_target_distance = state.info["last_target_distance"]
         result = super().step(state, action)
         left_contact = (
@@ -338,20 +346,30 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
             post_contact_steps >= self._config.post_contact_recovery_steps
         )
         fall = result.metrics["cost/fall"] > 0.5
+        post_contact_fell = was_post_contact_fell | (contacted & fall)
+        post_contact_fall_event = post_contact_fell & ~was_post_contact_fell
         invalid = (
             jp.isnan(result.data.qpos).any()
             | jp.isnan(result.data.qvel).any()
             | jp.isnan(action).any()
         )
-        target_success = (
-            recovery_complete
-            & ~fall
+        ball_target_condition = (
+            contacted
             & (target_distance <= self._config.target_radius_m)
             & (lateral_error <= self._config.lateral_tolerance_m)
             & (
                 arrival_speed_error
                 <= self._config.arrival_speed_tolerance_m_s
             )
+        )
+        ball_target_succeeded = (
+            was_ball_target_succeeded | ball_target_condition
+        )
+        ball_target_success_event = (
+            ball_target_succeeded & ~was_ball_target_succeeded
+        )
+        target_success = (
+            recovery_complete & ball_target_succeeded & ~post_contact_fell
         )
         timeout = result.info["step"] >= self._config.episode_length
 
@@ -371,16 +389,19 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
             4.0 * target_progress_rate * self.dt
             + 0.5 * speed_tracking * self.dt
             + 0.2 * jp.clip(result.metrics["reward/upright"], 0.0, 1.0) * self.dt
-            - self._config.post_contact_fall_cost * fall.astype(jp.float32)
+            - self._config.post_contact_fall_cost
+            * post_contact_fall_event.astype(jp.float32)
         )
-        terminal_reward = jp.where(
-            recovery_complete,
-            jp.where(
-                target_success,
-                self._config.success_event_reward,
-                -self._config.miss_event_cost,
-            ),
-            0.0,
+        ball_success_reward = (
+            self._config.success_event_reward
+            * ball_target_success_event.astype(jp.float32)
+        )
+        miss_terminal = (
+            (recovery_complete | timeout) & ~ball_target_succeeded
+        )
+        terminal_reward = (
+            ball_success_reward
+            - self._config.miss_event_cost * miss_terminal.astype(jp.float32)
         )
         reward = jp.where(
             was_contacted, post_contact_reward, pre_contact_reward
@@ -388,6 +409,8 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
 
         result.info["contacted"] = contacted
         result.info["wrong_foot_contacted"] = wrong_contacted
+        result.info["ball_target_succeeded"] = ball_target_succeeded
+        result.info["post_contact_fell"] = post_contact_fell
         result.info["post_contact_steps"] = post_contact_steps
         result.info["last_target_distance"] = target_distance
         result.info["minimum_target_distance"] = jp.minimum(
@@ -400,6 +423,9 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
             {
                 "event/correct_foot_contact": contact_event.astype(jp.float32),
                 "event/wrong_foot_contact": wrong_contact_event.astype(jp.float32),
+                "event/ball_target_success": (
+                    ball_target_success_event.astype(jp.float32)
+                ),
                 "event/recovery_complete": recovery_complete.astype(jp.float32),
                 "event/target_success": target_success.astype(jp.float32),
                 "reward/ball_target_progress": target_progress_rate,
@@ -411,7 +437,8 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
                 "diagnostic/arrival_speed_error": arrival_speed_error,
             }
         )
-        done = fall | invalid | recovery_complete | timeout
+        pre_contact_fall = fall & ~contacted
+        done = pre_contact_fall | invalid | recovery_complete | timeout
         obs = self._get_obs(result.data, result.info)
         return result.replace(
             obs=obs,
