@@ -42,16 +42,44 @@ class DynamicPassOutcome:
     ball_dy_m: float
     ball_displacement_m: float
     peak_ball_height_m: float
+    end_ball_valid: bool
+    end_ball_age_s: float
     completed: bool
     upright: bool
+
+    @property
+    def measurement_valid(self) -> bool:
+        return (
+            self.peak_ball_speed_mps >= 0.0
+            and self.final_ball_speed_mps >= 0.0
+            and self.end_ball_valid
+            and self.end_ball_age_s <= 0.10
+        )
 
     @property
     def straight_2m_success(self) -> bool:
         return (
             self.completed
+            and self.measurement_valid
             and self.upright
             and 1.5 <= self.ball_dx_m <= 2.5
             and abs(self.ball_dy_m) <= 0.30
+        )
+
+    @property
+    def forward_drive_success(self) -> bool:
+        """Match the training clearance/drive contract without hiding falls.
+
+        Falling is reported independently through ``upright``.  An occasional
+        fall is a finite cost, not a reason to erase a useful ball outcome.
+        """
+
+        return (
+            self.completed
+            and self.measurement_valid
+            and self.ball_dx_m >= 2.5
+            and abs(self.ball_dy_m) <= 1.0
+            and self.peak_ball_speed_mps >= 1.5
         )
 
 
@@ -112,6 +140,8 @@ def load_outcomes(match_dir: Path, team_prefix: str) -> list[DynamicPassOutcome]
                     ball_dy_m=float(result["ball_dy"]),
                     ball_displacement_m=float(result["ball_displacement"]),
                     peak_ball_height_m=float(result["peak_ball_height"]),
+                    end_ball_valid=result["end_ball_valid"] == "1",
+                    end_ball_age_s=float(result["end_ball_age"]),
                     completed=result["termination"] == "completed",
                     upright=result["upright"] == "1",
                 )
@@ -132,9 +162,15 @@ def summarize(outcomes: list[DynamicPassOutcome]) -> dict[str, object]:
         return {
             "outcome_count": len(subset),
             "completed_count": sum(outcome.completed for outcome in subset),
+            "measurement_valid_count": sum(
+                outcome.measurement_valid for outcome in subset
+            ),
             "upright_count": sum(outcome.upright for outcome in subset),
             "straight_2m_success_count": sum(
                 outcome.straight_2m_success for outcome in subset
+            ),
+            "forward_drive_success_count": sum(
+                outcome.forward_drive_success for outcome in subset
             ),
             "median_ball_dx_m": median("ball_dx_m"),
             "median_abs_ball_dy_m": float(
@@ -217,10 +253,20 @@ def save_npz(path: Path, outcomes: list[DynamicPassOutcome]) -> None:
             [outcome.peak_ball_height_m for outcome in outcomes],
             dtype=np.float32,
         ),
+        end_ball_valid=np.asarray([outcome.end_ball_valid for outcome in outcomes]),
+        end_ball_age_s=np.asarray(
+            [outcome.end_ball_age_s for outcome in outcomes], dtype=np.float32
+        ),
+        measurement_valid=np.asarray(
+            [outcome.measurement_valid for outcome in outcomes]
+        ),
         completed=np.asarray([outcome.completed for outcome in outcomes]),
         upright=np.asarray([outcome.upright for outcome in outcomes]),
         straight_2m_success=np.asarray(
             [outcome.straight_2m_success for outcome in outcomes]
+        ),
+        forward_drive_success=np.asarray(
+            [outcome.forward_drive_success for outcome in outcomes]
         ),
     )
 

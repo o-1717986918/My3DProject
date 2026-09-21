@@ -28,12 +28,14 @@ struct DynamicPassStepResult {
     robot::JointTargets joint_targets;
 };
 
-/// Experimental, opt-in 2 m straight-pass primitive.
+/// Experimental straight-kick primitive.
 ///
 /// The selector observes live walk-to-ball states. Once one prototype remains
 /// above its frozen threshold for two consecutive frames, the selected
 /// fourteen-parameter trajectory is overlaid on the live Apollo Walk target.
-/// This deliberately does not import the old KickCommand or strategy stack.
+/// An offline-selected forward-drive candidate may be forced for shadow
+/// evaluation at the wider real Walk handoff. It is never selected by the old
+/// ten-output model and does not alter the default team.
 class DynamicPassRunner {
 public:
     explicit DynamicPassRunner(
@@ -56,6 +58,8 @@ public:
     double elapsed_s(double server_time) const;
 
     static bool release_geometry(const world::WorldSnapshot& snapshot);
+    static bool forward_drive_release_geometry(
+        const world::WorldSnapshot& snapshot);
     static std::vector<float> build_selector_observation(
         const world::WorldSnapshot& snapshot,
         const robot::T1RobotModel& robot_model);
@@ -68,7 +72,8 @@ public:
         const robot::T1RobotModel& robot_model);
 
 private:
-    static constexpr std::size_t kPrototypeCount = 10U;
+    static constexpr std::size_t kSelectorPrototypeCount = 10U;
+    static constexpr std::size_t kPrototypeCount = 11U;
     static constexpr double kDurationS = 1.20;
 
     OnnxSession selector_;

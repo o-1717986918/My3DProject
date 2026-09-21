@@ -417,3 +417,47 @@ latent/专家，执行期连续反馈”的混合专家：先用完整 30 动作
 - `/home/win98/rl_runs/training-transition/kick-server-bc-3p5m-s20260964-v4-expanded/`
 - `/home/win98/rl_runs/training-transition/kick-server-dagger-3p5m-s20260966-v1/`
 - `/home/win98/rl_runs/training-transition/kick-server-dagger-3p5m-s20260968-v2/`
+
+### 冻结专家门控、第二批盲测与服务器影子结果
+
+在上述 16 场语料上实现了释放时只选择一次、整段保持同一动作的低秩专家门控。
+门控只读释放时已有的 98 维观测，不在执行中事后换专家；数据按
+`source_match_id` 整场切分。此前部分 selector 实验把每一帧唯一的
+`rollout_id` 当成分组键，实质仍是帧级切分，该结果不再作为泛化证据。
+
+第一版物理分数门控在旧 20 条开发集上为 8/20 严格命中，高于固定动作
+`164464` 的 6/20；冻结后新采 3 场 23 条盲测却只有 2/23，对照为 1/23，配对
+单侧符号检验 `p=0.5`。加入这 3 场后形成 19 场、142 条入口：16 场 119 条训练，
+3 场 23 条开发。严格边界 margin、低秩维数和 ridge 消融都只有 2/23，说明不是
+继续调一个线性门控超参数就能解决。
+
+将用途改成“向前强力出球/解围”后，成功契约为触球、最大前进不少于 2.5 m、
+绝对横偏不超过 1.0 m、方向速度不少于 1.5 m/s；是否倒地另列，不把一次倒地
+从球结果中抹掉。冻结 margin 门控在开发集为 10/23，最佳静态原型 `60467` 为
+9/23。第二批全新 3 场 22 条盲测中，门控为 10/22，`60467` 为 11/22；门控没有
+超过更简单的固定原型。它虽以 10/22 显著超过旧固定 `164464` 的 3/22
+（gate-only 7、baseline-only 0，`p=0.0078125`），仍不能据此上线一个比当前
+最佳静态动作更复杂的模型。两批均为 0 跌倒，这里拒绝原因是收益不足而非追求
+零跌倒。
+
+`60467` 使用与运行时 `DynamicPassRunner` 相同的 14 参数解码，被加入源码中的
+**仅强制影子**原型；旧十输出 selector 永远不会选到它，默认球队行为没有改变。
+强制时单独开放真实 Walk 交接所需的 `0.50..0.68 m` 前向、`±0.25 m` 横向窗口。
+RCSSServerMJ 在左侧正中、左侧 0.10 m 偏置和镜像右侧三种场景中记录到 4 次完整
+执行，4/4 直立，但强力出球为 0/4。只有一次结束时球观测仍新鲜可完整计量：
+前进 1.639 m、横移 0.445 m、峰值球速 2.205 m/s；其余执行没有可靠触球证据。
+因此 `60467` 也不进入默认策略，影子日志位于：
+
+- `/home/win98/rl_runs/rcss-shadow-60467-left-y0-s20260921-v2/`
+- `/home/win98/rl_runs/rcss-shadow-60467-left-ym010-s20260921-v1/`
+- `/home/win98/rl_runs/rcss-shadow-60467-right-y0-s20260921-v1/`
+
+评估器现在同时报告 `measurement_valid`、窄 2 m、向前强力出球和 `upright`；球在
+动作结束时已陈旧的轨迹不会再伪装成物理成功。下一轮不继续拟合同一个门控，而是
+采集运行时逐周期的 Walk 基底目标、接触时刻及服务器真值球轨迹，针对
+`0.50..0.68 m` 真实交接窗训练“对齐—发力—恢复”动作；先把固定动作在真实服务器
+做成可靠基线，再恢复混合专家。主要冻结产物为：
+
+- `/home/win98/rl_runs/training-transition/kick-server-expert-gate-s20260969-v1/`
+- `/home/win98/rl_runs/training-transition/kick-server-expert-gate-s20260970-v7-forward-drive-frozen/`
+- `/home/win98/rl_runs/training-transition/kick-server-transition-corpus-s20260970-v10-forward-blind/`

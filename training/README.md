@@ -742,3 +742,40 @@ WSL launchers also enable the transition-kick ONNX by default, but its frozen
 exact-CPU score is only 27/92, so active ownership is restricted to its measured
 fixed-2 m slice and every mismatch or inference failure falls back in the same
 cycle. Use `APOLLO_LEARNED_KICK_MODE=shadow` when joint ownership is undesired.
+
+## Frozen release-time kick expert gate
+
+The transition kick experiments can fit a low-rank gate that selects one fixed
+fourteen-parameter expert at release and holds that expert for the complete
+motion. Splits are grouped by source match, not by per-frame rollout IDs:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/train_transition_kick_expert_gate.py \
+  /absolute/path/to/transition-corpus.npz \
+  /absolute/path/to/prototype-bank.npz \
+  --target-profile strict-success-margin \
+  --maximum-prototypes 50 --latent-rank 2 --ridge 300 \
+  --output-prefix /home/win98/rl_runs/training-transition/EXPERIMENT/gate
+```
+
+Freeze the JSON, NPZ and ONNX before collecting a new whole-match corpus. The
+blind evaluator compares exact paired release states and uses a one-sided exact
+sign test rather than treating a one-sample lead as evidence:
+
+```bash
+PYTHONPATH=training conda run -n my3d-rl python \
+  training/tools/evaluate_frozen_kick_expert_gate.py \
+  /absolute/path/to/new-transition-corpus.npz \
+  /absolute/path/to/new-prototype-bank.npz \
+  /absolute/path/to/frozen-gate.json \
+  --primary-contract forward-drive \
+  --baseline-prototype-rollout-id 60467 \
+  --output /home/win98/rl_runs/training-transition/EXPERIMENT/blind.json
+```
+
+`forward-drive` means contact, at least 2.5 m forward progress, at most 1.0 m
+lateral error and at least 1.5 m/s directional ball speed. Falls are a finite
+cost and are reported separately; occasional falling is allowed when net match
+value improves. The current gate and prototype 60467 did not pass the RCSS
+promotion step, so both remain experimental and disabled by default.

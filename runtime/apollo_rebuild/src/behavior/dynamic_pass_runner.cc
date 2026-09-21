@@ -25,7 +25,8 @@ constexpr double kNominalGaitFrequencyHz = 1.6;
 constexpr double kNeutralMagnitudeRad = 0.02;
 constexpr double kSupportSwitchSine = 0.15;
 constexpr std::array<double, 6> kKeyTimes{0.0, 0.18, 0.34, 0.54, 0.76, 1.20};
-constexpr std::array<int, 10> kPrototypeRolloutIds{302, 117, 4, 84, 99, 107, 43, 79, 65, 17};
+constexpr std::array<int, 11> kPrototypeRolloutIds{
+    302, 117, 4, 84, 99, 107, 43, 79, 65, 17, 60467};
 constexpr std::array<double, kJointCount> kKickActionScaleRad{
     0.10, 0.10, 0.20, 0.20, 0.20, 0.20, 0.20, 0.20,
     0.20, 0.20, 0.15, 0.35, 0.25, 0.25, 0.45, 0.25,
@@ -34,7 +35,7 @@ constexpr std::array<double, kJointCount> kKickActionScaleRad{
 
 // Frozen order matches the selector outputs. Values are the accepted
 // fourteen-parameter teacher rows recorded in the asset provenance file.
-constexpr std::array<std::array<double, 14>, 10> kPrototypeParameters{{
+constexpr std::array<std::array<double, 14>, 11> kPrototypeParameters{{
     {{-0.01525139, -0.08081315, -0.00740486, -0.00918799, -0.32853943, -0.66942644, 0.74557120, 0.13354625, -0.14192195, 0.22820915, -0.37221354, 0.18193147, 0.39421314, -0.28855804}},
     {{0.00918042, -0.05674657, 0.08044184, 0.12201948, -0.37835607, -0.64818686, 0.90702653, -0.03172085, -0.14275746, 0.20548317, -0.34681413, -0.07010191, 0.42492211, -0.32737646}},
     {{-0.07810739, 0.18151353, 0.19064227, 0.02859146, -0.47873834, -0.81816888, 1.09884787, 0.20272595, 0.03538802, 0.09161026, -0.36008984, -0.41411686, 0.44235754, -0.19193180}},
@@ -45,6 +46,7 @@ constexpr std::array<std::array<double, 14>, 10> kPrototypeParameters{{
     {{0.01364377, -0.06955606, 0.08036270, 0.11145449, -0.50203502, -0.66156733, 0.89178240, -0.00496340, -0.16648939, 0.19813035, -0.34195593, -0.10031623, 0.21906446, -0.14632015}},
     {{-0.06687591, 0.17324013, 0.03355756, 0.22084114, -0.53499049, -0.79430616, 1.02704823, 0.34562504, 0.13406256, 0.00860855, -0.38314834, -0.37528443, 0.30675778, -0.18181908}},
     {{-0.03100448, -0.10645301, -0.03303166, 0.13965136, -0.40579990, -0.79496008, 0.24881774, 0.31227469, -0.03208317, 0.27840254, -0.35401016, -0.09580568, 0.21010955, -0.24599387}},
+    {{-0.15693578, -0.02045635, 0.38565540, 0.23308305, 0.00966061, -0.73189694, 0.29920760, -0.19347940, -0.17541935, -0.13053219, 0.36546421, -0.33426705, 0.16985032, 0.07014800}},
 }};
 
 bool finite_joint_state(
@@ -66,6 +68,30 @@ bool finite_joint_state(
 double smoothstep(double value) {
     const double x = std::clamp(value, 0.0, 1.0);
     return x * x * (3.0 - 2.0 * x);
+}
+
+bool release_geometry_with_bounds(
+    const world::WorldSnapshot& snapshot,
+    double minimum_forward_m,
+    double maximum_forward_m,
+    double lateral_half_width_m) {
+    const bool ball_fresh = snapshot.ball.position_valid &&
+        (snapshot.ball.visible ||
+         snapshot.ball.position_age_s <= kReleaseBallFreshnessS);
+    if (!ball_fresh ||
+        snapshot.self.position_m[2] <= world::kFallenHeightThresholdM) {
+        return false;
+    }
+    const double yaw_deg = world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
+        snapshot.self.orientation_wxyz);
+    const auto ball_local = math::rotate_2d(
+        {snapshot.ball.position_m[0] - snapshot.self.position_m[0],
+         snapshot.ball.position_m[1] - snapshot.self.position_m[1]},
+        -yaw_deg);
+    return ball_local[0] >= minimum_forward_m &&
+        ball_local[0] <= maximum_forward_m &&
+        ball_local[1] >= -lateral_half_width_m &&
+        ball_local[1] <= lateral_half_width_m;
 }
 
 std::array<double, kJointCount> raw_keyframe(
@@ -125,21 +151,12 @@ DynamicPassRunner::DynamicPassRunner(
 }
 
 bool DynamicPassRunner::release_geometry(const world::WorldSnapshot& snapshot) {
-    const bool ball_fresh = snapshot.ball.position_valid &&
-        (snapshot.ball.visible ||
-         snapshot.ball.position_age_s <= kReleaseBallFreshnessS);
-    if (!ball_fresh ||
-        snapshot.self.position_m[2] <= world::kFallenHeightThresholdM) {
-        return false;
-    }
-    const double yaw_deg = world::FrameNormalizer::yaw_deg_from_quaternion_wxyz(
-        snapshot.self.orientation_wxyz);
-    const auto ball_local = math::rotate_2d(
-        {snapshot.ball.position_m[0] - snapshot.self.position_m[0],
-         snapshot.ball.position_m[1] - snapshot.self.position_m[1]},
-        -yaw_deg);
-    return ball_local[0] >= 0.25 && ball_local[0] <= 0.50 &&
-        ball_local[1] >= -0.15 && ball_local[1] <= 0.15;
+    return release_geometry_with_bounds(snapshot, 0.25, 0.50, 0.15);
+}
+
+bool DynamicPassRunner::forward_drive_release_geometry(
+    const world::WorldSnapshot& snapshot) {
+    return release_geometry_with_bounds(snapshot, 0.50, 0.68, 0.25);
 }
 
 std::vector<float> DynamicPassRunner::build_selector_observation(
@@ -244,7 +261,11 @@ DynamicPassActivation DynamicPassRunner::consider(
     if (active_) {
         return {};
     }
-    release_candidate_ = release_geometry(snapshot);
+    const bool forced_forward_drive = forced_prototype_index_ >=
+        static_cast<int>(kSelectorPrototypeCount);
+    release_candidate_ = forced_forward_drive
+        ? forward_drive_release_geometry(snapshot)
+        : release_geometry(snapshot);
     if (!release_candidate_) {
         streak_.fill(0);
         armed_ = true;
@@ -256,10 +277,27 @@ DynamicPassActivation DynamicPassRunner::consider(
         return {};
     }
 
+    if (forced_prototype_index_ >= 0) {
+        const std::size_t forced = static_cast<std::size_t>(
+            forced_prototype_index_);
+        streak_[forced] += 1;
+        max_probability_ = 1.0F;
+        best_prototype_rollout_id_ = kPrototypeRolloutIds[forced];
+        if (streak_[forced] < kConfirmationFrames) {
+            return {};
+        }
+        active_ = true;
+        selected_prototype_ = forced;
+        selected_confidence_ = 1.0F;
+        start_time_s_ = snapshot.server_time;
+        streak_.fill(0);
+        return {true, kPrototypeRolloutIds[forced], selected_confidence_};
+    }
+
     try {
         const auto probabilities = selector_.run(
             build_selector_observation(snapshot, robot_model_));
-        if (probabilities.size() != kPrototypeCount) {
+        if (probabilities.size() != kSelectorPrototypeCount) {
             throw std::runtime_error("dynamic-pass selector output size mismatch");
         }
         const auto best = std::max_element(probabilities.begin(), probabilities.end());
@@ -267,30 +305,20 @@ DynamicPassActivation DynamicPassRunner::consider(
             std::distance(probabilities.begin(), best));
         max_probability_ = *best;
         best_prototype_rollout_id_ = kPrototypeRolloutIds[best_index];
-        for (std::size_t i = 0; i < kPrototypeCount; ++i) {
-            const bool confirmed = forced_prototype_index_ >= 0
-                ? i == static_cast<std::size_t>(forced_prototype_index_)
-                : std::isfinite(probabilities[i]) &&
-                      probabilities[i] >= kSelectorThreshold;
+        for (std::size_t i = 0; i < kSelectorPrototypeCount; ++i) {
+            const bool confirmed = std::isfinite(probabilities[i]) &&
+                probabilities[i] >= kSelectorThreshold;
             streak_[i] = confirmed ? streak_[i] + 1 : 0;
         }
-        std::size_t choice = kPrototypeCount;
-        if (forced_prototype_index_ >= 0) {
-            const std::size_t forced = static_cast<std::size_t>(
-                forced_prototype_index_);
-            if (streak_[forced] >= kConfirmationFrames) {
-                choice = forced;
-            }
-        } else {
-            for (std::size_t i = 0; i < kPrototypeCount; ++i) {
-                if (streak_[i] >= kConfirmationFrames &&
-                    (choice == kPrototypeCount ||
-                     probabilities[i] > probabilities[choice])) {
-                    choice = i;
-                }
+        std::size_t choice = kSelectorPrototypeCount;
+        for (std::size_t i = 0; i < kSelectorPrototypeCount; ++i) {
+            if (streak_[i] >= kConfirmationFrames &&
+                (choice == kSelectorPrototypeCount ||
+                 probabilities[i] > probabilities[choice])) {
+                choice = i;
             }
         }
-        if (choice == kPrototypeCount) {
+        if (choice == kSelectorPrototypeCount) {
             return {};
         }
         active_ = true;

@@ -59,6 +59,12 @@ int main() {
     assert(!behavior::DynamicPassRunner::release_geometry(snapshot));
     snapshot.ball.visible = true;
     snapshot.ball.position_age_s = 0.0;
+    snapshot.ball.position_m = {0.60, 0.20, 0.11};
+    assert(!behavior::DynamicPassRunner::release_geometry(snapshot));
+    assert(behavior::DynamicPassRunner::forward_drive_release_geometry(snapshot));
+    snapshot.ball.position_m[0] = 0.69;
+    assert(!behavior::DynamicPassRunner::forward_drive_release_geometry(snapshot));
+    snapshot.ball.position_m = {0.34375, 0.01, 0.11};
 
     const auto observation =
         behavior::DynamicPassRunner::build_selector_observation(snapshot, robot_model);
@@ -126,6 +132,14 @@ int main() {
     assert(second_activation.started);
     assert(second_activation.prototype_rollout_id == 65);
     assert(forced.active());
+
+    snapshot.ball.position_m = {0.60, 0.10, 0.11};
+    behavior::DynamicPassRunner forward_drive(selector_path, 60467);
+    assert(!forward_drive.consider(snapshot, true).started);
+    snapshot.server_time += 0.02;
+    const auto forward_activation = forward_drive.consider(snapshot, true);
+    assert(forward_activation.started);
+    assert(forward_activation.prototype_rollout_id == 60467);
 
     bool rejected_unknown_rollout = false;
     try {
