@@ -92,7 +92,11 @@ def _load_teacher_table(
 
 def _load_transition_corpus(
     path: Path,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+) -> tuple[
+    np.ndarray, np.ndarray, np.ndarray,
+    np.ndarray, np.ndarray, np.ndarray,
+    dict[str, Any],
+]:
     manifest_path = path.with_suffix(".json")
     if not manifest_path.is_file():
         raise FileNotFoundError(
@@ -112,15 +116,23 @@ def _load_transition_corpus(
         split = np.asarray(archive["split"], dtype=np.uint8)
         rollout_id = np.asarray(archive["rollout_id"], dtype=np.int32)
         phase_bucket = np.asarray(archive["phase_bucket"], dtype=np.int32)
+        walk_previous_action_recorded = "walk_previous_action" in archive.files
+        walk_previous_action = (
+            np.asarray(archive["walk_previous_action"], dtype=np.float32)
+            if walk_previous_action_recorded
+            else np.zeros((qpos.shape[0], 23), dtype=np.float32)
+        )
     if (
         qpos.ndim != 2
         or qvel.ndim != 2
         or split.shape != (qpos.shape[0],)
         or rollout_id.shape != split.shape
         or phase_bucket.shape != split.shape
+        or walk_previous_action.shape != (qpos.shape[0], 23)
         or qvel.shape[0] != qpos.shape[0]
         or not np.isfinite(qpos).all()
         or not np.isfinite(qvel).all()
+        or not np.isfinite(walk_previous_action).all()
     ):
         raise ValueError("transition corpus arrays have incompatible shapes")
     if len(set(rollout_id.tolist())) != rollout_id.size:
@@ -145,8 +157,13 @@ def _load_transition_corpus(
         "train_phase_buckets": sorted(set(phase_bucket[train].tolist())),
         "validation_phase_buckets": sorted(set(phase_bucket[validation].tolist())),
         "teacher_condition_index": int(manifest["teacher_condition_index"]),
+        "walk_previous_action_recorded": walk_previous_action_recorded,
     }
-    return qpos[train], qvel[train], qpos[validation], qvel[validation], metadata
+    return (
+        qpos[train], qvel[train], walk_previous_action[train],
+        qpos[validation], qvel[validation], walk_previous_action[validation],
+        metadata,
+    )
 
 
 def _load_parity_report(path: Path, implementation: str) -> dict[str, Any]:
@@ -188,6 +205,7 @@ def main() -> None:
     parser.add_argument("--correction-scale", type=float, default=0.1)
     parser.add_argument("--gate-success-reward", type=float, default=20.0)
     parser.add_argument("--fall-penalty", type=float, default=20.0)
+    parser.add_argument("--lateral-error-cost", type=float, default=0.20)
     parser.add_argument("--restore-checkpoint", type=Path)
     parser.add_argument(
         "--base-kick-onnx",
@@ -217,6 +235,7 @@ def main() -> None:
         or not 0.0 < args.correction_scale <= 0.1
         or args.gate_success_reward <= 0.0
         or args.fall_penalty <= 0.0
+        or args.lateral_error_cost < 0.0
     ):
         raise ValueError("PPO optimization and safety scales are invalid")
     batch_size = 256
@@ -233,8 +252,10 @@ def main() -> None:
     (
         train_qpos,
         train_qvel,
+        train_walk_previous_action,
         validation_qpos,
         validation_qvel,
+        validation_walk_previous_action,
         transition_metadata,
     ) = _load_transition_corpus(args.transition_corpus)
     trajectories, offsets, condition_indices = _load_teacher_table(
@@ -252,6 +273,7 @@ def main() -> None:
         "action_scale": (args.correction_scale * KICK_ACTION_SCALE).tolist(),
         "gate_success_reward": args.gate_success_reward,
         "fall_penalty": args.fall_penalty,
+        "lateral_error_cost": args.lateral_error_cost,
     }
     env = DirectionalKick(
         config_overrides=environment_overrides,
@@ -260,6 +282,7 @@ def main() -> None:
         teacher_ball_offsets=offsets,
         transition_qpos=train_qpos,
         transition_qvel=train_qvel,
+        transition_walk_previous_action=train_walk_previous_action,
         base_kick_policy_path=args.base_kick_onnx,
     )
     eval_env = DirectionalKick(
@@ -269,6 +292,7 @@ def main() -> None:
         teacher_ball_offsets=offsets,
         transition_qpos=validation_qpos,
         transition_qvel=validation_qvel,
+        transition_walk_previous_action=validation_walk_previous_action,
         base_kick_policy_path=args.base_kick_onnx,
     )
     network_factory = functools.partial(
@@ -327,6 +351,7 @@ def main() -> None:
             "correction_scale": args.correction_scale,
             "gate_success_reward": args.gate_success_reward,
             "fall_penalty": args.fall_penalty,
+            "lateral_error_cost": args.lateral_error_cost,
         },
         "restore_checkpoint": (
             str(args.restore_checkpoint) if args.restore_checkpoint else None

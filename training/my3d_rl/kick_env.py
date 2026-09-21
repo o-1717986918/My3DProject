@@ -101,6 +101,7 @@ class DirectionalKick(mjx_env.MjxEnv):
         teacher_ball_offsets: np.ndarray | None = None,
         transition_qpos: np.ndarray | None = None,
         transition_qvel: np.ndarray | None = None,
+        transition_walk_previous_action: np.ndarray | None = None,
         base_kick_policy_path: Path | None = None,
     ) -> None:
         config = default_config() if config is None else config
@@ -220,8 +221,11 @@ class DirectionalKick(mjx_env.MjxEnv):
         if (transition_qpos is None) != (transition_qvel is None):
             raise ValueError("transition qpos and qvel must be provided together")
         if transition_qpos is None:
+            if transition_walk_previous_action is not None:
+                raise ValueError("transition walk action requires transition states")
             self._transition_qpos = jp.empty((0, self._mj_model.nq))
             self._transition_qvel = jp.empty((0, self._mj_model.nv))
+            self._transition_walk_previous_action = jp.empty((0, self.action_size))
             self._uses_transition_states = False
         else:
             transition_qpos = np.asarray(transition_qpos, dtype=np.float32)
@@ -242,8 +246,24 @@ class DirectionalKick(mjx_env.MjxEnv):
                 or not np.isfinite(transition_qvel).all()
             ):
                 raise ValueError("transition corpus state must be finite")
+            if transition_walk_previous_action is None:
+                transition_walk_previous_action = np.zeros(
+                    (transition_qpos.shape[0], self.action_size), dtype=np.float32
+                )
+            transition_walk_previous_action = np.asarray(
+                transition_walk_previous_action, dtype=np.float32
+            )
+            if (
+                transition_walk_previous_action.shape
+                != (transition_qpos.shape[0], self.action_size)
+                or not np.isfinite(transition_walk_previous_action).all()
+            ):
+                raise ValueError("transition walk actions have incompatible shape")
             self._transition_qpos = jp.asarray(transition_qpos)
             self._transition_qvel = jp.asarray(transition_qvel)
+            self._transition_walk_previous_action = jp.asarray(
+                transition_walk_previous_action
+            )
             self._uses_transition_states = True
 
     def _configure_pd_actuators(self) -> None:
@@ -298,12 +318,16 @@ class DirectionalKick(mjx_env.MjxEnv):
             maxval=self._config.ball_y_range[1],
         )
         transition_index = jp.array(-1, dtype=jp.int32)
+        walk_previous_action = jp.zeros(self.action_size)
         if self._uses_transition_states:
             transition_index = jax.random.randint(
                 transition_rng, (), 0, self._transition_qpos.shape[0]
             )
             qpos = self._transition_qpos[transition_index]
             qvel = self._transition_qvel[transition_index]
+            walk_previous_action = self._transition_walk_previous_action[
+                transition_index
+            ]
             ball_pos = qpos[self._ball_qpos : self._ball_qpos + 3]
             ball_x, ball_y = ball_pos[0], ball_pos[1]
         else:
@@ -362,7 +386,7 @@ class DirectionalKick(mjx_env.MjxEnv):
             "step": jp.array(0, dtype=jp.int32),
             "last_action": jp.zeros(self.action_size),
             "last_correction_action": jp.zeros(self.action_size),
-            "walk_last_action": jp.zeros(self.action_size),
+            "walk_last_action": walk_previous_action,
             "target_world": target_world,
             "target_distance": target_distance,
             "requested_ball_speed": requested_ball_speed,

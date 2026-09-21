@@ -60,6 +60,11 @@ def _load_entry(path: Path, rollout_id: int | None):
         return (
             np.asarray(archive["qpos"][selected], dtype=np.float32),
             np.asarray(archive["qvel"][selected], dtype=np.float32),
+            (
+                np.asarray(archive["walk_previous_action"][selected], dtype=np.float32)
+                if "walk_previous_action" in archive.files
+                else np.zeros(23, dtype=np.float32)
+            ),
             int(ids[selected]),
             int(np.asarray(archive["phase_bucket"])[selected]),
         )
@@ -163,7 +168,7 @@ def main() -> int:
     teacher, offsets = _load_condition(
         args.teacher_manifest, args.condition_index, contract
     )
-    qpos, qvel, rollout_id, phase_bucket = _load_entry(
+    qpos, qvel, walk_previous_action, rollout_id, phase_bucket = _load_entry(
         args.transition_corpus, args.rollout_id
     )
     env = DirectionalKick(
@@ -180,6 +185,9 @@ def main() -> int:
         teacher_ball_offsets=offsets,
         transition_qpos=np.stack([qpos, qpos]),
         transition_qvel=np.stack([qvel, qvel]),
+        transition_walk_previous_action=np.stack(
+            [walk_previous_action, walk_previous_action]
+        ),
     )
     session = None
     input_name = None

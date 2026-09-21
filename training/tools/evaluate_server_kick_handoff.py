@@ -120,6 +120,11 @@ def main() -> None:
         help="also probe this many nearest static-position teachers per approach",
     )
     parser.add_argument("--model", type=Path, action="append", default=[])
+    parser.add_argument(
+        "--model-with-correction", type=Path, nargs=2, action="append", default=[],
+        metavar=("BASE_ONNX", "CORRECTION_ONNX"),
+    )
+    parser.add_argument("--correction-scale", type=float, default=0.1)
     parser.add_argument("--replay-model", type=Path)
     parser.add_argument("--replay-output", type=Path)
     parser.add_argument("--output", type=Path, required=True)
@@ -131,6 +136,8 @@ def main() -> None:
         or output.exists() or args.max_approaches < 1
         or args.teacher_bank_neighbors < 0 or args.teacher_bank_neighbors > 16
         or not all(path.is_file() for path in args.model)
+        or not all(path.is_file() for pair in args.model_with_correction for path in pair)
+        or not 0.0 < args.correction_scale <= 0.5
         or (args.replay_model is not None and (
             args.replay_output is None
             or args.replay_model.resolve() not in {path.resolve() for path in args.model}
@@ -191,6 +198,21 @@ def main() -> None:
         ):
             raise ValueError(f"ONNX model does not match kick policy v3: {path}")
         sessions.append((path, session))
+    corrected_sessions: list[
+        tuple[Path, ort.InferenceSession, Path, ort.InferenceSession]
+    ] = []
+    for base_path, correction_path in args.model_with_correction:
+        base = ort.InferenceSession(str(base_path.resolve()), providers=["CPUExecutionProvider"])
+        correction = ort.InferenceSession(
+            str(correction_path.resolve()), providers=["CPUExecutionProvider"]
+        )
+        if any(
+            candidate.get_inputs()[0].shape != list(contract.input_shape)
+            or candidate.get_outputs()[0].shape != list(contract.output_shape)
+            for candidate in (base, correction)
+        ):
+            raise ValueError("base/correction ONNX does not match kick policy v3")
+        corrected_sessions.append((base_path, base, correction_path, correction))
     local = ball_local_xy(arrays)
     trials: list[dict[str, object]] = []
     for row in selected[: args.max_approaches]:
@@ -300,6 +322,37 @@ def main() -> None:
             "trials": model_trials,
         })
     report["models"] = models
+    for base_path, base, correction_path, correction in corrected_sessions:
+        model_trials: list[dict[str, object]] = []
+        for row in selected[: args.max_approaches]:
+            project_server_motion_state(scene, arrays, int(row))
+            previous_action, _ = infer_previous_walk_action(arrays, int(row))
+            metrics = evaluator.rollout(
+                None,
+                initial_qpos=scene.data.qpos.copy(),
+                initial_qvel=scene.data.qvel.copy(),
+                initial_walk_previous_action=previous_action,
+                kick_policy_session=base,
+                kick_correction_session=correction,
+                kick_correction_scale=args.correction_scale,
+            )
+            model_trials.append({
+                "row": int(row), "contact": bool(metrics["contact"]),
+                "fell": bool(metrics["fell"]),
+                "success": bool(kick_trial_success(metrics)),
+                "maximum_progress_m": float(metrics["maximum_progress_m"]),
+                "metrics": metrics,
+            })
+        models.append({
+            "model": str(base_path.resolve()), "model_sha256": sha256(base_path),
+            "correction_model": str(correction_path.resolve()),
+            "correction_model_sha256": sha256(correction_path),
+            "correction_scale": args.correction_scale,
+            "contacts": sum(int(trial["contact"]) for trial in model_trials),
+            "falls": sum(int(trial["fell"]) for trial in model_trials),
+            "successes": sum(int(trial["success"]) for trial in model_trials),
+            "trials": model_trials,
+        })
     if args.replay_output is not None:
         replay_session = None
         replay_trials = trials

@@ -21,6 +21,7 @@ def _write_corpus(tmp_path: Path) -> Path:
         split=np.array([0, 0, 0, 1, 1, 1], dtype=np.uint8),
         rollout_id=np.array([10, 11, 12, 20, 21, 22], dtype=np.int32),
         phase_bucket=np.array([0, 1, 2, 0, 1, 2], dtype=np.int32),
+        walk_previous_action=np.arange(6 * 23, dtype=np.float32).reshape(6, 23),
     )
     path.with_suffix(".json").write_text(
         json.dumps(
@@ -38,17 +39,22 @@ def _write_corpus(tmp_path: Path) -> Path:
 def test_transition_corpus_loader_keeps_rollouts_out_of_validation(tmp_path: Path):
     path = _write_corpus(tmp_path)
 
-    train_qpos, train_qvel, validation_qpos, validation_qvel, metadata = (
-        _load_transition_corpus(path)
-    )
+    (
+        train_qpos, train_qvel, train_walk_action,
+        validation_qpos, validation_qvel, validation_walk_action, metadata,
+    ) = _load_transition_corpus(path)
 
     assert train_qpos.shape == (3, 37)
     assert train_qvel.shape == (3, 35)
     assert validation_qpos.shape == (3, 37)
     assert validation_qvel.shape == (3, 35)
+    assert train_walk_action.shape == (3, 23)
+    assert validation_walk_action.shape == (3, 23)
+    np.testing.assert_array_equal(train_walk_action[0], np.arange(23))
     assert metadata["train_phase_buckets"] == [0, 1, 2]
     assert metadata["validation_phase_buckets"] == [0, 1, 2]
     assert metadata["teacher_condition_index"] == 60
+    assert metadata["walk_previous_action_recorded"] is True
 
 
 def test_transition_corpus_loader_rejects_hash_mismatch(tmp_path: Path):
@@ -60,6 +66,26 @@ def test_transition_corpus_loader_rejects_hash_mismatch(tmp_path: Path):
 
     with pytest.raises(ValueError, match="hash"):
         _load_transition_corpus(path)
+
+
+def test_transition_corpus_loader_supports_legacy_zero_walk_action(tmp_path: Path):
+    path = _write_corpus(tmp_path)
+    with np.load(path, allow_pickle=False) as archive:
+        arrays = {
+            name: np.asarray(archive[name])
+            for name in archive.files if name != "walk_previous_action"
+        }
+    np.savez_compressed(path, **arrays)
+    manifest_path = path.with_suffix(".json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["npz_sha256"] = _sha256(path)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    loaded = _load_transition_corpus(path)
+
+    np.testing.assert_array_equal(loaded[2], np.zeros((3, 23)))
+    np.testing.assert_array_equal(loaded[5], np.zeros((3, 23)))
+    assert loaded[6]["walk_previous_action_recorded"] is False
 
 
 def _write_parity_report(tmp_path: Path, *, backend: str, passed: bool) -> Path:
