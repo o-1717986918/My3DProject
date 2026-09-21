@@ -113,6 +113,7 @@ def main() -> None:
         "source_corpus_sha256": sha256(args.server_corpus),
         "contract": str(CONTRACT.resolve()), "contract_sha256": sha256(CONTRACT),
         "teacher_condition_index": args.teacher_condition_index,
+        "phase_bucket_count": args.phase_buckets,
         "candidate_frames": candidate_frames,
         "entries": int(rows.size),
         "train_entries": int(np.count_nonzero(arrays["split"] == 0)),

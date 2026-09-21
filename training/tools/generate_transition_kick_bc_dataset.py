@@ -13,6 +13,7 @@ import numpy as np
 
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.kick_teacher import KickTeacherEvaluator, KickTeacherSpec, kick_trial_success
+from tools.evaluate_server_kick_handoff import normalize_teacher_records
 from tools.generate_kick_switch_window_corpus import sha256_file
 from tools.generate_kick_transition_corpus import stratified_rollout_split
 
@@ -52,6 +53,9 @@ def _worker_replay(task: dict[str, Any]) -> dict[str, Any]:
         np.asarray(task["parameters"], dtype=np.float64),
         initial_qpos=np.asarray(task["qpos"], dtype=np.float64),
         initial_qvel=np.asarray(task["qvel"], dtype=np.float64),
+        initial_walk_previous_action=np.asarray(
+            task["walk_previous_action"], dtype=np.float64
+        ),
         capture_targets=True,
     )
     observations = _WORKER_EVALUATOR.captured_observations
@@ -77,10 +81,15 @@ def _worker_replay(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def _accepted_condition(source: dict[str, Any], condition_index: int) -> dict[str, Any]:
+    records_source = normalize_teacher_records(source)
+    selected_condition = (
+        0 if source.get("purpose") == "r1_low_dimensional_kick_teacher"
+        else condition_index
+    )
     records = [
         record
-        for record in source.get("records", [])
-        if int(record["condition_index"]) == condition_index
+        for record in records_source
+        if int(record["condition_index"]) == selected_condition
         and bool(record["accepted"])
     ]
     if len(records) != 1:
@@ -115,17 +124,25 @@ def main() -> int:
         raise ValueError("transition BC requires the kick_policy_v3 contract")
     teacher = json.loads(args.teacher_manifest.read_text(encoding="utf-8"))
     record = _accepted_condition(teacher, args.condition_index)
+    selected_condition = int(record["condition_index"])
     corpus_manifest_path = args.transition_corpus.with_suffix(".json")
     corpus_manifest = json.loads(corpus_manifest_path.read_text(encoding="utf-8"))
     if (
         corpus_manifest.get("npz_sha256") != sha256_file(args.transition_corpus)
         or corpus_manifest.get("contract_sha256") != sha256_file(args.contract)
         or int(corpus_manifest.get("teacher_condition_index", -1))
-        != args.condition_index
+        != selected_condition
     ):
         raise ValueError("transition corpus is invalid or bound to other inputs")
     with np.load(args.transition_corpus, allow_pickle=False) as archive:
-        required = {"qpos", "qvel", "rollout_id", "phase_bucket", "split"}
+        required = {
+            "qpos",
+            "qvel",
+            "walk_previous_action",
+            "rollout_id",
+            "phase_bucket",
+            "split",
+        }
         if not required <= set(archive.files):
             raise ValueError("transition corpus is missing required arrays")
         corpus = {name: np.asarray(archive[name]) for name in required}
@@ -191,6 +208,9 @@ def main() -> int:
                 "phase_bucket": int(labels["phase_bucket"][label_row]),
                 "qpos": corpus["qpos"][corpus_index],
                 "qvel": corpus["qvel"][corpus_index],
+                "walk_previous_action": corpus["walk_previous_action"][
+                    corpus_index
+                ],
                 # JSON retains the optimizer's float64 boundary values. The compact
                 # NPZ is float32 and may round a value a few ulps outside its bound.
                 "parameters": np.asarray(

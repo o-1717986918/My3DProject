@@ -3,7 +3,10 @@ from __future__ import annotations
 import numpy as np
 
 from tools.evaluate_server_kick_handoff import (
-    ball_local_xy, nearest_teacher_records, representative_approaches,
+    ball_local_xy,
+    nearest_teacher_records,
+    normalize_teacher_records,
+    representative_approaches,
 )
 
 
@@ -59,3 +62,27 @@ def test_nearest_teacher_bank_uses_geometry_not_outcome() -> None:
     chosen = nearest_teacher_records(records, np.array([0.34, 0.0]), 2)
 
     assert [record["condition_index"] for record in chosen] == [1, 3]
+
+
+def test_normalize_single_teacher_manifest() -> None:
+    records = normalize_teacher_records(
+        {
+            "purpose": "r1_low_dimensional_kick_teacher",
+            "spec": {
+                "target_distance_m": 3.5,
+                "target_angle_deg": 0.0,
+                "requested_ball_speed_mps": 2.2,
+                "desired_arrival_speed_mps": 0.8,
+                "action_mode": "pass",
+            },
+            "ball_offset_m": {"x": -0.01, "y": -0.04},
+            "parameters": [0.1] * 14,
+            "metrics": {"contact": True},
+        }
+    )
+
+    assert len(records) == 1
+    assert records[0]["condition_index"] == 0
+    assert records[0]["distance_m"] == 3.5
+    assert records[0]["ball_y_offset_m"] == -0.04
+    assert records[0]["accepted"] is True

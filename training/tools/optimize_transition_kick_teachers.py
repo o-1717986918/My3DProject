@@ -26,6 +26,7 @@ from my3d_rl.kick_teacher import (
     cem_optimize,
     kick_trial_success,
 )
+from tools.evaluate_server_kick_handoff import normalize_teacher_records
 
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
@@ -62,12 +63,16 @@ def _worker_optimize(task: dict[str, Any]) -> dict[str, Any]:
     evaluator = _WORKER_EVALUATOR
     qpos = np.asarray(task["qpos"], dtype=np.float64)
     qvel = np.asarray(task["qvel"], dtype=np.float64)
+    walk_previous_action = np.asarray(
+        task["walk_previous_action"], dtype=np.float64
+    )
     initial = np.asarray(task["initial_parameters"], dtype=np.float64)
 
     baseline = evaluator.rollout(
         initial,
         initial_qpos=qpos,
         initial_qvel=qvel,
+        initial_walk_previous_action=walk_previous_action,
         capture_targets=True,
     )
     observations = evaluator.captured_observations
@@ -80,7 +85,10 @@ def _worker_optimize(task: dict[str, Any]) -> dict[str, Any]:
 
     def objective(parameters: np.ndarray) -> float:
         metrics = evaluator.rollout(
-            parameters, initial_qpos=qpos, initial_qvel=qvel
+            parameters,
+            initial_qpos=qpos,
+            initial_qvel=qvel,
+            initial_walk_previous_action=walk_previous_action,
         )
         return float(
             metrics["score"]
@@ -104,7 +112,10 @@ def _worker_optimize(task: dict[str, Any]) -> dict[str, Any]:
         smoothing=0.35,
     )
     trained = evaluator.rollout(
-        result.parameters, initial_qpos=qpos, initial_qvel=qvel
+        result.parameters,
+        initial_qpos=qpos,
+        initial_qvel=qvel,
+        initial_walk_previous_action=walk_previous_action,
     )
     return {
         "corpus_index": int(task["corpus_index"]),
@@ -126,14 +137,19 @@ def _worker_optimize(task: dict[str, Any]) -> dict[str, Any]:
 def _load_source(
     teacher_manifest: Path,
     transition_corpus: Path,
-    phase_initializer: Path,
+    phase_initializer: Path | None,
     condition_index: int,
 ) -> tuple[dict[str, Any], dict[str, np.ndarray], dict[int, np.ndarray]]:
     teacher = json.loads(teacher_manifest.read_text(encoding="utf-8"))
+    teacher_records = normalize_teacher_records(teacher)
+    selected_condition = (
+        0 if teacher.get("purpose") == "r1_low_dimensional_kick_teacher"
+        else condition_index
+    )
     records = [
         record
-        for record in teacher["records"]
-        if int(record["condition_index"]) == condition_index
+        for record in teacher_records
+        if int(record["condition_index"]) == selected_condition
         and bool(record["accepted"])
     ]
     if len(records) != 1:
@@ -145,33 +161,49 @@ def _load_source(
     )
     if corpus_manifest.get("npz_sha256") != _sha256(transition_corpus):
         raise ValueError("transition corpus hash mismatch")
-    if int(corpus_manifest["teacher_condition_index"]) != condition_index:
+    if int(corpus_manifest["teacher_condition_index"]) != selected_condition:
         raise ValueError("transition corpus teacher condition mismatch")
     with np.load(transition_corpus, allow_pickle=False) as archive:
-        required = {"qpos", "qvel", "split", "rollout_id", "phase_bucket"}
+        required = {
+            "qpos",
+            "qvel",
+            "walk_previous_action",
+            "split",
+            "rollout_id",
+            "phase_bucket",
+        }
         if not required <= set(archive.files):
             raise ValueError("transition corpus is missing required arrays")
         arrays = {name: np.asarray(archive[name]) for name in required}
 
-    initializer = json.loads(phase_initializer.read_text(encoding="utf-8"))
-    if initializer.get("purpose") != "exact_cpu_phase_indexed_kick_teacher_training":
-        raise ValueError("phase initializer has the wrong purpose")
-    if not bool(initializer.get("complete")):
-        raise ValueError("phase initializer is incomplete")
-    if int(initializer.get("condition_index", -1)) != condition_index:
-        raise ValueError("phase initializer condition mismatch")
-    if int(initializer.get("phase_bucket_count", -1)) != int(
-        corpus_manifest["phase_bucket_count"]
-    ):
-        raise ValueError("phase initializer bucket definition mismatch")
-    parameters = {
-        int(node["phase_bucket"]): np.asarray(node["parameters"], dtype=np.float64)
-        for node in initializer["nodes"]
-    }
     buckets = set(
         int(value)
         for value in arrays["phase_bucket"][arrays["split"] == 0]
     )
+    if phase_initializer is None:
+        source_parameters = np.asarray(records[0]["parameters"], dtype=np.float64)
+        parameters = {bucket: source_parameters.copy() for bucket in buckets}
+    else:
+        initializer = json.loads(phase_initializer.read_text(encoding="utf-8"))
+        if (
+            initializer.get("purpose")
+            != "exact_cpu_phase_indexed_kick_teacher_training"
+        ):
+            raise ValueError("phase initializer has the wrong purpose")
+        if not bool(initializer.get("complete")):
+            raise ValueError("phase initializer is incomplete")
+        if int(initializer.get("condition_index", -1)) != selected_condition:
+            raise ValueError("phase initializer condition mismatch")
+        if int(initializer.get("phase_bucket_count", -1)) != int(
+            corpus_manifest["phase_bucket_count"]
+        ):
+            raise ValueError("phase initializer bucket definition mismatch")
+        parameters = {
+            int(node["phase_bucket"]): np.asarray(
+                node["parameters"], dtype=np.float64
+            )
+            for node in initializer["nodes"]
+        }
     if set(parameters) != buckets:
         raise ValueError("phase initializer does not cover every training bucket")
     return records[0], arrays, parameters
@@ -189,7 +221,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("teacher_manifest", type=Path)
     parser.add_argument("transition_corpus", type=Path)
-    parser.add_argument("phase_initializer", type=Path)
+    parser.add_argument(
+        "phase_initializer",
+        type=Path,
+        nargs="?",
+        help="optional phase-indexed initializer; defaults to the teacher parameters",
+    )
     parser.add_argument("--condition-index", type=int, default=60)
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     parser.add_argument("--seed", type=int, default=7401)
@@ -247,7 +284,10 @@ def main() -> int:
     identity = {
         "teacher_manifest_sha256": _sha256(args.teacher_manifest),
         "transition_corpus_sha256": _sha256(args.transition_corpus),
-        "phase_initializer_sha256": _sha256(args.phase_initializer),
+        "phase_initializer_sha256": (
+            _sha256(args.phase_initializer)
+            if args.phase_initializer is not None else None
+        ),
         "contract_sha256": _sha256(args.contract),
         "seed": args.seed,
         "population": args.population,
@@ -311,7 +351,10 @@ def main() -> int:
             "mujoco": mujoco.__version__,
             "teacher_manifest": str(args.teacher_manifest.resolve()),
             "transition_corpus": str(args.transition_corpus.resolve()),
-            "phase_initializer": str(args.phase_initializer.resolve()),
+            "phase_initializer": (
+                str(args.phase_initializer.resolve())
+                if args.phase_initializer is not None else None
+            ),
             "repair_source": (
                 str(args.repair_source.resolve())
                 if args.repair_source is not None
@@ -339,6 +382,7 @@ def main() -> int:
                 "phase_bucket": bucket,
                 "qpos": arrays["qpos"][row],
                 "qvel": arrays["qvel"][row],
+                "walk_previous_action": arrays["walk_previous_action"][row],
                 "initial_parameters": (
                     repair_labels[row]["parameters"]
                     if row in repair_labels

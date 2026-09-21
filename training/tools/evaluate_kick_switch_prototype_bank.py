@@ -13,6 +13,7 @@ import numpy as np
 
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.kick_teacher import KickTeacherEvaluator, KickTeacherSpec, kick_trial_success
+from tools.evaluate_server_kick_handoff import normalize_teacher_records
 from tools.generate_kick_switch_window_corpus import load_prototype, sha256_file
 
 
@@ -116,14 +117,19 @@ def _worker_initialize(
     _WORKER_PARAMETERS = [np.asarray(value, dtype=np.float64) for value in parameters]
 
 
-def _worker_evaluate(task: tuple[int, int, np.ndarray, np.ndarray]) -> dict[str, Any]:
+def _worker_evaluate(
+    task: tuple[int, int, np.ndarray, np.ndarray, np.ndarray]
+) -> dict[str, Any]:
     if _WORKER_EVALUATOR is None or not _WORKER_PARAMETERS:
         raise RuntimeError("prototype-bank worker was not initialized")
-    prototype_index, candidate_index, qpos, qvel = task
+    prototype_index, candidate_index, qpos, qvel, walk_previous_action = task
     metrics = _WORKER_EVALUATOR.rollout(
         _WORKER_PARAMETERS[prototype_index],
         initial_qpos=np.asarray(qpos, dtype=np.float64),
         initial_qvel=np.asarray(qvel, dtype=np.float64),
+        initial_walk_previous_action=np.asarray(
+            walk_previous_action, dtype=np.float64
+        ),
     )
     return {
         "prototype_index": prototype_index,
@@ -139,9 +145,21 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("switch_corpus", type=Path)
     parser.add_argument(
-        "--prototype", type=_parse_prototype, action="append", required=True
+        "--prototype", type=_parse_prototype, action="append", default=[]
+    )
+    parser.add_argument(
+        "--all-successful-prototypes",
+        type=Path,
+        action="append",
+        default=[],
+        help="add every successful rollout from a transition-label manifest",
     )
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
+    parser.add_argument(
+        "--teacher-manifest",
+        type=Path,
+        help="required when the transition corpus does not embed its teacher path",
+    )
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--maximum-prototypes", type=int, default=4)
     parser.add_argument("--output-prefix", type=Path, required=True)
@@ -149,6 +167,30 @@ def main() -> int:
 
     if args.workers < 1 or args.maximum_prototypes < 1:
         raise ValueError("workers and maximum prototypes must be positive")
+    prototype_sources = list(args.prototype)
+    for manifest_path in args.all_successful_prototypes:
+        source = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if (
+            source.get("purpose")
+            != "exact_cpu_per_transition_kick_teacher_labels"
+            or not bool(source.get("complete"))
+        ):
+            raise ValueError("all-successful source must be complete transition labels")
+        source_npz = Path(str(source["npz"]))
+        if sha256_file(source_npz) != source.get("npz_sha256"):
+            raise ValueError("all-successful prototype NPZ hash mismatch")
+        with np.load(source_npz, allow_pickle=False) as archive:
+            if not {"rollout_id", "trained_success"} <= set(archive.files):
+                raise ValueError("all-successful prototype NPZ is incomplete")
+            prototype_sources.extend(
+                (manifest_path, int(rollout_id))
+                for rollout_id, successful in zip(
+                    archive["rollout_id"], archive["trained_success"], strict=True
+                )
+                if bool(successful)
+            )
+    if not prototype_sources:
+        raise ValueError("at least one prototype source is required")
     npz_path = args.output_prefix.with_suffix(".npz")
     json_path = args.output_prefix.with_suffix(".json")
     if not json_path.is_absolute() or json_path.is_relative_to(Path.cwd()):
@@ -158,29 +200,47 @@ def main() -> int:
 
     corpus_manifest_path = args.switch_corpus.with_suffix(".json")
     corpus_manifest = json.loads(corpus_manifest_path.read_text(encoding="utf-8"))
+    corpus_purpose = corpus_manifest.get("purpose")
     if (
-        corpus_manifest.get("purpose")
-        != "exact_cpu_walk_to_kick_switch_window_corpus"
+        corpus_purpose not in {
+            "exact_cpu_walk_to_kick_switch_window_corpus",
+            "kick_policy_v3_walk_to_kick_transition_corpus",
+        }
         or corpus_manifest.get("npz_sha256") != sha256_file(args.switch_corpus)
     ):
-        raise ValueError("switch-window corpus is invalid or has a hash mismatch")
+        raise ValueError("transition corpus is invalid or has a hash mismatch")
     if corpus_manifest.get("contract_sha256") != sha256_file(args.contract):
         raise ValueError("switch-window corpus contract mismatch")
     with np.load(args.switch_corpus, allow_pickle=False) as archive:
-        required = {"qpos", "qvel", "approach_rollout_id", "split"}
+        rollout_field = (
+            "approach_rollout_id"
+            if corpus_purpose == "exact_cpu_walk_to_kick_switch_window_corpus"
+            else "rollout_id"
+        )
+        required = {"qpos", "qvel", rollout_field, "split"}
         if not required <= set(archive.files):
-            raise ValueError("switch-window corpus is missing required arrays")
+            raise ValueError("transition corpus is missing required arrays")
         qpos = np.asarray(archive["qpos"])
         qvel = np.asarray(archive["qvel"])
-        rollout_ids = np.asarray(archive["approach_rollout_id"], dtype=np.int32)
+        rollout_ids = np.asarray(archive[rollout_field], dtype=np.int32)
         split = np.asarray(archive["split"], dtype=np.uint8)
-    if qpos.shape[0] != qvel.shape[0] or rollout_ids.shape != split.shape or qpos.shape[0] != split.size:
+        walk_previous_action = (
+            np.asarray(archive["walk_previous_action"], dtype=np.float32)
+            if "walk_previous_action" in archive.files
+            else np.zeros((qpos.shape[0], 23), dtype=np.float32)
+        )
+    if (
+        qpos.shape[0] != qvel.shape[0]
+        or rollout_ids.shape != split.shape
+        or qpos.shape[0] != split.size
+        or walk_previous_action.shape != (split.size, 23)
+    ):
         raise ValueError("switch-window corpus arrays are misaligned")
 
     prototype_nodes: list[dict[str, Any]] = []
     parameter_rows: list[np.ndarray] = []
     seen: set[tuple[str, int]] = set()
-    for manifest_path, rollout_id in args.prototype:
+    for manifest_path, rollout_id in prototype_sources:
         identity = (sha256_file(manifest_path), rollout_id)
         if identity in seen:
             raise ValueError("duplicate prototype selection")
@@ -201,12 +261,15 @@ def main() -> int:
         )
         parameter_rows.append(parameters)
 
-    record_source = json.loads(
-        Path(corpus_manifest["teacher_manifest"]).read_text(encoding="utf-8")
-    )
+    teacher_manifest = args.teacher_manifest
+    if teacher_manifest is None and corpus_manifest.get("teacher_manifest"):
+        teacher_manifest = Path(str(corpus_manifest["teacher_manifest"]))
+    if teacher_manifest is None:
+        raise ValueError("transition corpus requires --teacher-manifest")
+    record_source = json.loads(teacher_manifest.read_text(encoding="utf-8"))
     records = [
         record
-        for record in record_source["records"]
+        for record in normalize_teacher_records(record_source)
         if int(record["condition_index"]) == int(corpus_manifest["teacher_condition_index"])
         and bool(record["accepted"])
     ]
@@ -228,7 +291,13 @@ def main() -> int:
     contact = np.zeros_like(success)
     score = np.zeros((prototype_count, candidate_count), dtype=np.float32)
     tasks = [
-        (prototype_index, candidate_index, qpos[candidate_index], qvel[candidate_index])
+        (
+            prototype_index,
+            candidate_index,
+            qpos[candidate_index],
+            qvel[candidate_index],
+            walk_previous_action[candidate_index],
+        )
         for prototype_index in range(prototype_count)
         for candidate_index in range(candidate_count)
     ]

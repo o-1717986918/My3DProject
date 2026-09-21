@@ -12,6 +12,7 @@ import onnxruntime as ort
 
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.kick_teacher import KickTeacherEvaluator, KickTeacherSpec, kick_trial_success
+from tools.evaluate_server_kick_handoff import normalize_teacher_records
 from tools.generate_kick_switch_window_corpus import sha256_file
 
 
@@ -71,10 +72,15 @@ def main() -> int:
         raise ValueError("correction scale must be in (0, 0.5]")
 
     teacher = json.loads(args.teacher_manifest.read_text(encoding="utf-8"))
+    teacher_records = normalize_teacher_records(teacher)
+    selected_condition = (
+        0 if teacher.get("purpose") == "r1_low_dimensional_kick_teacher"
+        else args.condition_index
+    )
     records = [
         record
-        for record in teacher.get("records", [])
-        if int(record["condition_index"]) == args.condition_index
+        for record in teacher_records
+        if int(record["condition_index"]) == selected_condition
         and bool(record["accepted"])
     ]
     if len(records) != 1:
@@ -86,15 +92,25 @@ def main() -> int:
         corpus_manifest.get("npz_sha256") != sha256_file(args.transition_corpus)
         or corpus_manifest.get("contract_sha256") != sha256_file(args.contract)
         or int(corpus_manifest.get("teacher_condition_index", -1))
-        != args.condition_index
+        != selected_condition
     ):
         raise ValueError("transition corpus is invalid or bound to other inputs")
     with np.load(args.transition_corpus, allow_pickle=False) as archive:
-        required = {"qpos", "qvel", "rollout_id", "phase_bucket", "split"}
+        required = {
+            "qpos",
+            "qvel",
+            "walk_previous_action",
+            "rollout_id",
+            "phase_bucket",
+            "split",
+        }
         if not required <= set(archive.files):
             raise ValueError("transition corpus is missing required arrays")
         qpos = np.asarray(archive["qpos"], dtype=np.float64)
         qvel = np.asarray(archive["qvel"], dtype=np.float64)
+        walk_previous_action = np.asarray(
+            archive["walk_previous_action"], dtype=np.float64
+        )
         rollout_ids = np.asarray(archive["rollout_id"], dtype=np.int32)
         phase_bucket = np.asarray(archive["phase_bucket"], dtype=np.int32)
         split = np.asarray(archive["split"], dtype=np.uint8)
@@ -117,6 +133,7 @@ def main() -> int:
             None,
             initial_qpos=qpos[row],
             initial_qvel=qvel[row],
+            initial_walk_previous_action=walk_previous_action[row],
             kick_policy_session=session,
             kick_correction_session=correction_session,
             kick_correction_scale=args.correction_scale,

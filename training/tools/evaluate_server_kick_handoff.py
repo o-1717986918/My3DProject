@@ -109,6 +109,39 @@ def nearest_teacher_records(
     return ranked[:count]
 
 
+def normalize_teacher_records(source: dict[str, object]) -> list[dict[str, object]]:
+    """Expose dataset and single-teacher manifests through one record schema."""
+    if isinstance(source.get("records"), list):
+        return list(source["records"])
+    if (
+        source.get("purpose") == "r1_low_dimensional_kick_teacher"
+        and isinstance(source.get("spec"), dict)
+        and isinstance(source.get("parameters"), list)
+    ):
+        spec = source["spec"]
+        offset = source.get("ball_offset_m", {"x": 0.0, "y": 0.0})
+        metrics = source.get("metrics", {})
+        if not isinstance(offset, dict) or not isinstance(metrics, dict):
+            raise ValueError("single kick teacher metadata must be mappings")
+        return [
+            {
+                "condition_index": 0,
+                "accepted": bool(metrics.get("contact", False)),
+                "distance_m": float(spec["target_distance_m"]),
+                "angle_deg": float(spec["target_angle_deg"]),
+                "requested_speed_mps": float(spec["requested_ball_speed_mps"]),
+                "desired_arrival_speed_mps": float(
+                    spec["desired_arrival_speed_mps"]
+                ),
+                "mode": str(spec["action_mode"]),
+                "ball_x_offset_m": float(offset["x"]),
+                "ball_y_offset_m": float(offset["y"]),
+                "parameters": source["parameters"],
+            }
+        ]
+    raise ValueError("unsupported kick teacher manifest schema")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("teacher_manifest", type=Path)
@@ -158,16 +191,21 @@ def main() -> None:
     if not selected.size:
         raise ValueError("no fresh forward-facing release-like player approach")
     teacher = json.loads(args.teacher_manifest.read_text(encoding="utf-8"))
+    all_teacher_records = normalize_teacher_records(teacher)
+    selected_condition = (
+        0 if teacher.get("purpose") == "r1_low_dimensional_kick_teacher"
+        else args.condition_index
+    )
     records = [
-        record for record in teacher.get("records", [])
-        if int(record["condition_index"]) == args.condition_index
+        record for record in all_teacher_records
+        if int(record["condition_index"]) == selected_condition
         and bool(record["accepted"])
     ]
     if len(records) != 1:
         raise ValueError("condition index must select one accepted teacher")
     record = records[0]
     compatible_bank = [
-        item for item in teacher.get("records", [])
+        item for item in all_teacher_records
         if bool(item.get("accepted"))
         and all(item.get(key) == record.get(key) for key in (
             "distance_m", "angle_deg", "requested_speed_mps",
@@ -257,7 +295,7 @@ def main() -> None:
         "source_corpus_sha256": sha256(args.server_corpus),
         "teacher_manifest": str(args.teacher_manifest.resolve()),
         "teacher_manifest_sha256": sha256(args.teacher_manifest),
-        "condition_index": args.condition_index,
+        "condition_index": selected_condition,
         "trials": trials,
     }
     if args.teacher_bank_neighbors:
