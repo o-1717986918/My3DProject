@@ -12,6 +12,7 @@ from my3d_rl.soccer_motion_ball import (
 )
 from tools.evaluate_soccer_motion_ball_cpu import (
     _checkpoint_tree_sha256,
+    _target_conditioned_observation,
     _validate_output_path,
 )
 
@@ -36,6 +37,48 @@ def test_ball_evaluator_refuses_existing_output(tmp_path):
     output.write_text("existing")
     with pytest.raises(FileExistsError, match="already exists"):
         _validate_output_path(output)
+
+
+def test_ball_evaluator_builds_the_requested_actor_boundary():
+    inherited = np.zeros(110, dtype=np.float32)
+    common = {
+        "torso_position_world": np.array([0.0, 0.0, 0.7]),
+        "torso_yaw_rad": 0.0,
+        "torso_linear_velocity_world": np.zeros(3),
+        "ball_position_world": np.array([0.5, 0.0, 0.11]),
+        "ball_velocity_world": np.zeros(3),
+        "target_position_world_xy": np.array([2.5, 0.0]),
+        "requested_launch_speed_m_s": 1.0,
+        "requested_arrival_speed_m_s": 0.8,
+    }
+
+    legacy = _target_conditioned_observation(
+        inherited, observation_size=110, **common
+    )
+    conditioned = _target_conditioned_observation(
+        inherited, observation_size=126, **common
+    )
+
+    assert legacy is inherited
+    assert conditioned.shape == (126,)
+    np.testing.assert_array_equal(conditioned[:110], inherited)
+    assert conditioned[-1] == 1.0
+
+
+def test_ball_evaluator_rejects_unknown_actor_boundary():
+    with pytest.raises(ValueError, match="unsupported"):
+        _target_conditioned_observation(
+            np.zeros(110, dtype=np.float32),
+            observation_size=111,
+            torso_position_world=np.array([0.0, 0.0, 0.7]),
+            torso_yaw_rad=0.0,
+            torso_linear_velocity_world=np.zeros(3),
+            ball_position_world=np.array([0.5, 0.0, 0.11]),
+            ball_velocity_world=np.zeros(3),
+            target_position_world_xy=np.array([2.5, 0.0]),
+            requested_launch_speed_m_s=1.0,
+            requested_arrival_speed_m_s=0.8,
+        )
 
 
 def test_ball_placement_perturbation_is_deterministic_and_bounded():

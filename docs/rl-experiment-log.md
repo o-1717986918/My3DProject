@@ -2036,3 +2036,38 @@ direction reflection and runtime coexistence only; it does not overturn the
 earlier negative performance comparisons for FastWalk/RapidTurn or establish a
 match-strength gain. Logs are under
 `/home/win98/rl_runs/live/rebuild-all-capabilities-v3`.
+
+## K2-B Warp direction-control rebaseline — 2026-09-21
+
+The soccer-ball MJX-Warp backend now uses public geom-pair contact sensors and
+the staged graph mode instead of reading private contact buffers. A fixed-2 m
+196,608-step smoke completed the full reset, PPO, evaluation, checkpoint and
+dashboard path. The first formal request was rounded to two complete PPO/eval
+intervals, or 393,216 observed steps. It retained 100% correct-foot contact,
+100% recovery-window completion and zero falls, but both the physical ball
+target event and upright target event remained 0%.
+
+The exact CPU evaluator previously could not truthfully replay that checkpoint:
+it always built the inherited 110-value motion observation even when the loaded
+contract required the 126-value K2 ball/target actor. It now appends the exact
+versioned ball position, velocity, target, launch/arrival-speed, mode and
+freshness features, and reports the physical 2 m outcome independently of
+post-contact posture. On motion 12 starts 113--118, the zero-row bootstrap and
+formal checkpoint both made 6/6 correct-foot contacts, had zero falls and made
+0/6 targets. The formal checkpoint regressed median closest-target distance
+from 1.547 m to 1.593 m, median maximum forward progress from 4.131 m to
+3.955 m, and median final lateral error from 4.795 m to 4.961 m. It is rejected.
+Reports are `/home/win98/rl_runs/paid-k2/exact-bootstrap-s20260993-v1.json` and
+`/home/win98/rl_runs/paid-k2/exact-formal-s20260993-v1.json`; the training run is
+`/home/win98/rl_runs/paid-k2/k2b-fixed2m-warp-formal-s20260992-v1`.
+
+The next curriculum changes the learning signal rather than hiding the miss
+behind wider gates. Target-axis progress and cross-axis ball velocity are now
+separate terms, with a configurable dense lateral-speed cost. One-shot outcome
+metrics expose the final progress, final lateral error, final target distance,
+minimum target distance, maximum progress and final directional speed instead
+of treating accumulated per-frame diagnostics as endpoints. A first
+post-contact fall costs 25 once and no longer terminates ball observation;
+pre-contact falls still terminate. This prices occasional recoverable falls as
+a finite match cost while preserving both physical target success and upright
+recovery as separate evidence.

@@ -19,6 +19,12 @@ from my3d_rl.contract import load_policy_contract
 from my3d_rl.ppo_profile import get_ppo_profile
 from my3d_rl.rcss_scene import build_single_t1_soccer_model
 from my3d_rl.reference_dynamics import configure_pd_actuators
+from my3d_rl.soccer_ball_policy import (
+    SOCCER_BALL_ACTOR_SIZE,
+    SOCCER_MOTION_ACTOR_SIZE,
+    append_ball_target_features,
+    soccer_ball_target_features,
+)
 from my3d_rl.soccer_motion_ball import (
     classify_ball_contacts,
     deterministic_ball_placement_perturbation,
@@ -41,6 +47,42 @@ from my3d_rl.t1_control import APOLLO_DEFAULT_POSE, apollo_joint_gains
 
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
+
+
+def _target_conditioned_observation(
+    inherited: np.ndarray,
+    *,
+    observation_size: int,
+    torso_position_world: np.ndarray,
+    torso_yaw_rad: float,
+    torso_linear_velocity_world: np.ndarray,
+    ball_position_world: np.ndarray,
+    ball_velocity_world: np.ndarray,
+    target_position_world_xy: np.ndarray,
+    requested_launch_speed_m_s: float,
+    requested_arrival_speed_m_s: float,
+) -> np.ndarray:
+    """Append K2 features only when the selected policy contract requires them."""
+    if observation_size == SOCCER_MOTION_ACTOR_SIZE:
+        return inherited
+    if observation_size != SOCCER_BALL_ACTOR_SIZE:
+        raise ValueError(
+            f"unsupported soccer-ball actor observation size: {observation_size}"
+        )
+    features = soccer_ball_target_features(
+        torso_position_world=torso_position_world,
+        torso_yaw_rad=torso_yaw_rad,
+        torso_linear_velocity_world=torso_linear_velocity_world,
+        ball_position_world=ball_position_world,
+        ball_velocity_world=ball_velocity_world,
+        target_position_world_xy=target_position_world_xy,
+        requested_launch_speed_m_s=requested_launch_speed_m_s,
+        requested_arrival_speed_m_s=requested_arrival_speed_m_s,
+        action_mode="pass",
+        observation_age_s=0.0,
+        observation_valid=True,
+    )
+    return append_ball_target_features(inherited, features)
 
 
 def _sha256_file(path: Path) -> str:
@@ -131,6 +173,12 @@ def _evaluate_case(
     ball_radius_offset_m: float,
     ball_arc_angle_rad: float,
     target_angle_rad: float,
+    target_distance_m: float,
+    requested_arrival_speed_m_s: float,
+    rolling_deceleration_m_s2: float,
+    target_radius_m: float,
+    lateral_tolerance_m: float,
+    arrival_speed_tolerance_m_s: float,
     post_motion_frames: int,
     post_contact_controller: str,
     recovery_blend_frames: int,
@@ -271,6 +319,13 @@ def _evaluate_case(
     lateral_direction = np.array(
         [-target_direction[1], target_direction[0]], dtype=np.float64
     )
+    goal_world = initial_ball[:2] + target_distance_m * target_direction
+    requested_launch_speed = float(
+        np.sqrt(
+            requested_arrival_speed_m_s**2
+            + 2.0 * rolling_deceleration_m_s2 * target_distance_m
+        )
+    )
     previous_action = np.zeros(contract.action_size, dtype=np.float64)
     correct_is_left = bool(corpus.kick_leg_one_hot[motion, 0] > 0.5)
     any_robot_contact = False
@@ -281,6 +336,10 @@ def _evaluate_case(
     maximum_lateral = 0.0
     maximum_ball_speed = 0.0
     maximum_directional_speed = 0.0
+    minimum_target_distance = target_distance_m
+    closest_target_lateral_error = 0.0
+    closest_target_arrival_speed_error = requested_arrival_speed_m_s
+    ball_target_success = False
     minimum_torso_height = float("inf")
     minimum_upright = float("inf")
     fell = False
@@ -317,7 +376,7 @@ def _evaluate_case(
                 arrays["upper"],
             )
         else:
-            observation = soccer_motion_actor_observation(
+            inherited_observation = soccer_motion_actor_observation(
                 data,
                 joint_qpos=joint_qpos,
                 joint_dof=joint_dof,
@@ -335,6 +394,22 @@ def _evaluate_case(
                 previous_action=previous_action,
                 progress=current / max(length - 1, 1),
                 kick_leg_one_hot=corpus.kick_leg_one_hot[motion],
+            )
+            torso_rotation = data.site_xmat[arrays["torso_site"]].reshape(3, 3)
+            torso_yaw = float(
+                np.arctan2(torso_rotation[1, 0], torso_rotation[0, 0])
+            )
+            observation = _target_conditioned_observation(
+                inherited_observation,
+                observation_size=contract.observation_size,
+                torso_position_world=data.xpos[arrays["torso_body"]],
+                torso_yaw_rad=torso_yaw,
+                torso_linear_velocity_world=data.qvel[root_dof : root_dof + 3],
+                ball_position_world=data.xpos[arrays["ball_body"]],
+                ball_velocity_world=data.qvel[ball_dof : ball_dof + 3],
+                target_position_world_xy=goal_world,
+                requested_launch_speed_m_s=requested_launch_speed,
+                requested_arrival_speed_m_s=requested_arrival_speed_m_s,
             )
             action = np.clip(policy(observation), *contract.action_clip)
             target = np.clip(
@@ -378,6 +453,26 @@ def _evaluate_case(
             maximum_ball_speed = max(maximum_ball_speed, float(np.linalg.norm(velocity)))
             maximum_directional_speed = max(
                 maximum_directional_speed, float(np.dot(velocity, target_direction))
+            )
+            current_target_distance = float(
+                np.linalg.norm(goal_world - data.xpos[arrays["ball_body"], :2])
+            )
+            current_lateral_error = float(
+                abs(np.dot(displacement, lateral_direction))
+            )
+            current_directional_speed = float(np.dot(velocity, target_direction))
+            current_arrival_speed_error = abs(
+                current_directional_speed - requested_arrival_speed_m_s
+            )
+            if current_target_distance < minimum_target_distance:
+                minimum_target_distance = current_target_distance
+                closest_target_lateral_error = current_lateral_error
+                closest_target_arrival_speed_error = current_arrival_speed_error
+            ball_target_success |= (
+                correct_foot_contact
+                and current_target_distance <= target_radius_m
+                and current_lateral_error <= lateral_tolerance_m
+                and current_arrival_speed_error <= arrival_speed_tolerance_m_s
             )
 
         rotation = data.site_xmat[arrays["torso_site"]].reshape(3, 3)
@@ -437,6 +532,15 @@ def _evaluate_case(
         "final_lateral_error_m": final_lateral,
         "maximum_ball_speed_mps": maximum_ball_speed,
         "maximum_directional_speed_mps": maximum_directional_speed,
+        "target_distance_command_m": target_distance_m,
+        "requested_launch_speed_mps": requested_launch_speed,
+        "requested_arrival_speed_mps": requested_arrival_speed_m_s,
+        "minimum_target_distance_m": minimum_target_distance,
+        "closest_target_lateral_error_m": closest_target_lateral_error,
+        "closest_target_arrival_speed_error_mps": (
+            closest_target_arrival_speed_error
+        ),
+        "ball_target_success": ball_target_success,
         "minimum_torso_height_m": minimum_torso_height,
         "minimum_upright": minimum_upright,
     }
@@ -462,6 +566,12 @@ def main() -> None:
     parser.add_argument("--ball-radius-offset-m", type=float, default=0.0)
     parser.add_argument("--ball-arc-angle-deg", type=float, default=0.0)
     parser.add_argument("--target-angle-deg", type=float, default=0.0)
+    parser.add_argument("--target-distance-m", type=float, default=2.0)
+    parser.add_argument("--requested-arrival-speed-mps", type=float, default=0.8)
+    parser.add_argument("--rolling-deceleration-m-s2", type=float, default=0.08)
+    parser.add_argument("--target-radius-m", type=float, default=0.5)
+    parser.add_argument("--lateral-tolerance-m", type=float, default=0.5)
+    parser.add_argument("--arrival-speed-tolerance-mps", type=float, default=0.5)
     parser.add_argument("--post-motion-frames", type=int, default=25)
     parser.add_argument("--perturbation-seed", type=int)
     parser.add_argument("--reset-joint-noise", type=float, default=0.0)
@@ -506,6 +616,15 @@ def main() -> None:
             args.ball_arc_noise_deg,
         )
         < 0.0
+        or min(
+            args.target_distance_m,
+            args.requested_arrival_speed_mps,
+            args.rolling_deceleration_m_s2,
+            args.target_radius_m,
+            args.lateral_tolerance_m,
+            args.arrival_speed_tolerance_mps,
+        )
+        <= 0.0
         or not np.isfinite(
             [
                 args.ball_radius_offset_m,
@@ -672,6 +791,18 @@ def main() -> None:
                         ball_radius_offset_m=args.ball_radius_offset_m,
                         ball_arc_angle_rad=np.deg2rad(args.ball_arc_angle_deg),
                         target_angle_rad=np.deg2rad(args.target_angle_deg),
+                        target_distance_m=args.target_distance_m,
+                        requested_arrival_speed_m_s=(
+                            args.requested_arrival_speed_mps
+                        ),
+                        rolling_deceleration_m_s2=(
+                            args.rolling_deceleration_m_s2
+                        ),
+                        target_radius_m=args.target_radius_m,
+                        lateral_tolerance_m=args.lateral_tolerance_m,
+                        arrival_speed_tolerance_m_s=(
+                            args.arrival_speed_tolerance_mps
+                        ),
                         post_motion_frames=args.post_motion_frames,
                         post_contact_controller=args.post_contact_controller,
                         recovery_blend_frames=args.recovery_blend_frames,
@@ -701,6 +832,9 @@ def main() -> None:
                 ),
                 "screening_passes": sum(
                     bool(item["contact_screening_passed"]) for item in items
+                ),
+                "ball_target_successes": sum(
+                    bool(item.get("ball_target_success", False)) for item in items
                 ),
                 "falls": sum(bool(item["fell"]) for item in items),
                 "initial_overlaps": sum(
@@ -739,6 +873,12 @@ def main() -> None:
             "ball_radius_offset_m": args.ball_radius_offset_m,
             "ball_arc_angle_deg": args.ball_arc_angle_deg,
             "target_angle_deg": args.target_angle_deg,
+            "target_distance_m": args.target_distance_m,
+            "requested_arrival_speed_mps": args.requested_arrival_speed_mps,
+            "rolling_deceleration_m_s2": args.rolling_deceleration_m_s2,
+            "target_radius_m": args.target_radius_m,
+            "lateral_tolerance_m": args.lateral_tolerance_m,
+            "arrival_speed_tolerance_mps": args.arrival_speed_tolerance_mps,
             "post_motion_frames": args.post_motion_frames,
             "post_contact_controller": args.post_contact_controller,
             "recovery_blend_frames": args.recovery_blend_frames,
@@ -763,6 +903,9 @@ def main() -> None:
         ),
         "screening_passes": sum(
             bool(record["contact_screening_passed"]) for record in records
+        ),
+        "ball_target_successes": sum(
+            bool(record.get("ball_target_success", False)) for record in records
         ),
         "falls": sum(bool(record["fell"]) for record in records),
         "initial_overlaps": sum(

@@ -3,8 +3,13 @@ from __future__ import annotations
 import jax
 import jax.numpy as jp
 import numpy as np
+import pytest
 
-from my3d_rl.soccer_ball_motion_env import BallConditionedSoccerMotionTracking
+from my3d_rl.soccer_ball_motion_env import (
+    BallConditionedSoccerMotionTracking,
+    default_config,
+    post_contact_ball_reward,
+)
 from my3d_rl.soccer_motion_corpus import SoccerMotionCorpus
 from my3d_rl.t1_control import APOLLO_DEFAULT_POSE
 
@@ -72,3 +77,65 @@ def test_k2_environment_has_finite_126_and_134_boundaries():
     assert int(stepped.info["step"]) == 1
     assert np.isfinite(float(stepped.reward))
     assert np.isfinite(np.asarray(stepped.obs["state"])).all()
+
+
+def test_k2_reward_separates_lateral_ball_motion_from_forward_progress():
+    config = default_config()
+
+    assert config.target_progress_reward_scale > 0.0
+    assert config.launch_speed_reward_scale > 0.0
+    assert config.lateral_speed_cost > 0.0
+    assert config.post_contact_upright_reward_scale > 0.0
+    assert config.post_contact_fall_cost < config.success_event_reward
+
+    common = {
+        "target_progress_rate": jp.array(2.0),
+        "directional_speed": jp.array(1.0),
+        "requested_launch_speed": jp.array(1.0),
+        "upright": jp.array(1.0),
+        "post_contact_fall_event": jp.array(False),
+        "dt": 0.02,
+        "target_progress_reward_scale": config.target_progress_reward_scale,
+        "launch_speed_reward_scale": config.launch_speed_reward_scale,
+        "lateral_speed_cost": config.lateral_speed_cost,
+        "post_contact_upright_reward_scale": (
+            config.post_contact_upright_reward_scale
+        ),
+        "post_contact_fall_cost": config.post_contact_fall_cost,
+    }
+    straight = post_contact_ball_reward(lateral_speed=jp.array(0.0), **common)
+    diagonal = post_contact_ball_reward(lateral_speed=jp.array(1.0), **common)
+
+    assert float(straight - diagonal) == pytest.approx(
+        config.lateral_speed_cost * common["dt"]
+    )
+
+
+def test_k2_exposes_one_shot_outcome_metrics():
+    env = BallConditionedSoccerMotionTracking(
+        _synthetic_corpus(),
+        config_overrides={
+            "impl": "jax",
+            "episode_length": 2,
+            "reset_joint_noise": 0.0,
+            "reset_root_velocity_noise": 0.0,
+            "reset_yaw_range": 0.0,
+        },
+        prefix="test_k2_outcome_",
+    )
+
+    state = env.reset(jax.random.PRNGKey(20260993))
+
+    for key in (
+        "cost/ball_lateral_speed",
+        "event/post_contact_fall",
+        "event/ball_outcome_terminal",
+        "outcome/final_ball_progress_m",
+        "outcome/final_lateral_error_m",
+        "outcome/final_target_distance_m",
+        "outcome/minimum_target_distance_m",
+        "outcome/maximum_ball_progress_m",
+        "outcome/final_directional_speed_m_s",
+    ):
+        assert key in state.metrics
+        assert float(state.metrics[key]) == 0.0

@@ -50,6 +50,34 @@ DEFAULT_WALK_POLICY = (
 )
 
 
+def post_contact_ball_reward(
+    *,
+    target_progress_rate: jax.Array,
+    directional_speed: jax.Array,
+    lateral_speed: jax.Array,
+    requested_launch_speed: jax.Array,
+    upright: jax.Array,
+    post_contact_fall_event: jax.Array,
+    dt: float,
+    target_progress_reward_scale: float,
+    launch_speed_reward_scale: float,
+    lateral_speed_cost: float,
+    post_contact_upright_reward_scale: float,
+    post_contact_fall_cost: float,
+) -> jax.Array:
+    """Score the physical ball flight and price a fall once, not per frame."""
+    speed_tracking = jp.exp(
+        -jp.square(directional_speed - requested_launch_speed)
+    )
+    return (
+        target_progress_reward_scale * target_progress_rate * dt
+        + launch_speed_reward_scale * speed_tracking * dt
+        - lateral_speed_cost * lateral_speed * dt
+        + post_contact_upright_reward_scale * jp.clip(upright, 0.0, 1.0) * dt
+        - post_contact_fall_cost * post_contact_fall_event.astype(jp.float32)
+    )
+
+
 def default_config() -> config_dict.ConfigDict:
     """Return the locked fixed-2 m K2-B first curriculum."""
     config = motion_default_config()
@@ -74,6 +102,14 @@ def default_config() -> config_dict.ConfigDict:
     config.success_event_reward = 30.0
     config.miss_event_cost = 20.0
     config.wrong_foot_cost = 20.0
+    # Ball-flight shaping is deliberately separated into target-axis progress
+    # and cross-axis velocity.  Euclidean distance progress alone can reward a
+    # fast diagonal kick for much of its flight even when it can never enter
+    # the receiver corridor.
+    config.target_progress_reward_scale = 4.0
+    config.launch_speed_reward_scale = 0.5
+    config.lateral_speed_cost = 4.0
+    config.post_contact_upright_reward_scale = 0.2
     # One post-contact fall is a finite match cost. A useful high-impulse ball
     # outcome may outweigh it, while repeated per-frame punishment must not
     # make all aggressive actions irrational.
@@ -125,6 +161,10 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
             self._config.target_radius_m,
             self._config.lateral_tolerance_m,
             self._config.arrival_speed_tolerance_m_s,
+            self._config.target_progress_reward_scale,
+            self._config.launch_speed_reward_scale,
+            self._config.lateral_speed_cost,
+            self._config.post_contact_upright_reward_scale,
         )
         if any(value <= 0.0 for value in scalar_positive):
             raise ValueError("K2 ball outcome thresholds must be positive")
@@ -282,7 +322,16 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
                 "event/target_success": jp.array(0.0),
                 "reward/ball_target_progress": jp.array(0.0),
                 "reward/ball_speed": jp.array(0.0),
+                "cost/ball_lateral_speed": jp.array(0.0),
                 "cost/target_error": jp.array(0.0),
+                "event/post_contact_fall": jp.array(0.0),
+                "event/ball_outcome_terminal": jp.array(0.0),
+                "outcome/final_ball_progress_m": jp.array(0.0),
+                "outcome/final_lateral_error_m": jp.array(0.0),
+                "outcome/final_target_distance_m": jp.array(0.0),
+                "outcome/minimum_target_distance_m": jp.array(0.0),
+                "outcome/maximum_ball_progress_m": jp.array(0.0),
+                "outcome/final_directional_speed_m_s": jp.array(0.0),
                 "diagnostic/ball_progress": jp.array(0.0),
                 "diagnostic/target_distance": target_distance,
                 "diagnostic/lateral_error": jp.array(0.0),
@@ -327,6 +376,10 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
         )
         directional_speed = jp.dot(
             ball_velocity[:2], result.info["target_direction_world"]
+        )
+        lateral_speed = jp.abs(
+            result.info["target_direction_world"][0] * ball_velocity[1]
+            - result.info["target_direction_world"][1] * ball_velocity[0]
         )
         arrival_speed_error = jp.abs(
             directional_speed - result.info["requested_arrival_speed"]
@@ -385,12 +438,23 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
             - self._config.wrong_foot_cost
             * wrong_contact_event.astype(jp.float32)
         )
-        post_contact_reward = (
-            4.0 * target_progress_rate * self.dt
-            + 0.5 * speed_tracking * self.dt
-            + 0.2 * jp.clip(result.metrics["reward/upright"], 0.0, 1.0) * self.dt
-            - self._config.post_contact_fall_cost
-            * post_contact_fall_event.astype(jp.float32)
+        post_contact_reward = post_contact_ball_reward(
+            target_progress_rate=target_progress_rate,
+            directional_speed=directional_speed,
+            lateral_speed=lateral_speed,
+            requested_launch_speed=result.info["requested_launch_speed"],
+            upright=result.metrics["reward/upright"],
+            post_contact_fall_event=post_contact_fall_event,
+            dt=self.dt,
+            target_progress_reward_scale=(
+                self._config.target_progress_reward_scale
+            ),
+            launch_speed_reward_scale=self._config.launch_speed_reward_scale,
+            lateral_speed_cost=self._config.lateral_speed_cost,
+            post_contact_upright_reward_scale=(
+                self._config.post_contact_upright_reward_scale
+            ),
+            post_contact_fall_cost=self._config.post_contact_fall_cost,
         )
         ball_success_reward = (
             self._config.success_event_reward
@@ -413,12 +477,16 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
         result.info["post_contact_fell"] = post_contact_fell
         result.info["post_contact_steps"] = post_contact_steps
         result.info["last_target_distance"] = target_distance
-        result.info["minimum_target_distance"] = jp.minimum(
+        minimum_target_distance = jp.minimum(
             result.info["minimum_target_distance"], target_distance
         )
-        result.info["maximum_ball_progress"] = jp.maximum(
+        maximum_ball_progress = jp.maximum(
             result.info["maximum_ball_progress"], ball_progress
         )
+        result.info["minimum_target_distance"] = minimum_target_distance
+        result.info["maximum_ball_progress"] = maximum_ball_progress
+        ball_outcome_terminal = contacted & (recovery_complete | timeout)
+        terminal_mask = ball_outcome_terminal.astype(jp.float32)
         result.metrics.update(
             {
                 "event/correct_foot_contact": contact_event.astype(jp.float32),
@@ -428,9 +496,26 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
                 ),
                 "event/recovery_complete": recovery_complete.astype(jp.float32),
                 "event/target_success": target_success.astype(jp.float32),
+                "event/post_contact_fall": (
+                    post_contact_fall_event.astype(jp.float32)
+                ),
+                "event/ball_outcome_terminal": terminal_mask,
                 "reward/ball_target_progress": target_progress_rate,
                 "reward/ball_speed": speed_tracking,
+                "cost/ball_lateral_speed": lateral_speed,
                 "cost/target_error": target_distance,
+                "outcome/final_ball_progress_m": ball_progress * terminal_mask,
+                "outcome/final_lateral_error_m": lateral_error * terminal_mask,
+                "outcome/final_target_distance_m": target_distance * terminal_mask,
+                "outcome/minimum_target_distance_m": (
+                    minimum_target_distance * terminal_mask
+                ),
+                "outcome/maximum_ball_progress_m": (
+                    maximum_ball_progress * terminal_mask
+                ),
+                "outcome/final_directional_speed_m_s": (
+                    directional_speed * terminal_mask
+                ),
                 "diagnostic/ball_progress": ball_progress,
                 "diagnostic/target_distance": target_distance,
                 "diagnostic/lateral_error": lateral_error,
