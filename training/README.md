@@ -56,7 +56,9 @@ PYTHONPATH=training conda run -n my3d-rl python \
 ```
 
 Pass `--match-dir` repeatedly to collect independent matches; the last match
-is held out as validation. One match has no validation split. The raw
+is held out as validation. Use `--validation-match-count N` to hold out the
+last N complete matches; at least one earlier match must remain for training.
+One match has no validation split. The raw
 server-observed torso and joint arrays are not simulator qpos/qvel and must
 not be injected into MuJoCo without a calibrated state adapter.
 

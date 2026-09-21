@@ -14,6 +14,7 @@ import onnxruntime as ort
 
 from my3d_rl.contract import load_policy_contract
 from my3d_rl.kick_teacher import KickTeacherEvaluator, KickTeacherSpec, kick_trial_success
+from tools.evaluate_server_kick_handoff import normalize_teacher_records
 from tools.generate_kick_switch_window_corpus import sha256_file
 
 
@@ -60,6 +61,9 @@ def _worker_collect(task: dict[str, Any]) -> dict[str, Any]:
         _WORKER_SESSION,
         initial_qpos=np.asarray(task["qpos"], dtype=np.float64),
         initial_qvel=np.asarray(task["qvel"], dtype=np.float64),
+        initial_walk_previous_action=np.asarray(
+            task["walk_previous_action"], dtype=np.float64
+        ),
     )
     return {
         "episode_id": int(task["episode_id"]),
@@ -112,10 +116,14 @@ def main() -> int:
         raise ValueError("learner ONNX does not match the selected contract")
 
     teacher = json.loads(args.teacher_manifest.read_text(encoding="utf-8"))
+    selected_condition = (
+        0 if teacher.get("purpose") == "r1_low_dimensional_kick_teacher"
+        else args.condition_index
+    )
     records = [
         record
-        for record in teacher.get("records", [])
-        if int(record["condition_index"]) == args.condition_index
+        for record in normalize_teacher_records(teacher)
+        if int(record["condition_index"]) == selected_condition
         and bool(record["accepted"])
     ]
     if len(records) != 1:
@@ -127,11 +135,16 @@ def main() -> int:
     if (
         corpus_manifest.get("npz_sha256") != sha256_file(args.transition_corpus)
         or corpus_manifest.get("contract_sha256") != sha256_file(args.contract)
+        or int(corpus_manifest.get("teacher_condition_index", -1))
+        != selected_condition
     ):
         raise ValueError("transition corpus hash or contract mismatch")
     with np.load(args.transition_corpus, allow_pickle=False) as archive:
         qpos = np.asarray(archive["qpos"])
         qvel = np.asarray(archive["qvel"])
+        walk_previous_action = np.asarray(
+            archive["walk_previous_action"], dtype=np.float32
+        )
         rollout_ids = np.asarray(archive["rollout_id"], dtype=np.int32)
 
     label_manifest = json.loads(args.transition_labels.read_text(encoding="utf-8"))
@@ -177,6 +190,9 @@ def main() -> int:
             "episode_id": episode_id,
             "qpos": qpos[corpus_by_rollout[episode_id]],
             "qvel": qvel[corpus_by_rollout[episode_id]],
+            "walk_previous_action": walk_previous_action[
+                corpus_by_rollout[episode_id]
+            ],
             "parameters": np.asarray(labels[episode_id]["parameters"], np.float64),
         }
         for episode_id in train_ids

@@ -65,6 +65,35 @@ def test_collect_holds_out_whole_matches_not_correlated_players(tmp_path: Path) 
     assert np.all(arrays["split"][arrays["match_id"] == 1] == 1)
 
 
+def test_collect_can_hold_out_multiple_complete_matches(tmp_path: Path) -> None:
+    match_dirs = [tmp_path / f"match-{index}" for index in range(4)]
+    for match_dir in match_dirs:
+        match_dir.mkdir()
+        (match_dir / "Apollo-Rebuild-7.log").write_text(
+            sample_line(time_s=1.0) + "\n",
+            encoding="utf-8",
+        )
+
+    arrays, summary = collect(match_dirs, validation_match_count=2)
+
+    assert summary["validation_match_groups"] == 2
+    assert summary["train_samples"] == summary["validation_samples"] == 2
+    assert np.array_equal(arrays["split"], np.array([0, 0, 1, 1]))
+
+
+def test_collect_requires_at_least_one_training_match(tmp_path: Path) -> None:
+    match_dirs = [tmp_path / "first", tmp_path / "second"]
+    for match_dir in match_dirs:
+        match_dir.mkdir()
+        (match_dir / "Apollo-Rebuild-7.log").write_text(
+            sample_line(time_s=1.0) + "\n",
+            encoding="utf-8",
+        )
+
+    with pytest.raises(ValueError, match="leave at least one training"):
+        collect(match_dirs, validation_match_count=2)
+
+
 def test_collect_rejects_nonincreasing_player_time(tmp_path: Path) -> None:
     match_dir = tmp_path / "match"
     match_dir.mkdir()

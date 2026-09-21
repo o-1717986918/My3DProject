@@ -374,3 +374,46 @@ DAgger v1 为 5/5、1/5、0 跌倒。第二场右侧被完整保留为下一轮�
 - `/home/win98/rl_runs/training-transition/kick-server-teacher-labels-3p5m-s20260941-v4-repair/`
 - `/home/win98/rl_runs/training-transition/kick-server-3p5m-prototype-bank-s20260941-v2-righttrain/`
 - `/home/win98/rl_runs/training-transition/kick-server-bc-3p5m-s20260943-v2-righttrain/`
+
+### 16 场动态长传扩充与连续效用动作库
+
+后续又加入左右侧各三场独立随机接近，并把服务器遥测收集器改为可按**多个完整
+比赛**留出，而不是只能留出最后一场。最终语料有 16 场、119 个去重交接状态：
+13 场 99 条用于训练，最后 3 场 20 条完全留出；119/119 都成功反算 Apollo Walk
+上一动作。留出状态的球局部前向距离为 `0.560..0.647 m`（中位 `0.608 m`），
+20/20 都不在现有 DynamicPass `0.25..0.50 m` 释放窗内。把场景停留从 2.2 秒
+延长到 3.2 秒仍得到同样距离，说明这是真实接近器的动作交接位置，不是 reset
+过早造成的假象。训练新过渡动作必须覆盖该入口；是否扩大比赛运行时释放窗则仍需
+动作本身通过盲测，不能先放宽一个弱 selector。
+
+动作库评价同时保留严格 3.5 m 成功标签和连续物理得分。得分包含推进、距离、
+横偏、球速、触球以及有限的跌倒代价；跌倒不再一票否决，但其起身和丢球损失仍
+被强惩罚。初始 49 个成功原型在三场留出上的事后上限为 12/20；按训练集连续效用
+选出的 15 个动作也保留 12/20，优于硬成功覆盖选出的 10/20。增量标签工具现在
+能按 rollout ID、`qpos/qvel` 和 Walk 上一动作逐项校验后复用旧标签，只优化新增
+状态和旧失败状态。49 条成功旧标签加 50 次增量搜索后得到 72/99 成功教师、
+99/99 触球、0 跌倒；扩展 72 动作库把留出事后上限提高到 14/20。15 动作压缩
+只能保留 11/20；30 个效用动作才能保留 14/20，说明过早压缩动作库会丢失真实
+相位覆盖。
+
+两类可部署 selector 均未接近该上限。98 维硬标签 MLP 在留出集释放 8 次、成功
+2 次；连续效用软标签版本释放 13 次、成功 1 次，均为 0 跌倒。由 72 条成功教师
+生成 10,872 帧完整轨迹后，单 actor BC 为 0/20 成功、16/20 触球。修复 DAgger
+对单教师 manifest 的兼容，并把真实 Walk 上一动作传入 learner rollout 后，第一轮
+提高到 3/20 成功、20/20 触球、0 跌倒；第二轮仍为 3/20，停止继续堆同一训练。
+
+这批结果不挂载比赛。它证明 3.5 m 动态长传的物理覆盖已到 70% 的盲测 oracle，
+主要缺口是多模态动作选择和连续闭环，而非零跌倒。下一模型改为“释放时冻结
+latent/专家，执行期连续反馈”的混合专家：先用完整 30 动作效用集蒸馏专家簇，
+再训练低维门控并让整段动作保持同一 latent；评价仍用这三场 20 条冻结留出，
+随后另采新比赛做最终确认。只有可执行策略而非事后 oracle 明显超过固定动作
+`164464` 的 6/20，才进入 RCSS shadow/active A/B。
+
+本轮主要产物：
+
+- `/home/win98/rl_runs/training-transition/kick-server-transition-corpus-s20260959-v7-three-match-validation/`
+- `/home/win98/rl_runs/training-transition/kick-server-teacher-labels-3p5m-s20260962-v7-expanded-repair/`
+- `/home/win98/rl_runs/training-transition/kick-server-3p5m-prototype-bank-s20260962-v7-expanded/`
+- `/home/win98/rl_runs/training-transition/kick-server-bc-3p5m-s20260964-v4-expanded/`
+- `/home/win98/rl_runs/training-transition/kick-server-dagger-3p5m-s20260966-v1/`
+- `/home/win98/rl_runs/training-transition/kick-server-dagger-3p5m-s20260968-v2/`

@@ -92,7 +92,11 @@ def parse_telemetry_line(line: str) -> dict[str, object] | None:
     return frame
 
 
-def collect(match_dirs: list[Path]) -> tuple[dict[str, np.ndarray], dict[str, object]]:
+def collect(
+    match_dirs: list[Path],
+    *,
+    validation_match_count: int = 1,
+) -> tuple[dict[str, np.ndarray], dict[str, object]]:
     rows: list[dict[str, object]] = []
     sources: list[dict[str, object]] = []
     for match_id, match_dir in enumerate(match_dirs):
@@ -129,8 +133,18 @@ def collect(match_dirs: list[Path]) -> tuple[dict[str, np.ndarray], dict[str, ob
         arrays[name] = np.asarray([row[name] for row in rows], dtype="U64")
     # Correlated players and time windows from one match stay on one side.
     unique_matches = np.unique(arrays["match_id"])
-    validation_match = int(unique_matches[-1]) if len(unique_matches) > 1 else -1
-    arrays["split"] = (arrays["match_id"] == validation_match).astype(np.uint8)
+    if validation_match_count < 1:
+        raise ValueError("validation_match_count must be positive")
+    if len(unique_matches) > 1 and validation_match_count >= len(unique_matches):
+        raise ValueError("validation matches must leave at least one training match")
+    validation_matches = (
+        unique_matches[-validation_match_count:]
+        if len(unique_matches) > 1
+        else np.empty(0, dtype=unique_matches.dtype)
+    )
+    arrays["split"] = np.isin(
+        arrays["match_id"], validation_matches
+    ).astype(np.uint8)
     near_ball = (
         (arrays["ball_valid"] == 1)
         & (arrays["ball_position_age_s"] <= 0.1)
@@ -139,6 +153,7 @@ def collect(match_dirs: list[Path]) -> tuple[dict[str, np.ndarray], dict[str, ob
     summary = {
         "samples": len(rows),
         "match_groups": len(unique_matches),
+        "validation_match_groups": int(validation_matches.size),
         "train_samples": int(np.sum(arrays["split"] == 0)),
         "validation_samples": int(np.sum(arrays["split"] == 1)),
         "fresh_near_ball_samples": int(np.sum(near_ball)),
@@ -151,6 +166,7 @@ def collect(match_dirs: list[Path]) -> tuple[dict[str, np.ndarray], dict[str, ob
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--match-dir", type=Path, action="append", required=True)
+    parser.add_argument("--validation-match-count", type=int, default=1)
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
     run_dir = args.run_dir.resolve()
@@ -161,7 +177,10 @@ def main() -> None:
         or run_dir.exists()
     ):
         raise ValueError("match dirs must exist; run dir must be new, absolute, and outside the repo")
-    arrays, summary = collect(args.match_dir)
+    arrays, summary = collect(
+        args.match_dir,
+        validation_match_count=args.validation_match_count,
+    )
     run_dir.mkdir(parents=True)
     archive = run_dir / "server-motion-telemetry.npz"
     np.savez_compressed(archive, **arrays)

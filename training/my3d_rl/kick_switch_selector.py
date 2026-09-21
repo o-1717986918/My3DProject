@@ -134,7 +134,7 @@ def _binary_cross_entropy(logits: jax.Array, labels: jax.Array) -> jax.Array:
 
 def train_switch_selector(
     observations: np.ndarray,
-    success: np.ndarray,
+    labels: np.ndarray,
     fall: np.ndarray,
     rollout_ids: np.ndarray,
     *,
@@ -146,10 +146,11 @@ def train_switch_selector(
     batch_size: int,
     learning_rate: float,
     fall_weight: float = 8.0,
+    balance_positive_labels: bool = True,
 ) -> KickSwitchSelectorResult:
-    """Fit a group-balanced multi-label physical-success predictor."""
+    """Fit a group-balanced multi-label outcome or utility predictor."""
     states = np.asarray(observations, dtype=np.float32)
-    labels = np.asarray(success, dtype=np.float32)
+    labels = np.asarray(labels, dtype=np.float32)
     unsafe = np.asarray(fall, dtype=np.float32)
     ids = np.asarray(rollout_ids, dtype=np.int64)
     selected = tuple(int(value) for value in prototype_indices)
@@ -177,10 +178,14 @@ def train_switch_selector(
         raise ValueError("selector optimization settings are invalid")
     if (
         not np.isfinite(states).all()
-        or not set(np.unique(labels).tolist()) <= {0.0, 1.0}
+        or not np.isfinite(labels).all()
+        or np.any(labels < 0.0)
+        or np.any(labels > 1.0)
         or not set(np.unique(unsafe).tolist()) <= {0.0, 1.0}
     ):
-        raise ValueError("selector inputs must be finite and labels must be binary")
+        raise ValueError(
+            "selector inputs must be finite; labels must be in [0, 1]"
+        )
 
     fit_mask = np.isin(ids, fit_ids)
     calibration_mask = np.isin(ids, calibration_ids)
@@ -189,9 +194,14 @@ def train_switch_selector(
     observation_mean = states[fit_mask].mean(axis=0)
     observation_std = np.maximum(states[fit_mask].std(axis=0), 1.0e-3)
     normalized = (states - observation_mean) / observation_std
-    positives = fit_labels.sum(axis=0)
-    negative = fit_labels.shape[0] - positives
-    positive_weights = np.clip(negative / np.maximum(positives, 1.0), 1.0, 20.0)
+    if balance_positive_labels:
+        positives = fit_labels.sum(axis=0)
+        negative = fit_labels.shape[0] - positives
+        positive_weights = np.clip(
+            negative / np.maximum(positives, 1.0), 1.0, 20.0
+        )
+    else:
+        positive_weights = np.ones(fit_labels.shape[1], dtype=np.float32)
     group_rows, group_lengths = _balanced_group_rows(ids, fit_ids)
 
     model = KickSwitchSelector(output_size=len(selected))

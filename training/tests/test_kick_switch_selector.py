@@ -149,3 +149,28 @@ def test_selector_export_matches_numpy(tmp_path: Path) -> None:
     assert probabilities.shape == (24, 2)
     assert np.all((probabilities > 0.0) & (probabilities < 1.0))
     assert parity["maximum_absolute_error"] < 2.0e-6
+
+
+def test_selector_accepts_continuous_utility_labels() -> None:
+    rng = np.random.default_rng(17)
+    observations = rng.normal(size=(12, 5)).astype(np.float32)
+    rollout_ids = np.repeat(np.arange(6), 2)
+    labels = rng.uniform(0.05, 0.95, size=(2, 12)).astype(np.float32)
+
+    result = train_switch_selector(
+        observations,
+        labels,
+        np.zeros_like(labels),
+        rollout_ids,
+        prototype_indices=(0, 1),
+        fit_rollout_ids=(0, 1, 2, 3),
+        calibration_rollout_ids=(4, 5),
+        seed=19,
+        steps=2,
+        batch_size=4,
+        learning_rate=1.0e-3,
+        balance_positive_labels=False,
+    )
+
+    np.testing.assert_array_equal(result.positive_weights, np.ones(2))
+    assert apply_switch_selector_numpy(result, observations).shape == (12, 2)

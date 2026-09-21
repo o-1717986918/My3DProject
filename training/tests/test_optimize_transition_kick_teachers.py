@@ -7,6 +7,7 @@ from my3d_rl.kick_env import TRANSITION_CONTRACT
 from my3d_rl.kick_teacher import KickTeacherEvaluator, KickTeacherSpec
 from training.tools.optimize_transition_kick_teachers import (
     _load_source,
+    _map_repair_labels,
     _sha256,
     _write_checkpoint,
 )
@@ -95,3 +96,48 @@ def test_single_teacher_parameters_initialize_every_training_phase(tmp_path: Pat
     assert arrays["walk_previous_action"].shape == (4, 23)
     assert set(initializers) == {2, 5}
     assert all(np.allclose(value, 0.1) for value in initializers.values())
+
+
+def test_repair_labels_map_only_identical_states_into_expanded_corpus(
+    tmp_path: Path,
+):
+    source = tmp_path / "source.npz"
+    np.savez_compressed(
+        source,
+        qpos=np.array([[1.0], [2.0]], dtype=np.float32),
+        qvel=np.array([[3.0], [4.0]], dtype=np.float32),
+        walk_previous_action=np.zeros((2, 23), dtype=np.float32),
+        rollout_id=np.array([10, 20], dtype=np.int32),
+        split=np.zeros(2, dtype=np.uint8),
+    )
+    manifest = tmp_path / "labels.json"
+    manifest.write_text(
+        "{\n"
+        '  "purpose": "exact_cpu_per_transition_kick_teacher_labels",\n'
+        '  "complete": true,\n'
+        '  "teacher_manifest_sha256": "teacher",\n'
+        '  "contract_sha256": "contract",\n'
+        f'  "transition_corpus": "{source}",\n'
+        f'  "transition_corpus_sha256": "{_sha256(source)}",\n'
+        '  "labels": [{"corpus_index": 1, "rollout_id": 20, '
+        '"trained_success": true, "parameters": [0]}]\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    arrays = {
+        "qpos": np.array([[2.0], [5.0]], dtype=np.float32),
+        "qvel": np.array([[4.0], [6.0]], dtype=np.float32),
+        "walk_previous_action": np.zeros((2, 23), dtype=np.float32),
+        "rollout_id": np.array([20, 30], dtype=np.int32),
+        "split": np.zeros(2, dtype=np.uint8),
+    }
+
+    mapped = _map_repair_labels(
+        manifest,
+        arrays,
+        teacher_manifest_sha256="teacher",
+        contract_sha256="contract",
+    )
+
+    assert list(mapped) == [0]
+    assert mapped[0]["rollout_id"] == 20

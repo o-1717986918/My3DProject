@@ -10,6 +10,7 @@ agent_port=${MATCH_AGENT_PORT:-$((38000 + $$ % 1000))}
 monitor_port=$((agent_port + 1))
 server_python=${RCSSSERVERMJ_PYTHON:-/home/win98/.local/pipx/venvs/rcsssmj/bin/python}
 approach_side=${KICK_APPROACH_SIDE:-left}
+scenario_dwell_s=${KICK_APPROACH_DWELL_S:-2.2}
 match_pid=
 
 cleanup() {
@@ -37,6 +38,11 @@ case "${KICK_APPROACH_VARIANT:-train}" in
 esac
 if [[ "$approach_side" != left && "$approach_side" != right ]]; then
     echo "KICK_APPROACH_SIDE must be left or right" >&2
+    exit 2
+fi
+if ! [[ "$scenario_dwell_s" =~ ^[0-9]+([.][0-9]+)?$ ]] ||
+    ! awk -v value="$scenario_dwell_s" 'BEGIN { exit !(value >= 1.0 && value <= 4.0) }'; then
+    echo "KICK_APPROACH_DWELL_S must be in [1.0, 4.0]" >&2
     exit 2
 fi
 if [[ "${KICK_APPROACH_VARIANT:-train}" == random ]] &&
@@ -182,7 +188,7 @@ for scenario in "${scenarios[@]}"; do
         "(ball (pos 0 0 0.11) (vel $ball_vx $ball_vy 0))"
     printf 'scenario side=%s raw_x=%s raw_y=%s ball_v=(%s,%s)\n' \
         "$approach_side" "$robot_x" "$robot_y" "$ball_vx" "$ball_vy"
-    sleep 2.2
+    sleep "$scenario_dwell_s"
 done
 
 wait "$match_pid"

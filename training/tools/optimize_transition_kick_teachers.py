@@ -217,6 +217,64 @@ def _write_checkpoint(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _map_repair_labels(
+    repair_manifest: Path,
+    arrays: dict[str, np.ndarray],
+    *,
+    teacher_manifest_sha256: str,
+    contract_sha256: str,
+) -> dict[int, dict[str, Any]]:
+    """Map reusable labels onto an expanded corpus after state verification."""
+    repair = json.loads(repair_manifest.read_text(encoding="utf-8"))
+    if (
+        repair.get("purpose")
+        != "exact_cpu_per_transition_kick_teacher_labels"
+        or not bool(repair.get("complete"))
+        or repair.get("teacher_manifest_sha256") != teacher_manifest_sha256
+        or repair.get("contract_sha256") != contract_sha256
+    ):
+        raise ValueError("repair source is incomplete or bound to other inputs")
+    source_corpus = Path(str(repair.get("transition_corpus", "")))
+    if (
+        not source_corpus.is_file()
+        or repair.get("transition_corpus_sha256") != _sha256(source_corpus)
+    ):
+        raise ValueError("repair source transition corpus is unavailable or changed")
+    with np.load(source_corpus, allow_pickle=False) as archive:
+        required = {
+            "qpos", "qvel", "walk_previous_action", "rollout_id", "split",
+        }
+        if not required <= set(archive.files):
+            raise ValueError("repair source transition corpus is incomplete")
+        source = {name: np.asarray(archive[name]) for name in required}
+
+    mapped: dict[int, dict[str, Any]] = {}
+    for original in repair.get("labels", []):
+        old_row = int(original["corpus_index"])
+        if old_row < 0 or old_row >= source["rollout_id"].size:
+            raise ValueError("repair label references an invalid corpus row")
+        rollout_id = int(original["rollout_id"])
+        if int(source["rollout_id"][old_row]) != rollout_id:
+            raise ValueError("repair label rollout identity is inconsistent")
+        matches = np.flatnonzero(
+            (arrays["split"] == 0) & (arrays["rollout_id"] == rollout_id)
+        )
+        if matches.size != 1:
+            raise ValueError("repair rollout must map to one current training row")
+        new_row = int(matches[0])
+        for name in ("qpos", "qvel", "walk_previous_action"):
+            if not np.allclose(
+                source[name][old_row], arrays[name][new_row], rtol=0.0, atol=1.0e-7
+            ):
+                raise ValueError("repair rollout physical state changed")
+        node = dict(original)
+        node["corpus_index"] = new_row
+        mapped[new_row] = node
+    if len(mapped) != len(repair.get("labels", [])):
+        raise ValueError("repair labels do not map uniquely")
+    return mapped
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("teacher_manifest", type=Path)
@@ -302,23 +360,12 @@ def main() -> int:
     repair_labels: dict[int, dict[str, Any]] = {}
     elapsed_before_resume = 0.0
     if args.repair_source is not None:
-        repair = json.loads(args.repair_source.read_text(encoding="utf-8"))
-        if (
-            repair.get("purpose")
-            != "exact_cpu_per_transition_kick_teacher_labels"
-            or not bool(repair.get("complete"))
-            or repair.get("teacher_manifest_sha256")
-            != identity["teacher_manifest_sha256"]
-            or repair.get("transition_corpus_sha256")
-            != identity["transition_corpus_sha256"]
-            or repair.get("contract_sha256") != identity["contract_sha256"]
-        ):
-            raise ValueError("repair source is incomplete or bound to other inputs")
-        repair_labels = {
-            int(label["corpus_index"]): label for label in repair["labels"]
-        }
-        if set(repair_labels) != set(train_rows.tolist()):
-            raise ValueError("repair source does not cover every training entry")
+        repair_labels = _map_repair_labels(
+            args.repair_source,
+            arrays,
+            teacher_manifest_sha256=identity["teacher_manifest_sha256"],
+            contract_sha256=identity["contract_sha256"],
+        )
         completed = {
             index: label
             for index, label in repair_labels.items()
@@ -359,6 +406,11 @@ def main() -> int:
                 str(args.repair_source.resolve())
                 if args.repair_source is not None
                 else None
+            ),
+            "repair_source_mapped_entries": len(repair_labels),
+            "repair_source_reused_successes": sum(
+                bool(label["trained_success"])
+                for label in repair_labels.values()
             ),
             "contract": str(args.contract.resolve()),
             **identity,

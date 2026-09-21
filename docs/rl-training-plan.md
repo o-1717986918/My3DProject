@@ -521,5 +521,11 @@ FastWalk 域适配 -> 更准 ReachTime -> 球队职责/传球时机修正
    恢复损失衡量收益；
 7. 用真实传球分布开发接球/first-touch，最后才训练步行无法覆盖的门将扑挡。
 
+2026-09-21 的 16 场 3.5 m 动态入口批次已把教师库盲测事后上限提高到
+14/20，但硬/软 selector 仅为 2/20 和 1/20；单 actor BC 为 0/20，第一、二轮
+DAgger 均为 3/20，且均无跌倒。因此第 3 项下一实现不再重复同一单头 BC：改为
+释放时固定 latent 的混合专家，保留连续效用和有限跌倒成本，并继续使用冻结三场
+留出。详细计数与产物见 `docs/player-motion-training-2026-09-20.md`。
+
 详细程序化轨迹设计见 `docs/model-free-parameterized-kick-plan.md`；历史实验与拒绝
 原因见 `docs/rl-experiment-log.md` 和 `docs/kick-transition-development.md`。

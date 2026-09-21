@@ -25,6 +25,7 @@ from my3d_rl.kick_teacher import (
     cem_optimize,
     kick_trial_success,
 )
+from tools.evaluate_server_kick_handoff import normalize_teacher_records
 
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
@@ -91,10 +92,14 @@ def _load_inputs(
     condition_index: int,
 ) -> tuple[dict[str, Any], dict[str, np.ndarray], dict[str, Any]]:
     teacher = json.loads(teacher_manifest.read_text(encoding="utf-8"))
+    selected_condition = (
+        0 if teacher.get("purpose") == "r1_low_dimensional_kick_teacher"
+        else condition_index
+    )
     records = [
         record
-        for record in teacher["records"]
-        if int(record["condition_index"]) == condition_index
+        for record in normalize_teacher_records(teacher)
+        if int(record["condition_index"]) == selected_condition
         and bool(record["accepted"])
     ]
     if len(records) != 1:
@@ -105,10 +110,17 @@ def _load_inputs(
         raise ValueError("transition corpus has the wrong purpose")
     if manifest.get("npz_sha256") != _sha256(corpus):
         raise ValueError("transition corpus hash mismatch")
-    if int(manifest["teacher_condition_index"]) != condition_index:
+    if int(manifest["teacher_condition_index"]) != selected_condition:
         raise ValueError("teacher condition does not match transition corpus")
     with np.load(corpus, allow_pickle=False) as archive:
-        required = {"qpos", "qvel", "split", "rollout_id", "phase_bucket"}
+        required = {
+            "qpos",
+            "qvel",
+            "walk_previous_action",
+            "split",
+            "rollout_id",
+            "phase_bucket",
+        }
         if not required <= set(archive.files):
             raise ValueError("transition corpus is missing required arrays")
         arrays = {name: np.asarray(archive[name]) for name in required}
@@ -116,7 +128,11 @@ def _load_inputs(
     if (
         arrays["qpos"].ndim != 2
         or arrays["qvel"].ndim != 2
-        or any(arrays[name].shape != (row_count,) for name in required - {"qpos", "qvel"})
+        or arrays["walk_previous_action"].shape != (row_count, 23)
+        or any(
+            arrays[name].shape != (row_count,)
+            for name in required - {"qpos", "qvel", "walk_previous_action"}
+        )
         or not np.isfinite(arrays["qpos"]).all()
         or not np.isfinite(arrays["qvel"]).all()
         or not set(arrays["split"].tolist()) <= {0, 1}
@@ -137,6 +153,7 @@ def _evaluate_rows(
             parameters,
             initial_qpos=arrays["qpos"][row],
             initial_qvel=arrays["qvel"][row],
+            initial_walk_previous_action=arrays["walk_previous_action"][row],
         )
         results.append(
             {
@@ -241,7 +258,7 @@ def main() -> int:
             ),
             "contract": str(args.contract.resolve()),
             "contract_sha256": _sha256(args.contract),
-            "condition_index": args.condition_index,
+            "condition_index": int(record["condition_index"]),
             "phase_bucket_count": int(corpus_manifest["phase_bucket_count"]),
             "parameter_names": list(PARAMETER_NAMES),
             "initial_parameters": initial_parameters.tolist(),

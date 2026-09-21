@@ -175,6 +175,11 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=1024)
     parser.add_argument("--learning-rate", type=float, default=3.0e-4)
     parser.add_argument("--fall-weight", type=float, default=8.0)
+    parser.add_argument(
+        "--label-profile",
+        choices=("hard-success", "score-utility"),
+        default="hard-success",
+    )
     parser.add_argument("--minimum-calibration-precision", type=float, default=0.95)
     parser.add_argument("--maximum-consecutive-frames", type=int, default=3)
     parser.add_argument(
@@ -184,7 +189,9 @@ def main() -> int:
     )
     parser.add_argument("--cycle-normalizer", type=float, default=60.0)
     parser.add_argument(
-        "--prototype-set", choices=("selected", "all"), default="selected"
+        "--prototype-set",
+        choices=("selected", "utility-selected", "all"),
+        default="selected",
     )
     parser.add_argument("--output-prefix", type=Path, required=True)
     args = parser.parse_args()
@@ -211,12 +218,15 @@ def main() -> int:
     bank_manifest_path = args.prototype_bank.with_suffix(".json")
     corpus_manifest = json.loads(corpus_manifest_path.read_text(encoding="utf-8"))
     bank_manifest = json.loads(bank_manifest_path.read_text(encoding="utf-8"))
+    corpus_purpose = corpus_manifest.get("purpose")
     if (
-        corpus_manifest.get("purpose")
-        != "exact_cpu_walk_to_kick_switch_window_corpus"
+        corpus_purpose not in {
+            "exact_cpu_walk_to_kick_switch_window_corpus",
+            "kick_policy_v3_walk_to_kick_transition_corpus",
+        }
         or corpus_manifest.get("npz_sha256") != sha256_file(args.switch_corpus)
     ):
-        raise ValueError("switch corpus is invalid or has a hash mismatch")
+        raise ValueError("transition corpus is invalid or has a hash mismatch")
     if (
         bank_manifest.get("purpose")
         != "exact_cpu_kick_switch_prototype_bank_coverage"
@@ -226,23 +236,14 @@ def main() -> int:
     ):
         raise ValueError("prototype bank is invalid or does not match the corpus")
 
-    with np.load(args.switch_corpus, allow_pickle=False) as archive:
-        required = {
-            "actor_observation",
-            "approach_rollout_id",
-            "confirmation_cycles",
-            "split",
-        }
-        if not required <= set(archive.files):
-            raise ValueError("switch corpus is missing selector arrays")
-        observations = np.asarray(archive["actor_observation"], dtype=np.float32)
-        rollout_ids = np.asarray(archive["approach_rollout_id"], dtype=np.int32)
-        confirmation_cycles = np.asarray(
-            archive["confirmation_cycles"], dtype=np.int32
-        )
-        split = np.asarray(archive["split"], dtype=np.uint8)
     with np.load(args.prototype_bank, allow_pickle=False) as archive:
-        required = {"prototype_rollout_id", "approach_rollout_id", "split", "success", "fall"}
+        required = {
+            "prototype_rollout_id",
+            "approach_rollout_id",
+            "split",
+            "success",
+            "fall",
+        }
         if not required <= set(archive.files):
             raise ValueError("prototype bank is missing selector labels")
         prototype_rollout_ids = np.asarray(
@@ -252,6 +253,46 @@ def main() -> int:
         bank_split = np.asarray(archive["split"], dtype=np.uint8)
         success = np.asarray(archive["success"], dtype=np.uint8)
         fall = np.asarray(archive["fall"], dtype=np.uint8)
+        physical_score = (
+            np.asarray(archive["score"], dtype=np.float32)
+            if "score" in archive.files
+            else None
+        )
+        bank_observations = (
+            np.asarray(archive["actor_observation"], dtype=np.float32)
+            if "actor_observation" in archive.files
+            else None
+        )
+    with np.load(args.switch_corpus, allow_pickle=False) as archive:
+        if corpus_purpose == "exact_cpu_walk_to_kick_switch_window_corpus":
+            required = {
+                "actor_observation",
+                "approach_rollout_id",
+                "confirmation_cycles",
+                "split",
+            }
+            if not required <= set(archive.files):
+                raise ValueError("switch corpus is missing selector arrays")
+            observations = np.asarray(
+                archive["actor_observation"], dtype=np.float32
+            )
+            rollout_ids = np.asarray(
+                archive["approach_rollout_id"], dtype=np.int32
+            )
+            confirmation_cycles = np.asarray(
+                archive["confirmation_cycles"], dtype=np.int32
+            )
+            split = np.asarray(archive["split"], dtype=np.uint8)
+        else:
+            required = {"rollout_id", "split"}
+            if not required <= set(archive.files) or bank_observations is None:
+                raise ValueError(
+                    "server transition selection requires bank observations"
+                )
+            rollout_ids = np.asarray(archive["rollout_id"], dtype=np.int32)
+            split = np.asarray(archive["split"], dtype=np.uint8)
+            observations = bank_observations
+            confirmation_cycles = np.ones(rollout_ids.shape, dtype=np.int32)
     if (
         observations.shape[0] != rollout_ids.size
         or confirmation_cycles.shape != rollout_ids.shape
@@ -272,15 +313,31 @@ def main() -> int:
         if args.feature_profile == "anchor_context_v2"
         else observations
     )
-    prototype_indices = (
-        tuple(range(prototype_rollout_ids.size))
-        if args.prototype_set == "all"
-        else tuple(
-            int(value) for value in bank_manifest["selected_prototype_indices"]
+    if args.prototype_set == "all":
+        prototype_indices = tuple(range(prototype_rollout_ids.size))
+    else:
+        manifest_key = (
+            "utility_selected_prototype_indices"
+            if args.prototype_set == "utility-selected"
+            else "selected_prototype_indices"
         )
-    )
+        if manifest_key not in bank_manifest:
+            raise ValueError(
+                f"prototype bank does not provide {args.prototype_set} actions"
+            )
+        prototype_indices = tuple(
+            int(value) for value in bank_manifest[manifest_key]
+        )
     if not prototype_indices:
         raise ValueError("prototype bank selected no training action set")
+    if args.label_profile == "score-utility":
+        if physical_score is None or physical_score.shape != success.shape:
+            raise ValueError("score-utility labels require physical bank scores")
+        training_labels = 1.0 / (
+            1.0 + np.exp(-np.clip(physical_score / 3.0, -20.0, 20.0))
+        )
+    else:
+        training_labels = success
 
     train_rows = split == 0
     validation_rows = split == 1
@@ -292,7 +349,7 @@ def main() -> int:
     )
     result = train_switch_selector(
         model_observations,
-        success,
+        training_labels,
         fall,
         rollout_ids,
         prototype_indices=prototype_indices,
@@ -303,6 +360,7 @@ def main() -> int:
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         fall_weight=args.fall_weight,
+        balance_positive_labels=args.label_profile == "hard-success",
     )
     probabilities = apply_switch_selector_numpy(result, model_observations)
     calibration_rows = np.isin(rollout_ids, calibration_ids)
@@ -413,6 +471,12 @@ def main() -> int:
         ].tolist(),
         "seed": args.seed,
         "prototype_set": args.prototype_set,
+        "label_profile": args.label_profile,
+        "score_utility_transform": (
+            "sigmoid(physical_score / 3.0)"
+            if args.label_profile == "score-utility"
+            else None
+        ),
         "feature_profile": args.feature_profile,
         "cycle_normalizer": args.cycle_normalizer,
         "model_observation_size": int(model_observations.shape[1]),

@@ -21,6 +21,16 @@ REPOSITORY_ROOT = Path(__file__).parents[2]
 DEFAULT_CONTRACT = REPOSITORY_ROOT / "training" / "contracts" / "kick_policy_v3.yaml"
 _WORKER_EVALUATOR: KickTeacherEvaluator | None = None
 _WORKER_PARAMETERS: list[np.ndarray] = []
+_CONTINUOUS_METRICS = (
+    "progress_m",
+    "maximum_progress_m",
+    "lateral_error_m",
+    "range_error_m",
+    "maximum_directional_speed_mps",
+    "speed_error_mps",
+    "minimum_torso_height_m",
+    "minimum_upright",
+)
 
 
 def greedy_rollout_cover(
@@ -96,6 +106,81 @@ def rollout_coverage(
     return covered, int(unique.size)
 
 
+def greedy_utility_bank(
+    score: np.ndarray,
+    fall: np.ndarray,
+    rollout_ids: np.ndarray,
+    eligible_rows: np.ndarray,
+    *,
+    maximum_prototypes: int,
+) -> list[int]:
+    """Select a compact bank by continuous physical utility.
+
+    The kick evaluator's score already charges a finite fall cost.  Keeping
+    that cost finite lets a useful but imperfect action remain training data,
+    while still strongly preferring upright actions.  This is an oracle-bank
+    diagnostic only: a deployable selector must choose without outcome
+    peeking.
+    """
+    values = np.asarray(score, dtype=np.float64)
+    unsafe = np.asarray(fall, dtype=bool)
+    ids = np.asarray(rollout_ids, dtype=np.int64)
+    eligible = np.asarray(eligible_rows, dtype=bool)
+    if (
+        values.ndim != 2
+        or unsafe.shape != values.shape
+        or ids.shape != (values.shape[1],)
+        or eligible.shape != ids.shape
+        or not np.isfinite(values).all()
+    ):
+        raise ValueError("utility matrices and rollout rows are misaligned")
+    if maximum_prototypes < 1:
+        raise ValueError("maximum prototypes must be positive")
+    train_ids = np.unique(ids[eligible])
+    if train_ids.size < 1:
+        raise ValueError("eligible rows contain no approach rollouts")
+    per_rollout = np.stack(
+        [
+            np.max(values[:, eligible & (ids == rollout_id)], axis=1)
+            for rollout_id in train_ids
+        ],
+        axis=1,
+    )
+    per_rollout_fall = np.stack(
+        [
+            np.any(unsafe[:, eligible & (ids == rollout_id)], axis=1)
+            for rollout_id in train_ids
+        ],
+        axis=1,
+    )
+    selected: list[int] = []
+    available = set(range(values.shape[0]))
+    best = np.full(train_ids.size, -np.inf, dtype=np.float64)
+    best_mean = -np.inf
+    for _ in range(min(maximum_prototypes, values.shape[0])):
+        ranked: list[tuple[float, float, int, int]] = []
+        for index in available:
+            combined = np.maximum(best, per_rollout[index])
+            wins = per_rollout[index] > best
+            ranked.append(
+                (
+                    float(np.mean(combined)),
+                    float(np.min(combined)),
+                    -int(np.count_nonzero(per_rollout_fall[index] & wins)),
+                    -index,
+                )
+            )
+        ranking = max(ranked)
+        choice = -ranking[3]
+        if selected and ranking[0] <= best_mean + 1.0e-9:
+            break
+        selected.append(choice)
+        best = np.maximum(best, per_rollout[choice])
+        best_mean = float(np.mean(best))
+        available.remove(choice)
+    return selected
+
+
 def _parse_prototype(value: str) -> tuple[Path, int]:
     manifest, separator, rollout_id = value.rpartition(":")
     if not separator or not manifest:
@@ -130,8 +215,9 @@ def _worker_evaluate(
         initial_walk_previous_action=np.asarray(
             walk_previous_action, dtype=np.float64
         ),
+        capture_targets=prototype_index == 0,
     )
-    return {
+    result = {
         "prototype_index": prototype_index,
         "candidate_index": candidate_index,
         "success": bool(kick_trial_success(metrics)),
@@ -139,6 +225,19 @@ def _worker_evaluate(
         "contact": bool(metrics["contact"]),
         "score": float(metrics["score"]),
     }
+    result.update(
+        {name: float(metrics[name]) for name in _CONTINUOUS_METRICS}
+    )
+    if prototype_index == 0:
+        observations = _WORKER_EVALUATOR.captured_observations
+        if observations.shape != (
+            int(round(_WORKER_EVALUATOR.spec.evaluation_duration_s /
+                      _WORKER_EVALUATOR.spec.control_dt_s)) + 1,
+            _WORKER_EVALUATOR.contract.observation_size,
+        ):
+            raise RuntimeError("prototype bank failed to capture actor observations")
+        result["actor_observation"] = observations[0].astype(float).tolist()
+    return result
 
 
 def main() -> int:
@@ -290,6 +389,13 @@ def main() -> int:
     fall = np.zeros_like(success)
     contact = np.zeros_like(success)
     score = np.zeros((prototype_count, candidate_count), dtype=np.float32)
+    continuous_metrics = {
+        name: np.zeros((prototype_count, candidate_count), dtype=np.float32)
+        for name in _CONTINUOUS_METRICS
+    }
+    actor_observation = np.full(
+        (candidate_count, 98), np.nan, dtype=np.float32
+    )
     tasks = [
         (
             prototype_index,
@@ -315,13 +421,28 @@ def main() -> int:
             fall[row, column] = bool(node["fall"])
             contact[row, column] = bool(node["contact"])
             score[row, column] = float(node["score"])
+            for name, values in continuous_metrics.items():
+                values[row, column] = float(node[name])
+            if "actor_observation" in node:
+                actor_observation[column] = np.asarray(
+                    node["actor_observation"], dtype=np.float32
+                )
             if completed_count % 250 == 0 or completed_count == len(tasks):
                 print(f"evaluated {completed_count}/{len(tasks)} trials", flush=True)
 
+    if not np.isfinite(actor_observation).all():
+        raise RuntimeError("prototype bank actor observations are incomplete")
     train_rows = split == 0
     validation_rows = split == 1
     selected = greedy_rollout_cover(
         success,
+        fall,
+        rollout_ids,
+        train_rows,
+        maximum_prototypes=args.maximum_prototypes,
+    )
+    utility_selected = greedy_utility_bank(
+        score,
         fall,
         rollout_ids,
         train_rows,
@@ -340,6 +461,16 @@ def main() -> int:
     validation_all_covered, _ = rollout_coverage(
         success, rollout_ids, validation_rows, all_indices
     )
+    utility_train_covered, _ = rollout_coverage(
+        success, rollout_ids, train_rows, utility_selected
+    )
+    utility_validation_covered, _ = rollout_coverage(
+        success, rollout_ids, validation_rows, utility_selected
+    )
+    utility_train_best = np.max(score[utility_selected][:, train_rows], axis=0)
+    utility_validation_best = np.max(
+        score[utility_selected][:, validation_rows], axis=0
+    )
     arrays = {
         "prototype_rollout_id": np.asarray(
             [node["rollout_id"] for node in prototype_nodes], dtype=np.int32
@@ -350,6 +481,8 @@ def main() -> int:
         "fall": fall,
         "contact": contact,
         "score": score,
+        "actor_observation": actor_observation,
+        **continuous_metrics,
     }
     npz_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(npz_path, **arrays)
@@ -371,6 +504,26 @@ def main() -> int:
         "selected_prototype_rollout_ids": [
             prototype_nodes[index]["rollout_id"] for index in selected
         ],
+        "utility_selected_prototype_indices": utility_selected,
+        "utility_selected_prototype_rollout_ids": [
+            prototype_nodes[index]["rollout_id"]
+            for index in utility_selected
+        ],
+        "utility_selection_source": (
+            "training_rollout_continuous_physical_score_with_finite_fall_cost"
+        ),
+        "utility_selected_train_strict_oracle_coverage": (
+            utility_train_covered / train_total
+        ),
+        "utility_selected_validation_strict_oracle_coverage": (
+            utility_validation_covered / validation_total
+        ),
+        "utility_selected_train_best_score_mean": float(
+            np.mean(utility_train_best)
+        ),
+        "utility_selected_validation_best_score_mean": float(
+            np.mean(utility_validation_best)
+        ),
         "train_rollouts_covered": train_covered,
         "train_rollouts": train_total,
         "train_oracle_coverage": train_covered / train_total,
