@@ -2094,3 +2094,30 @@ rejects incomplete runs or checkpoints outside their declared parent. The next
 run starts at 45 degrees / 2.0 m/s, then rotates through 30, 15 and 0 degrees
 before lowering arrival speed; every stage is selected by exact CPU outcome,
 not by the last checkpoint convention.
+
+The first fixed-angle curriculum established a useful boundary. At 45 degrees,
+the selected midpoint raised same-run success from 3/32 to 10/32 and exact CPU
+success from 1/6 to 2/6 with no falls. A 30-degree continuation reached 11/32
+and 2/6, also without falls. Inserting 22.5 degrees instead of jumping directly
+to 15 produced the strongest stable result: 16/32 same-run success, 32/32
+contact/recovery, no falls and 2/6 exact CPU success. Its run is
+`k2b-curriculum-a22p5-v2-s20261000-v1` and exact report is
+`exact-curriculum-a22p5-final-s20261000-v1.json` under the K2 artifact root.
+
+Fixed 15 degrees exposed a failure mode rather than a deployable gain. One
+branch reached 13/32 success but only 27/32 contact/recovery and had 5/32
+pre-contact falls; exact CPU was 2/6 with one fall. A new branch from the stable
+22.5-degree parent retained all contacts and zero falls but never produced a
+target success. Continuing the aggressive branch directly to 0 degrees also
+stayed at 0% while contact fell to 22/32 and falls rose to 10/32. Both branches
+are stopped. Occasional falls remain a finite cost, but a curriculum that loses
+roughly one third of contacts without learning the requested target is not a
+useful trade.
+
+The diagnosis is target-conditioning collapse: each fixed-target continuation
+can solve by moving the whole action distribution and need not use the sixteen
+new command features. The trainer now supports an explicit target-angle range.
+The next run samples 15--22.5 degrees from the stable 22.5-degree checkpoint,
+retaining successful old targets in every batch while introducing the new
+direction. Only an overlapping range that preserves contact and nonzero target
+success will expand toward 7.5 and 0 degrees.

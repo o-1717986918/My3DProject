@@ -9,6 +9,7 @@ import pytest
 from tools.train_soccer_ball_motion import (
     _load_bootstrap_gate,
     _load_parent_run_gate,
+    _target_angle_range_degrees,
 )
 
 
@@ -126,3 +127,23 @@ def test_k2_trainer_rejects_incomplete_parent_run(tmp_path):
 
     with pytest.raises(ValueError, match="did not complete"):
         _load_parent_run_gate(manifest, checkpoint)
+
+
+def test_k2_trainer_resolves_fixed_and_overlapping_angle_curricula():
+    assert _target_angle_range_degrees(15.0, None, None) == (15.0, 15.0)
+    assert _target_angle_range_degrees(0.0, 15.0, 22.5) == (15.0, 22.5)
+
+
+@pytest.mark.parametrize(
+    ("minimum", "maximum", "message"),
+    [
+        (15.0, None, "both"),
+        (22.5, 15.0, "exceeds"),
+        (float("nan"), 15.0, "finite"),
+    ],
+)
+def test_k2_trainer_rejects_invalid_angle_curriculum(
+    minimum, maximum, message
+):
+    with pytest.raises(ValueError, match=message):
+        _target_angle_range_degrees(0.0, minimum, maximum)

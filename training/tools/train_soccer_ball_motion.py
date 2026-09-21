@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import platform
 import time
@@ -31,6 +32,23 @@ from tools.train_soccer_motion import (
     _sha256,
     _tree_sha256,
 )
+
+
+def _target_angle_range_degrees(
+    fixed: float,
+    minimum: float | None,
+    maximum: float | None,
+) -> tuple[float, float]:
+    """Resolve a fixed target or an explicit overlapping curriculum range."""
+    if (minimum is None) != (maximum is None):
+        raise ValueError("target angle range requires both minimum and maximum")
+    if minimum is None:
+        minimum = maximum = fixed
+    if not all(math.isfinite(value) for value in (minimum, maximum)):
+        raise ValueError("target angles must be finite")
+    if minimum > maximum:
+        raise ValueError("target angle minimum exceeds maximum")
+    return float(minimum), float(maximum)
 
 
 def _load_bootstrap_gate(
@@ -132,6 +150,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260990)
     parser.add_argument("--target-distance", type=float, default=2.0)
     parser.add_argument("--target-angle-degrees", type=float, default=0.0)
+    parser.add_argument("--target-angle-min-degrees", type=float)
+    parser.add_argument("--target-angle-max-degrees", type=float)
     parser.add_argument("--requested-arrival-speed", type=float, default=0.8)
     args = parser.parse_args()
     if min(
@@ -143,6 +163,11 @@ def main() -> None:
         raise ValueError("training counts must be positive")
     if min(args.target_distance, args.requested_arrival_speed) <= 0.0:
         raise ValueError("target distance and arrival speed must be positive")
+    angle_min_degrees, angle_max_degrees = _target_angle_range_degrees(
+        args.target_angle_degrees,
+        args.target_angle_min_degrees,
+        args.target_angle_max_degrees,
+    )
 
     run_dir = _external_new_directory(args.run_dir)
     revision = _git_revision()
@@ -176,12 +201,15 @@ def main() -> None:
     )
 
     corpus = load_soccer_motion_corpus(args.corpus_root)
-    angle_rad = args.target_angle_degrees * 3.141592653589793 / 180.0
+    angle_range_rad = [
+        value * 3.141592653589793 / 180.0
+        for value in (angle_min_degrees, angle_max_degrees)
+    ]
     overrides = {
         "impl": args.impl,
         "naconmax": max(2048, 8 * args.num_envs),
         "target_distance_range": [args.target_distance, args.target_distance],
-        "target_angle_range": [angle_rad, angle_rad],
+        "target_angle_range": angle_range_rad,
         "requested_arrival_speed_m_s": args.requested_arrival_speed,
     }
     train_env = BallConditionedSoccerMotionTracking(
@@ -231,7 +259,10 @@ def main() -> None:
             "start_frame_min": int(train_env._config.fixed_start_frame_min),
             "start_frame_max": int(train_env._config.fixed_start_frame_max),
             "target_distance_m": args.target_distance,
-            "target_angle_degrees": args.target_angle_degrees,
+            "target_angle_range_degrees": [
+                angle_min_degrees,
+                angle_max_degrees,
+            ],
             "requested_arrival_speed_m_s": args.requested_arrival_speed,
             "post_contact_controller": "apollo_zero_command_walk",
             "post_contact_recovery_steps": int(
