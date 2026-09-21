@@ -1,10 +1,16 @@
 from pathlib import Path
 
+import mujoco
 import numpy as np
 import pytest
 
 from my3d_rl import load_policy_contract
-from my3d_rl.rcss_scene import RcssKickScene, build_single_t1_soccer_model
+from my3d_rl.rcss_scene import (
+    BALL_LEFT_FOOT_CONTACT_SENSOR,
+    BALL_RIGHT_FOOT_CONTACT_SENSOR,
+    RcssKickScene,
+    build_single_t1_soccer_model,
+)
 
 
 CONTRACT = Path(__file__).parents[1] / "contracts" / "kick_policy_v1.yaml"
@@ -17,6 +23,15 @@ def test_rcss_scene_compiles_with_exact_ball_and_timestep():
     assert model.geom("ball").size[0] == 0.11
     assert model.body("ball").mass[0] == 0.41
     assert model.joint("train_Left_Knee_Pitch").range.tolist() == [0.0, 2.34]
+
+
+def test_optional_ball_foot_contact_sensors_use_public_sensor_data():
+    model = build_single_t1_soccer_model(add_ball_foot_contact_sensors=True)
+
+    left = model.sensor("train_" + BALL_LEFT_FOOT_CONTACT_SENSOR)
+    right = model.sensor("train_" + BALL_RIGHT_FOOT_CONTACT_SENSOR)
+    assert left.dim[0] == right.dim[0] == 1
+    assert left.type[0] == right.type[0] == int(mujoco.mjtSensor.mjSENS_CONTACT)
 
 
 def test_pd_surface_runs_one_50hz_control_step():

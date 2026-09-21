@@ -481,3 +481,10 @@ Walk 基底目标和动作时间。左侧正中 `60467` 影子执行得到 3,892
 日志保留在 `/home/win98/rl_runs/rcss-shadow-{104745,38407,193620}-*` 作为 hard
 negative。下一训练阶段使用闭环状态反馈和入口随机化优化触球冲量、方向和恢复；
 偶发跌倒按有限的起身/失位时间计价，不作为硬拒绝条件。
+
+同阶段恢复了 K2 目标条件动作的 GPU 训练路径。旧环境在 MuJoCo 3.12 Warp 后端
+使用默认 CUDA graph capture 时会报 `unknown stream`，切换到官方建议的
+`WARP_STAGED` 后又暴露其读取私有 `DataWarp.contact` 的兼容错误。现在有限动作环境
+显式使用 staged graph，并在编译场景时为球—左右脚添加 geom-pair `CONTACT`
+传感器，从公共 `sensordata` 读取 found 标志。WSL 的 RTX 5060 Laptop GPU 已通过
+2 环境批量 reset + step；这只是平台门槛，后续 PPO 仍需以定向出球和恢复指标判断。

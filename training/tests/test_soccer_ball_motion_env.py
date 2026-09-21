@@ -4,10 +4,7 @@ import jax
 import jax.numpy as jp
 import numpy as np
 
-from my3d_rl.soccer_ball_motion_env import (
-    BallConditionedSoccerMotionTracking,
-    mjx_ball_foot_contacts,
-)
+from my3d_rl.soccer_ball_motion_env import BallConditionedSoccerMotionTracking
 from my3d_rl.soccer_motion_corpus import SoccerMotionCorpus
 from my3d_rl.t1_control import APOLLO_DEFAULT_POSE
 
@@ -43,22 +40,6 @@ def _synthetic_corpus() -> SoccerMotionCorpus:
         kick_leg_one_hot=kick_leg,
         reset_weights=reset_weights,
     )
-
-
-def test_mjx_ball_contact_flags_ignore_inactive_candidates():
-    geom = jp.array([[1, 8], [9, 1], [1, 9], [0, 1]])
-    distance = jp.array([-0.01, 0.02, -0.03, -0.1])
-
-    left, right = mjx_ball_foot_contacts(
-        geom,
-        distance,
-        ball_geom=1,
-        left_foot_geom=8,
-        right_foot_geom=9,
-    )
-
-    assert bool(left)
-    assert bool(right)
 
 
 def test_k2_environment_has_finite_126_and_134_boundaries():

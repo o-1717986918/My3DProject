@@ -15,7 +15,11 @@ from mujoco_playground._src import mjx_env
 
 from .apollo_walk_jax import load_apollo_walk_jax
 from .contract import PolicyContract, load_policy_contract
-from .rcss_scene import DEFAULT_RESOURCE_ROOT
+from .rcss_scene import (
+    BALL_LEFT_FOOT_CONTACT_SENSOR,
+    BALL_RIGHT_FOOT_CONTACT_SENSOR,
+    DEFAULT_RESOURCE_ROOT,
+)
 from .soccer_ball_policy import (
     SOCCER_BALL_ACTOR_SIZE,
     SOCCER_BALL_FEATURE_SIZE,
@@ -72,29 +76,6 @@ def default_config() -> config_dict.ConfigDict:
     config.wrong_foot_cost = 20.0
     config.post_contact_fall_cost = 100.0
     return config
-
-
-def mjx_ball_foot_contacts(
-    contact_geom: jax.Array,
-    contact_distance: jax.Array,
-    *,
-    ball_geom: int,
-    left_foot_geom: int,
-    right_foot_geom: int,
-) -> tuple[jax.Array, jax.Array]:
-    """Return active exact MJX ball-left and ball-right contact flags."""
-    pairs = jp.asarray(contact_geom)
-    distances = jp.asarray(contact_distance)
-    active = distances <= 0.0
-
-    def pair_contact(other: int) -> jax.Array:
-        pair = (
-            ((pairs[:, 0] == ball_geom) & (pairs[:, 1] == other))
-            | ((pairs[:, 1] == ball_geom) & (pairs[:, 0] == other))
-        )
-        return jp.any(active & pair)
-
-    return pair_contact(left_foot_geom), pair_contact(right_foot_geom)
 
 
 class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
@@ -160,9 +141,16 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
         self._ball_qpos = self._mj_model.joint("ball-root").qposadr[0]
         self._ball_dof = self._mj_model.joint("ball-root").dofadr[0]
         self._ball_body = self._mj_model.body("ball").id
-        self._ball_geom = self._mj_model.geom("ball").id
-        self._left_foot_geom = self._mj_model.geom(prefix + "left_foot").id
-        self._right_foot_geom = self._mj_model.geom(prefix + "right_foot").id
+        left_contact_sensor = self._mj_model.sensor(
+            prefix + BALL_LEFT_FOOT_CONTACT_SENSOR
+        )
+        right_contact_sensor = self._mj_model.sensor(
+            prefix + BALL_RIGHT_FOOT_CONTACT_SENSOR
+        )
+        if left_contact_sensor.dim[0] != 1 or right_contact_sensor.dim[0] != 1:
+            raise ValueError("ball-foot contact sensors must expose one found flag")
+        self._left_ball_contact_sensor = int(left_contact_sensor.adr[0])
+        self._right_ball_contact_sensor = int(right_contact_sensor.adr[0])
         self._default_pose = jp.asarray(APOLLO_DEFAULT_POSE)
         self._walk_policy = load_apollo_walk_jax(walk_policy_path)
 
@@ -302,13 +290,11 @@ class BallConditionedSoccerMotionTracking(FiniteSoccerMotionTracking):
         was_wrong_contacted = state.info["wrong_foot_contacted"]
         last_target_distance = state.info["last_target_distance"]
         result = super().step(state, action)
-        contact = result.data._impl.contact
-        left_contact, right_contact = mjx_ball_foot_contacts(
-            contact.geom,
-            contact.dist,
-            ball_geom=self._ball_geom,
-            left_foot_geom=self._left_foot_geom,
-            right_foot_geom=self._right_foot_geom,
+        left_contact = (
+            result.data.sensordata[self._left_ball_contact_sensor] > 0.0
+        )
+        right_contact = (
+            result.data.sensordata[self._right_ball_contact_sensor] > 0.0
         )
         kick_leg = self._kick_leg[result.info["motion"]]
         correct_contact = jp.where(kick_leg[0] > 0.5, left_contact, right_contact)

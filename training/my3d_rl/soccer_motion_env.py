@@ -25,6 +25,22 @@ DEFAULT_CONTRACT = (
 )
 
 
+def _warp_staged_graph_mode():
+    """Return MuJoCo's staged Warp graph mode across its API rename."""
+    try:
+        from mujoco.mjx.warp import GraphMode
+
+        return GraphMode.WARP_STAGED
+    except (ImportError, AttributeError):
+        # MuJoCo 3.12 exposes the same enum through the bundled Warp FFI while
+        # retaining the documented graph_mode argument on mjx.put_model.
+        from mujoco.mjx.third_party.warp._src.jax.ffi import (
+            JaxCallableGraphMode,
+        )
+
+        return JaxCallableGraphMode.WARP_STAGED
+
+
 def default_config() -> config_dict.ConfigDict:
     return config_dict.create(
         ctrl_dt=0.02,
@@ -124,11 +140,25 @@ class FiniteSoccerMotionTracking(mjx_env.MjxEnv):
         self._resource_root = resource_root
 
         self._mj_model = build_single_t1_soccer_model(
-            resource_root, prefix=prefix, robot_x=-10.0, robot_y=0.0
+            resource_root,
+            prefix=prefix,
+            robot_x=-10.0,
+            robot_y=0.0,
+            add_ball_foot_contact_sensors=(
+                self.contract.policy_name == "soccer_ball_motion_policy_v1"
+            ),
         )
         self._mj_model.opt.timestep = self.sim_dt
         self._configure_pd_actuators()
-        self._mjx_model = mjx.put_model(self._mj_model, impl=self._config.impl)
+        put_model_kwargs = {}
+        if self._config.impl == "warp":
+            # Staging stabilizes XLA buffer pointers during Warp's internal
+            # CUDA graph capture. The default graph mode fails with an unknown
+            # stream on the verified WSL/JAX 0.6.2/MuJoCo 3.12 stack.
+            put_model_kwargs["graph_mode"] = _warp_staged_graph_mode()
+        self._mjx_model = mjx.put_model(
+            self._mj_model, impl=self._config.impl, **put_model_kwargs
+        )
 
         self._joint_qpos = np.asarray(
             [

@@ -15,6 +15,9 @@ DEFAULT_RESOURCE_ROOT = Path(
     "/home/win98/.local/pipx/venvs/rcsssmj/lib/python3.10/site-packages/rcsssmj/resources"
 )
 
+BALL_LEFT_FOOT_CONTACT_SENSOR = "ball_left_foot_contact"
+BALL_RIGHT_FOOT_CONTACT_SENSOR = "ball_right_foot_contact"
+
 
 def build_single_t1_soccer_model(
     resource_root: Path = DEFAULT_RESOURCE_ROOT,
@@ -22,6 +25,7 @@ def build_single_t1_soccer_model(
     prefix: str = "train_",
     robot_x: float = -0.32,
     robot_y: float = 0.0,
+    add_ball_foot_contact_sensors: bool = False,
 ) -> mujoco.MjModel:
     """Compile the exact soccer world plus one prefixed T1 robot.
 
@@ -42,6 +46,24 @@ def build_single_t1_soccer_model(
     torso.pos[0] = robot_x
     torso.pos[1] = robot_y
     world.worldbody.add_frame().attach_body(torso, prefix, "")
+    if add_ball_foot_contact_sensors:
+        # MJX-Warp intentionally does not expose its private contact buffer.
+        # Geom-pair contact sensors are supported by both JAX and Warp and keep
+        # this task observation on MuJoCo's public sensordata contract.
+        for sensor_name, foot_name in (
+            (BALL_LEFT_FOOT_CONTACT_SENSOR, "left_foot"),
+            (BALL_RIGHT_FOOT_CONTACT_SENSOR, "right_foot"),
+        ):
+            world.add_sensor(
+                name=prefix + sensor_name,
+                type=mujoco.mjtSensor.mjSENS_CONTACT,
+                objtype=mujoco.mjtObj.mjOBJ_GEOM,
+                objname="ball",
+                reftype=mujoco.mjtObj.mjOBJ_GEOM,
+                refname=prefix + foot_name,
+                # found field, minimum-distance reduction, one result slot.
+                intprm=[1, 1, 1],
+            )
     return world.compile()
 
 

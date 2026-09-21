@@ -145,6 +145,19 @@ Create the isolated CPU retargeting environment with:
 conda env create -f training/environment-motion.yml
 ```
 
+### MJX-Warp GPU backend
+
+The verified WSL stack uses JAX 0.6.2, MuJoCo/MJX 3.12.0 and Warp 1.16.0.
+Finite soccer environments select staged Warp graph capture so XLA buffer
+pointer changes do not invalidate Warp's internal CUDA graph. Ball-foot events
+come from two geom-pair `CONTACT` sensors in public `sensordata`; training code
+must not read the backend-private `DataWarp.contact` buffer. This follows the
+[MuJoCo MJX-Warp graph-mode and sensor guidance](https://mujoco.readthedocs.io/en/latest/mjx.html).
+
+Before starting a long run, exercise at least one batched reset and step with
+`--impl warp`. A successful CUDA import alone is insufficient: the full test
+must pass graph capture, contact-sensor evaluation and reward computation.
+
 GMR is also installed only in `my3d-motion`. Keep its checkout outside the
 repository at the source-lock commit; generated LAFAN derivatives remain
 local-only under the dataset licence.
